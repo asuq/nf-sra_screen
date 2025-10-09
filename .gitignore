@@ -1,0 +1,59 @@
+# macOS system files
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon?
+
+# Nextflow run‐time artifacts
+.nextflow/
+.nextflow.log
+.nextflow.log.*
+.nextflow_history
+.nextflow_trace.*
+.nextflow_timeline.*
+.nextflow_dag.*
+
+# Work & output dirs (pipeline‐specific)
+work/
+results/
+execution-reports/
+data/
+logs/
+
+# Container cache
+.singularity-cache/
+
+# Conda & Python
+__pycache__/
+*.py[cod]
+*.so
+*.egg-info/
+
+# local virtual envs (if you ever create one in‐repo)
+env/
+.venv/
+.conda_env/
+*.env
+
+# Jupyter notebooks
+.ipynb_checkpoints/
+
+# IDEs & editors
+.vscode/
+.idea/
+*.iml
+
+# Logs and temp
+*.log
+*.out
+*.err
+tmp/
+temp/
+
+# OS junk
+Thumbs.db
+Desktop.ini
+
+# others
+source/
+test/
