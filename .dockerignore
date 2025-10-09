@@ -1,0 +1,16 @@
+# Nextflow run-time artifacts
+.nextflow.log
+.nextflow_history
+.nextflow_trace.*
+.nextflow_timeline.*
+.nextflow_dag.*
+
+# Work folders
+work/
+results/
+data/
+
+# VCS + local config
+.git
+.gitignore
+.dockerignore
