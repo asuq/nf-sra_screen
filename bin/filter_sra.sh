@@ -44,18 +44,18 @@ NR==1 {
 
     # Decide assembler:
     # - ILLUMINA/DNBSEQ/BGISEQ -> short
-    # - OXFORD_NANOPORE -> long
-    # - PACBIO_SMRT with Pacbio RS/RSII in model -> long
+    # - OXFORD_NANOPORE -> long_nano
+    # - PACBIO_SMRT with Pacbio RS/RSII in model -> long_pacbio
     # - PACBIO_SMRT other models (e.g., Sequel, Revio) -> long_hifi
     asm = ""
     if (plat ~ /^(ILLUMINA|DNBSEQ|BGISEQ)$/) {
       asm = "short"
     } else if (plat == "OXFORD_NANOPORE") {
-      asm = "long"
+      asm = "long_nano"
     } else if (plat == "PACBIO_SMRT") {
       lmodel = tolower(model)
       if (lmodel ~ /pacbio rsii/ || lmodel ~ /pacbio rs( |$)/) {
-        asm = "long"
+        asm = "long_pacbio"
       } else {
         asm = "long_hifi"
       }
