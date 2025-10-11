@@ -38,7 +38,7 @@ def missingParametersError() {
 
 process DOWNLOAD_SRA_METADATA {
     tag "${sra}"
-    publishDir "${params.outdir}/metadata/${sra}", mode: 'copy', overwrite: true
+    publishDir "${params.outdir}/metadata/", mode: 'copy', overwrite: true
 
     input:
     val sra
@@ -77,7 +77,7 @@ process DOWNLOAD_SRR {
 
 process METASPADES {
     tag { "${sra}:${srr}" }
-    publishDir { "${params.outdir}/${sra}/${srr}/" }, mode: 'copy', overwrite: true
+    publishDir "${params.outdir}/${sra}/${srr}/", mode: 'copy', overwrite: true
 
     input:
     tuple val(sra), val(srr), val(platform), val(strategy), val(model), val(assembler), path(reads)
@@ -116,7 +116,7 @@ process METASPADES {
 
 process METAFLYE_NANO {
     tag { "${sra}:${srr}" }
-    publishDir { "${params.outdir}/${sra}/${srr}/" }, mode: 'copy', overwrite: true
+    publishDir "${params.outdir}/${sra}/${srr}/", mode: 'copy', overwrite: true
 
     input:
     tuple val(sra), val(srr), val(platform), val(strategy), val(model), val(assembler), path(reads)
@@ -141,7 +141,7 @@ process METAFLYE_NANO {
 
 process METAFLYE_PACBIO {
     tag { "${sra}:${srr}" }
-    publishDir { "${params.outdir}/${sra}/${srr}/" }, mode: 'copy', overwrite: true
+    publishDir "${params.outdir}/${sra}/${srr}/", mode: 'copy', overwrite: true
 
     input:
     tuple val(sra), val(srr), val(platform), val(strategy), val(model), val(assembler), path(reads)
@@ -166,7 +166,7 @@ process METAFLYE_PACBIO {
 
 process HIFIASM_META {
     tag { "${sra}:${srr}" }
-    publishDir { "${params.outdir}/${sra}/${srr}/" }, mode: 'copy', overwrite: true
+    publishDir "${params.outdir}/${sra}/${srr}/", mode: 'copy', overwrite: true
 
     input:
     tuple val(sra), val(srr), val(platform), val(strategy), val(model), val(assembler), path(reads)
