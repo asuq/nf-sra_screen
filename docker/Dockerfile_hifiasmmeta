@@ -11,7 +11,7 @@ WORKDIR /work
 # Install dependencies
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-        ca-certificates wget git build-essential zlib1g-dev \
+        ca-certificates wget git procps build-essential zlib1g-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Mambaforge
