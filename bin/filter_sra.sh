@@ -14,8 +14,7 @@ STRATEGIES='^WGS$'
 
 awk -F'\t' -v OFS=',' \
     -v P="$PLATFORMS" -v S="$SOURCES" -v T="$STRATEGIES" \
-    -v A="$ACCESSION" \
-'
+    -v A="$ACCESSION" '
 BEGIN {
   r="run_accession"
   p="instrument_platform"
@@ -30,33 +29,39 @@ NR==1 {
 }
 {
   sub(/\r$/,"",$0)
-  # Skip if any required header is missing
   if (!(r in idx) || !(p in idx) || !(m in idx) || !(s in idx) || !(t in idx)) next
 
-  plat = $idx[p]
-  src  = $idx[s]
-  strat= $idx[t]
+  plat  = $idx[p]
+  src   = $idx[s]
+  strat = $idx[t]
 
   # Apply whitelist filters
   if (plat ~ P && src ~ S && strat ~ T) {
-    run  = $idx[r]
-    model= $idx[m]
+    run   = $idx[r]
+    model = $idx[m]
+
+    # normalize model for exact matching:
+    lmodel = tolower(model)
+    gsub(/[[:space:]]+/, " ", lmodel)                    # collapse spaces
+    sub(/^[[:space:]]+/, "", lmodel); sub(/[[:space:]]+$/, "", lmodel)  # trim
 
     # Decide assembler:
     # - ILLUMINA/DNBSEQ/BGISEQ -> short
     # - OXFORD_NANOPORE -> long_nano
-    # - PACBIO_SMRT with Pacbio RS/RSII in model -> long_pacbio
-    # - PACBIO_SMRT other models (e.g., Sequel, Revio) -> long_hifi
+    # - PACBIO_SMRT with Pacbio RS/RSII, Sequel in model -> long_pacbio
+    # - PACBIO_SMRT other models (e.g., Sequel II, Sequel IIe, Revio) -> long_hifi
+
     asm = ""
     if (plat ~ /^(ILLUMINA|DNBSEQ|BGISEQ)$/) {
       asm = "short"
     } else if (plat == "OXFORD_NANOPORE") {
       asm = "long_nano"
     } else if (plat == "PACBIO_SMRT") {
-      lmodel = tolower(model)
-      if (lmodel ~ /pacbio rsii/ || lmodel ~ /pacbio rs( |$)/) {
+      # exact models for non-HiFi long reads:
+      if (lmodel == "pacbio rs" || lmodel == "pacbio rs ii" || lmodel == "sequel") {
         asm = "long_pacbio"
       } else {
+        # everything else under PACBIO_SMRT → HiFi bucket (e.g., "sequel ii", "sequel iie", "revio", etc.)
         asm = "long_hifi"
       }
     }
