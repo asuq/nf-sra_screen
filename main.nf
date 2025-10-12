@@ -102,7 +102,7 @@ process METASPADES {
       --length_required 50 --detect_adapter_for_pe --html fastp.html
 
     # Run SPAdes
-    spades.py -1 "${srr}_fastp_R1.fastq.gz" -2 "${srr}_fastp_R2.fastq.gz" \\
+    spades.py -1 "${srr}_fastp_R1.fastq.gz" -2 "${srr}_fastp_R2.fastq.gz" -o '.' \\
       -k 21,33,55,77,99,119,127 --meta --threads ${task.cpus} --memory ${task.memory.toGiga()}
 
     # Rename outputs
@@ -130,7 +130,7 @@ process METAFLYE_NANO {
     script:
     """
     # Run metaFlye
-    flye --nano-raw ${reads} --threads ${task.cpus} --scaffold --outdir '.' --meta
+    flye --nano-raw ${reads} --threads ${task.cpus} --scaffold --out-dir '.' --meta
 
     # Rename outputs
     mv -v assembly_graph.gfa assembly.gfa
@@ -155,7 +155,7 @@ process METAFLYE_PACBIO {
     script:
     """
     # Run metaFlye
-    flye --pacbio-raw ${reads} --threads ${task.cpus} --scaffold --outdir '.' --meta
+    flye --pacbio-raw ${reads} --threads ${task.cpus} --scaffold --out-dir '.' --meta
 
     # Rename outputs
     mv -v assembly_graph.gfa assembly.gfa
