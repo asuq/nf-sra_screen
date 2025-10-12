@@ -9,8 +9,9 @@ WORKDIR /work
 # Create the conda environment using Mamba
 RUN mamba create -y -n "${CONDA_ENV_NAME}" \
     -c bioconda -c conda-forge \
-    "spades==4.2.0" \
+    "spades==3.15.5" \
     "fastp==1.0.1" \
+    "python=3.11" \
     && mamba clean --all --yes
 
 ENV PATH="${CONDA_DIR}/envs/${CONDA_ENV_NAME}/bin:${PATH}"
