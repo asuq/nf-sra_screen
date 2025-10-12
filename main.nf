@@ -59,7 +59,7 @@ process DOWNLOAD_SRA_METADATA {
 process DOWNLOAD_SRR {
     tag { "${sra}:${srr}" }
     //TODO: remove publishDir at the end to save storage
-    publishDir "${params.outdir}/${sra}/${srr}", mode: 'copy', overwrite: true
+    // publishDir "${params.outdir}/${sra}/${srr}", mode: 'copy', overwrite: true
 
     input:
     tuple val(sra), val(srr), val(platform), val(strategy), val(model), val(assembler)
@@ -175,7 +175,7 @@ process HIFIASM_META {
     tuple val(sra), val(srr), val(assembler), path("assembly.fasta"), emit: assembly_fasta
     tuple val(sra), val(srr), val(assembler), path("assembly.gfa"), emit: assembly_graph
     tuple val(sra), val(srr), val(assembler), path("assembly.log"), emit: assembly_log
-    tuple val(sra), val(srr), val(assembler), path("assembly.bam"), emit: assembly_bam
+    tuple val(sra), val(srr), val(assembler), path("assembly.bam"), path("assembly.bam.bai"), emit: assembly_bam
 
     script:
     """
@@ -189,7 +189,7 @@ process HIFIASM_META {
     minimap2 -ax map-hifi -t ${task.cpus} assembly.fasta ${reads} \\
       | samtools sort --output-fmt BAM -@ ${task.cpus} -o assembly.bam
 
-    samtools index -b -@ ${task.cpus} assembly.bam
+    samtools index -b -o assembly.bam.bai -@ ${task.cpus} assembly.bam
 
     # Rename outputs
     mv -v assembly.p_ctg.gfa assembly.gfa
@@ -247,15 +247,13 @@ workflow {
   // }
 
   // Step 3: assemble reads
-  assembly = srr_reads.branch(
-  short       : { sra, srr, platform, strategy, model, assembler, reads -> assembler.equalsIgnoreCase('short') },
-  long_nano   : { sra, srr, platform, strategy, model, assembler, reads -> assembler.equalsIgnoreCase('long_nano') },
-  long_pacbio : { sra, srr, platform, strategy, model, assembler, reads -> assembler.equalsIgnoreCase('long_pacbio') },
-  long_hifi   : { sra, srr, platform, strategy, model, assembler, reads -> assembler.equalsIgnoreCase('long_hifi') }
-  )
+  short_ch       = srr_reads.filter { sra, srr, platform, strategy, model, assembler, reads -> assembler.equalsIgnoreCase('short') }
+  long_nano_ch   = srr_reads.filter { sra, srr, platform, strategy, model, assembler, reads -> assembler.equalsIgnoreCase('long_nano') }
+  long_pacbio_ch = srr_reads.filter { sra, srr, platform, strategy, model, assembler, reads -> assembler.equalsIgnoreCase('long_pacbio') }
+  long_hifi_ch   = srr_reads.filter { sra, srr, platform, strategy, model, assembler, reads -> assembler.equalsIgnoreCase('long_hifi') }
 
-  spades_asm = METASPADES(assembly.short)
-  flyenano_asm = METAFLYE_NANO(assembly.long_nano)
-  flyepacbio_asm = METAFLYE_PACBIO(assembly.long_pacbio)
-  hifimeta_asm = HIFIASM_META(assembly.long_hifi)
+  spades_asm    = METASPADES(short_ch)
+  flyenano_asm  = METAFLYE_NANO(long_nano_ch)
+  flyepacbio_asm= METAFLYE_PACBIO(long_pacbio_ch)
+  hifimeta_asm  = HIFIASM_META(long_hifi_ch)
 }
