@@ -144,7 +144,7 @@ process METAFLYE_NANO {
     flye --nano-raw ${reads} --threads ${task.cpus} --scaffold --out-dir '.' --meta
 
     # Run minimap2
-    minimap2 -ax map-nano -t ${task.cpus} assembly.fasta ${reads} \\
+    minimap2 -ax map-ont -t ${task.cpus} assembly.fasta ${reads} \\
       | samtools sort --output-fmt BAM -@ ${task.cpus} -o assembly.bam
     samtools index -b -o assembly.bam.bai -@ ${task.cpus} assembly.bam
 
@@ -174,7 +174,7 @@ process METAFLYE_PACBIO {
     flye --pacbio-raw ${reads} --threads ${task.cpus} --scaffold --out-dir '.' --meta
 
     # Run minimap2
-    minimap2 -ax map-pacbio -t ${task.cpus} assembly.fasta ${reads} \\
+    minimap2 -ax map-pb -t ${task.cpus} assembly.fasta ${reads} \\
       | samtools sort --output-fmt BAM -@ ${task.cpus} -o assembly.bam
     samtools index -b -o assembly.bam.bai -@ ${task.cpus} assembly.bam
 
