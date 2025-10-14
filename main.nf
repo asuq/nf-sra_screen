@@ -84,7 +84,7 @@ process METASPADES {
     tuple val(sra), val(srr), val(assembler), path("assembly.fasta"), emit: assembly_fasta
     tuple val(sra), val(srr), val(assembler), path("assembly.gfa"), emit: assembly_graph
     tuple val(sra), val(srr), val(assembler), path("assembly.log"), emit: assembly_log
-    tuple val(sra), val(srr), val(assembler), path("assembly.bam"), path("assembly.bam.bai"), emit: assembly_bam
+    tuple val(sra), val(srr), val(assembler), path("assembly.bam"), path("assembly.bam.csi"), emit: assembly_bam
     tuple val(sra), val(srr), val(assembler), path("fastp.html"), emit: fastp_html
 
     script:
@@ -118,7 +118,7 @@ process METASPADES {
     bowtie2 -q --reorder --threads ${task.cpus} --time --met-stderr --met 10 \\
       -x assembly_index -1 "${srr}_fastp_R1.fastq.gz" -2 "${srr}_fastp_R2.fastq.gz" \\
       | samtools sort --output-fmt BAM -@ ${task.cpus} -o assembly.bam
-    samtools index -b -o assembly.bam.bai -@ ${task.cpus} assembly.bam
+    samtools index -c -o assembly.bam.csi -@ ${task.cpus} assembly.bam
     """
 }
 
@@ -134,7 +134,7 @@ process METAFLYE_NANO {
     tuple val(sra), val(srr), val(assembler), path("assembly.fasta"), emit: assembly_fasta
     tuple val(sra), val(srr), val(assembler), path("assembly.gfa"), emit: assembly_graph
     tuple val(sra), val(srr), val(assembler), path("assembly.log"), emit: assembly_log
-    tuple val(sra), val(srr), val(assembler), path("assembly.bam"), path("assembly.bam.bai"), emit: assembly_bam
+    tuple val(sra), val(srr), val(assembler), path("assembly.bam"), path("assembly.bam.csi"), emit: assembly_bam
 
     script:
     """
@@ -144,7 +144,7 @@ process METAFLYE_NANO {
     # Run minimap2
     minimap2 -ax map-ont -t ${task.cpus} assembly.fasta ${reads} \\
       | samtools sort --output-fmt BAM -@ ${task.cpus} -o assembly.bam
-    samtools index -b -o assembly.bam.bai -@ ${task.cpus} assembly.bam
+    samtools index -c -o assembly.bam.csi -@ ${task.cpus} assembly.bam
 
     # Rename outputs
     mv -v assembly_graph.gfa assembly.gfa
@@ -164,7 +164,7 @@ process METAFLYE_PACBIO {
     tuple val(sra), val(srr), val(assembler), path("assembly.fasta"), emit: assembly_fasta
     tuple val(sra), val(srr), val(assembler), path("assembly.gfa"), emit: assembly_graph
     tuple val(sra), val(srr), val(assembler), path("assembly.log"), emit: assembly_log
-    tuple val(sra), val(srr), val(assembler), path("assembly.bam"), path("assembly.bam.bai"), emit: assembly_bam
+    tuple val(sra), val(srr), val(assembler), path("assembly.bam"), path("assembly.bam.csi"), emit: assembly_bam
 
     script:
     """
@@ -174,7 +174,7 @@ process METAFLYE_PACBIO {
     # Run minimap2
     minimap2 -ax map-pb -t ${task.cpus} assembly.fasta ${reads} \\
       | samtools sort --output-fmt BAM -@ ${task.cpus} -o assembly.bam
-    samtools index -b -o assembly.bam.bai -@ ${task.cpus} assembly.bam
+    samtools index -c -o assembly.bam.csi -@ ${task.cpus} assembly.bam
 
     # Rename outputs
     mv -v assembly_graph.gfa assembly.gfa
@@ -194,7 +194,7 @@ process HIFIASM_META {
     tuple val(sra), val(srr), val(assembler), path("assembly.fasta"), emit: assembly_fasta
     tuple val(sra), val(srr), val(assembler), path("assembly.gfa"), emit: assembly_graph
     tuple val(sra), val(srr), val(assembler), path("assembly.log"), emit: assembly_log
-    tuple val(sra), val(srr), val(assembler), path("assembly.bam"), path("assembly.bam.bai"), emit: assembly_bam
+    tuple val(sra), val(srr), val(assembler), path("assembly.bam"), path("assembly.bam.csi"), emit: assembly_bam
 
     script:
     """
@@ -208,7 +208,7 @@ process HIFIASM_META {
     minimap2 -ax map-hifi -t ${task.cpus} assembly.fasta ${reads} \\
       | samtools sort --output-fmt BAM -@ ${task.cpus} -o assembly.bam
 
-    samtools index -b -o assembly.bam.bai -@ ${task.cpus} assembly.bam
+    samtools index -c -o assembly.bam.csi -@ ${task.cpus} assembly.bam
 
     # Rename outputs
     mv -v assembly.p_ctg.gfa assembly.gfa
