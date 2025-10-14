@@ -239,6 +239,42 @@ process DIAMOND {
 }
 
 
+process BLOBTOOLS {
+    tag { "${sra}:${srr}" }
+    publishDir "${params.outdir}/${sra}/${srr}/", mode: 'copy', overwrite: true
+
+    input:
+    tuple val(sra), val(srr), val(assembler), path(assembly_fasta), path(blast), path(assembly_bam), path(assembly_bai)
+    path taxdump
+
+    output:
+    tuple val(sra), val(srr), val(assembler), path("blobtools.csv"), emit: blobtable
+    tuple val(sra), val(srr), val(assembler), path("blobtools/**"), emit: blobplots
+
+    script:
+    """
+		blobtools create --fasta "${assembly_fasta}" \
+			--cov "${assembly_bam}" --hits "${blast}" --taxdump "${taxdump}" \
+			--threads  ${task.cpus} 'blobtools'
+
+    blobtools filter --table 'blobtools.tsv' \
+      --table-fields gc,length,ncount,assembly_cov,bestsumorder_superkingdom,bestsumorder_kingdom,bestsumorder_phylum,bestsumorder_class,bestsumorder_order,bestsumorder_family,bestsumorder_genus,bestsumorder_species \
+			'blobtools'
+
+    blobtools view --format svg --out 'blobtools' --plot 'blobtools' || {
+      echo "blobtools view failed; leaving note and continuing." >&2
+      echo "blobtools view failed" > blobtools/_view_failed.txt
+    }
+
+    # Convert tsv file to csv file
+    header=\$(head -n 1 'blobtools.tsv' | cut -f2- | sed 's/bestsumorder_//g' | sed "s/assembly_cov/coverage/" | tr '\t' ',')
+    data=\$(tail -n +2 'blobtools.tsv' | cut -f2- | tr '\t' ',')
+    {
+    echo "\${header}"
+    echo "\${data}"
+    } > 'blobtools.csv'
+    """
+}
 
 
 //-- Workflow ------------------------------------------------------------------
@@ -249,8 +285,7 @@ workflow {
     exit 0
   }
 
-  // if (!params.sra || !params.uniprot_db || !params.taxdump) {
-  if (!params.sra) {
+  if (!params.sra || !params.uniprot_db || !params.taxdump) {
     missingParametersError()
     exit 1
   }
@@ -262,7 +297,7 @@ workflow {
                   .filter { it }
                   .distinct()
   uniprot_db_ch = Channel.value( file(params.uniprot_db) )
-  // taxdump_ch    = Channel.value( file(params.taxdump) )
+  taxdump_ch    = Channel.value( file(params.taxdump) )
 
   // Step 1: extract metadata & filter SRR
   filtered_srr = DOWNLOAD_SRA_METADATA(sra_ch)
@@ -312,7 +347,35 @@ workflow {
 
 
   diamond_ch = DIAMOND(asm_fasta_ch, uniprot_db_ch)
-  diamond_ch.view { sra, srr, asm, blast ->
-    "DIAMOND: ${sra}\t${srr}\t${asm}\t${blast}"
+  // diamond_ch.view { sra, srr, asm, blast ->
+  //   "DIAMOND: ${sra}\t${srr}\t${asm}\t${blast}"
+  // }
+
+  // Step 5. run BlobTools
+  // Merge all BAM+Bai streams
+  bam_ch = Channel.empty()
+                  .mix(spades_asm.assembly_bam)
+                  .mix(flyenano_asm.assembly_bam)
+                  .mix(flyepacbio_asm.assembly_bam)
+                  .mix(hifimeta_asm.assembly_bam)
+
+  // Key every stream by (sra,srr,assembler)
+  fasta_by  = asm_fasta_ch.map   { sra, srr, asm, fasta -> tuple([sra,srr,asm], fasta) }
+  blast_by  = diamond_ch.map     { sra, srr, asm, hits  -> tuple([sra,srr,asm], hits) }
+  bam_by    = bam_ch.map         { sra, srr, asm, bam, bai -> tuple([sra,srr,asm], [bam, bai]) }
+
+  // Join (fasta * diamond) then * bam
+  fasta_blast = fasta_by.join(blast_by)
+  fasta_blast_bam = fasta_blast.join(bam_by)
+  // -> ( [sra,srr,asm], fasta, hits, [bam,bai] )
+
+  // Unkey + call BlobTools
+  blobtools_in = fasta_blast_bam.map { key, fasta, hits, pair ->
+    def (sra, srr, asm) = key
+    def (bam, bai) = pair
+    tuple(sra, srr, asm, fasta, hits, bam, bai)
   }
+
+  blobtools_ch = BLOBTOOLS(blobtools_in, taxdump_ch)
+  // blobtools_ch.view { sra, srr, asm, tbl -> "BLOBTOOLS:\t${sra}\t${srr}\t${asm}\t${tbl}" }
 }
