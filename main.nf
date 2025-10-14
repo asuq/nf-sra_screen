@@ -231,10 +231,10 @@ process DIAMOND {
 
     script:
     """
-		diamond blastx --sensitive --query "assembly.fasta" \\
+		diamond blastx --sensitive --query "${assembly_fasta}" \\
 			--out "assembly_vs_uniprot.tsv" --db "${uniprot_db}" \\
 			--outfmt 6 qseqid staxids bitscore qseqid sseqid pident length mismatch gapopen qstart qend sstart send evalue bitscore \\
-			--verbose --threads ${task.cpus} --evalue 1e-25 --max-target-seqs 1
+			--verbose --threads ${task.cpus} --evalue 1e-25 --max-target-seqs 5
     """
 }
 
