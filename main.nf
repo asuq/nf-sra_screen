@@ -58,8 +58,6 @@ process DOWNLOAD_SRA_METADATA {
 
 process DOWNLOAD_SRR {
     tag { "${sra}:${srr}" }
-    //TODO: remove publishDir at the end to save storage
-    // publishDir "${params.outdir}/${sra}/${srr}", mode: 'copy', overwrite: true
 
     input:
     tuple val(sra), val(srr), val(platform), val(strategy), val(model), val(assembler)
