@@ -17,8 +17,8 @@ def helpMessage() {
 
   Required parameters:
     --sra           Path to sra.csv (header: sra)
-    --nt_db         Path to BLAST nt database
-    --blobtools_db  Path to BlobTools database
+    --uniprot_db    Path to Uniprot database
+    --taxdump  Path to BlobTools database
 
   Optional parameters:
     --help          Show this help message
@@ -30,7 +30,7 @@ def helpMessage() {
 def missingParametersError() {
     log.error "Missing input parameters"
     helpMessage()
-    error "Please provide all required parameters: --sra, --nt_db, and --blobtools_db"
+    error "Please provide all required parameters: --sra, --uniprot_db, and --taxdump"
 }
 
 
@@ -218,6 +218,29 @@ process HIFIASM_META {
 }
 
 
+process DIAMOND {
+    tag { "${sra}:${srr}" }
+    publishDir "${params.outdir}/${sra}/${srr}/", mode: 'copy', overwrite: true
+
+    input:
+    tuple val(sra), val(srr), val(assembler), path(assembly_fasta)
+    path uniprot_db
+
+    output:
+    tuple val(sra), val(srr), val(assembler), path("assembly_vs_uniprot.tsv"), emit: blast
+
+    script:
+    """
+		diamond blastx --sensitive --query "assembly.fasta" \\
+			--out "assembly_vs_uniprot.tsv" --db "${uniprot_db}" \\
+			--outfmt 6 qseqid staxids bitscore qseqid sseqid pident length mismatch gapopen qstart qend sstart send evalue bitscore \\
+			--verbose --threads ${task.cpus} --evalue 1e-25 --max-target-seqs 1
+    """
+}
+
+
+
+
 //-- Workflow ------------------------------------------------------------------
 workflow {
   // Parameter parsing
@@ -226,7 +249,7 @@ workflow {
     exit 0
   }
 
-  //TODO: Add check for nt_db and blobtools_db
+  // if (!params.sra || !params.uniprot_db || !params.taxdump) {
   if (!params.sra) {
     missingParametersError()
     exit 1
@@ -238,6 +261,8 @@ workflow {
                   .map { row -> row.sra.trim() }
                   .filter { it }
                   .distinct()
+  uniprot_db_ch = Channel.value( file(params.uniprot_db) )
+  // taxdump_ch    = Channel.value( file(params.taxdump) )
 
   // Step 1: extract metadata & filter SRR
   filtered_srr = DOWNLOAD_SRA_METADATA(sra_ch)
@@ -277,4 +302,17 @@ workflow {
   flyenano_asm  = METAFLYE_NANO(long_nano_ch)
   flyepacbio_asm= METAFLYE_PACBIO(long_pacbio_ch)
   hifimeta_asm  = HIFIASM_META(long_hifi_ch)
+
+  // Step 4: run DIAMOND
+  asm_fasta_ch = Channel.empty()
+                        .mix(spades_asm.assembly_fasta)
+                        .mix(flyenano_asm.assembly_fasta)
+                        .mix(flyepacbio_asm.assembly_fasta)
+                        .mix(hifimeta_asm.assembly_fasta)
+
+
+  diamond_ch = DIAMOND(asm_fasta_ch, uniprot_db_ch)
+  diamond_ch.view { sra, srr, asm, blast ->
+    "DIAMOND: ${sra}\t${srr}\t${asm}\t${blast}"
+  }
 }
