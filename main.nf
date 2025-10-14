@@ -86,6 +86,7 @@ process METASPADES {
     tuple val(sra), val(srr), val(assembler), path("assembly.fasta"), emit: assembly_fasta
     tuple val(sra), val(srr), val(assembler), path("assembly.gfa"), emit: assembly_graph
     tuple val(sra), val(srr), val(assembler), path("assembly.log"), emit: assembly_log
+    tuple val(sra), val(srr), val(assembler), path("assembly.bam"), path("assembly.bam.bai"), emit: assembly_bam
     tuple val(sra), val(srr), val(assembler), path("fastp.html"), emit: fastp_html
 
     script:
@@ -106,10 +107,20 @@ process METASPADES {
       -k 21,33,55,77,99,119,127 --meta --threads ${task.cpus} --memory ${task.memory.toGiga()}
 
     # Rename outputs
-    mv -v scaffolds.fasta assembly.fasta
+    if [ -f scaffolds.fasta ]; then
+      mv -v scaffolds.fasta assembly.fasta ;
+    else
+      mv -v contigs.fasta assembly.fasta ;
+    fi
     mv -v assembly_graph_with_scaffolds.gfa assembly.gfa
     mv -v spades.log assembly.log
-    touch assembly_info.txt
+
+    # Run bowtie2
+    bowtie2-build -f -q --threads ${task.cpus} assembly.fasta assembly_index
+    bowtie2 -q --reorder --threads ${task.cpus} --time --met-stderr --met 10 \\
+      -x assembly_index -1 "${srr}_fastp_R1.fastq.gz" -2 "${srr}_fastp_R2.fastq.gz" \\
+      | samtools sort --output-fmt BAM -@ ${task.cpus} -o assembly.bam
+    samtools index -b -o assembly.bam.bai -@ ${task.cpus} assembly.bam
     """
 }
 
@@ -125,12 +136,17 @@ process METAFLYE_NANO {
     tuple val(sra), val(srr), val(assembler), path("assembly.fasta"), emit: assembly_fasta
     tuple val(sra), val(srr), val(assembler), path("assembly.gfa"), emit: assembly_graph
     tuple val(sra), val(srr), val(assembler), path("assembly.log"), emit: assembly_log
-    tuple val(sra), val(srr), val(assembler), path("assembly_info.txt"), emit: assembly_info
+    tuple val(sra), val(srr), val(assembler), path("assembly.bam"), path("assembly.bam.bai"), emit: assembly_bam
 
     script:
     """
     # Run metaFlye
     flye --nano-raw ${reads} --threads ${task.cpus} --scaffold --out-dir '.' --meta
+
+    # Run minimap2
+    minimap2 -ax map-hifi -t ${task.cpus} assembly.fasta ${reads} \\
+      | samtools sort --output-fmt BAM -@ ${task.cpus} -o assembly.bam
+    samtools index -b -o assembly.bam.bai -@ ${task.cpus} assembly.bam
 
     # Rename outputs
     mv -v assembly_graph.gfa assembly.gfa
@@ -150,12 +166,17 @@ process METAFLYE_PACBIO {
     tuple val(sra), val(srr), val(assembler), path("assembly.fasta"), emit: assembly_fasta
     tuple val(sra), val(srr), val(assembler), path("assembly.gfa"), emit: assembly_graph
     tuple val(sra), val(srr), val(assembler), path("assembly.log"), emit: assembly_log
-    tuple val(sra), val(srr), val(assembler), path("assembly_info.txt"), emit: assembly_info
+    tuple val(sra), val(srr), val(assembler), path("assembly.bam"), path("assembly.bam.bai"), emit: assembly_bam
 
     script:
     """
     # Run metaFlye
     flye --pacbio-raw ${reads} --threads ${task.cpus} --scaffold --out-dir '.' --meta
+
+    # Run minimap2
+    minimap2 -ax map-hifi -t ${task.cpus} assembly.fasta ${reads} \\
+      | samtools sort --output-fmt BAM -@ ${task.cpus} -o assembly.bam
+    samtools index -b -o assembly.bam.bai -@ ${task.cpus} assembly.bam
 
     # Rename outputs
     mv -v assembly_graph.gfa assembly.gfa
