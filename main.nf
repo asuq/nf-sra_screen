@@ -182,8 +182,7 @@ process METAFLYE_PACBIO {
     """
 }
 
-
-process HIFIASM_META {
+process MYLOASM {
     tag { "${sra}:${srr}" }
     publishDir "${params.outdir}/${sra}/${srr}/", mode: 'copy', overwrite: true
 
@@ -193,25 +192,23 @@ process HIFIASM_META {
     output:
     tuple val(sra), val(srr), val(assembler), path("assembly.fasta"), emit: assembly_fasta
     tuple val(sra), val(srr), val(assembler), path("assembly.gfa"), emit: assembly_graph
-    tuple val(sra), val(srr), val(assembler), path("assembly.log"), emit: assembly_log
+    tuple val(sra), val(srr), val(assembler), path("myloasm_*.log"), emit: assembly_log
     tuple val(sra), val(srr), val(assembler), path("assembly.bam"), path("assembly.bam.csi"), emit: assembly_bam
 
     script:
     """
-    # Run Hifimeta
-    hifiasm_meta -t ${task.cpus} -o assembly ${reads} 2> assembly.log
+    # Run myloasm
+    myloasm ${reads} -o . -t ${task.cpus} --hifi
 
-    # Convert gfa file into fasta file
-    awk '/^S/{print ">"\$2;print \$3}' "assembly.p_ctg.gfa" > "assembly.fasta"
+    # Rename outputs
+    mv -v assembly_primary.fa assembly.fasta
+    mv -v final_contig_graph.gfa assembly.gfa
 
     # Run minimap2
     minimap2 -ax map-hifi -t ${task.cpus} assembly.fasta ${reads} \\
       | samtools sort --output-fmt BAM -@ ${task.cpus} -o assembly.bam
 
     samtools index -c -o assembly.bam.csi -@ ${task.cpus} assembly.bam
-
-    # Rename outputs
-    mv -v assembly.p_ctg.gfa assembly.gfa
     """
 }
 
@@ -334,7 +331,7 @@ workflow {
   spades_asm    = METASPADES(short_ch)
   flyenano_asm  = METAFLYE_NANO(long_nano_ch)
   flyepacbio_asm= METAFLYE_PACBIO(long_pacbio_ch)
-  hifimeta_asm  = HIFIASM_META(long_hifi_ch)
+  hifimeta_asm  = MYLOASM(long_hifi_ch)
 
   // Step 4: run DIAMOND
   asm_fasta_ch = Channel.empty()
