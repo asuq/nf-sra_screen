@@ -1,12 +1,13 @@
 FROM condaforge/mambaforge:24.9.2-0
 
 ARG CONDA_ENV_NAME='metaspades'
-ENV CONDA_DIR=/opt/conda
-ENV MAMBA_NO_BANNER=1
+ENV CONDA_DIR=/opt/conda \
+    MAMBA_NO_BANNER=1 \
+    DEBIAN_FRONTEND=noninteractive \
+    PATH=$CONDA_DIR/envs/$CONDA_ENV_NAME/bin:$PATH
 
 WORKDIR /work
 
-# Create the conda environment using Mamba
 RUN mamba create -y -n "${CONDA_ENV_NAME}" \
     -c bioconda -c conda-forge \
     "spades==3.15.5" \
@@ -15,7 +16,5 @@ RUN mamba create -y -n "${CONDA_ENV_NAME}" \
     "samtools==1.22.1" \
     "python=3.11" \
     && mamba clean --all --yes
-
-ENV PATH="${CONDA_DIR}/envs/${CONDA_ENV_NAME}/bin:${PATH}"
 
 CMD ["/bin/bash"]
