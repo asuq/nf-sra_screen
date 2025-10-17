@@ -17,8 +17,9 @@ def helpMessage() {
 
   Required parameters:
     --sra           Path to sra.csv (header: sra)
-    --uniprot_db    Path to Uniprot database
-    --taxdump  Path to BlobTools database
+    --taxa          Taxa for extraction (e.g., phylum, genus)
+    --uniprot_db    Path to Uniprot database (.dmnd)
+    --taxdump       Path to taxdump json database
 
   Optional parameters:
     --help          Show this help message
@@ -30,11 +31,27 @@ def helpMessage() {
 def missingParametersError() {
     log.error "Missing input parameters"
     helpMessage()
-    error "Please provide all required parameters: --sra, --uniprot_db, and --taxdump"
+    error "Please provide all required parameters: --sra, --taxa, --taxdump, and --uniprot_db"
 }
 
 
 //-- Processes -----------------------------------------------------------------
+
+process VALIDATE_TAXA {
+    input:
+    path(taxa_file)
+    path(taxdump)
+
+    output:
+    path("validated_taxa.csv"), emit: valid_taxa
+
+    script:
+    """
+    validate_taxa.py --taxa ${taxa_file} --taxdump ${taxdump} \\
+      && cp -v ${taxa_file} validated_taxa.csv
+    """
+}
+
 
 process DOWNLOAD_SRA_METADATA {
     tag "${sra}"
@@ -42,6 +59,7 @@ process DOWNLOAD_SRA_METADATA {
 
     input:
     val sra
+    path(valid_taxa)
 
     output:
     tuple val(sra), path("${sra}.filtered.csv"), emit: filtered_sra
@@ -55,6 +73,7 @@ process DOWNLOAD_SRA_METADATA {
     filter_sra.sh "${sra}.metadata.tsv"
     """
 }
+
 
 process DOWNLOAD_SRR {
     tag { "${sra}:${srr}" }
@@ -274,13 +293,12 @@ process BLOBTOOLS {
 
 //-- Workflow ------------------------------------------------------------------
 workflow {
-  // Parameter parsing
   if (params.help) {
     helpMessage()
     exit 0
   }
 
-  if (!params.sra || !params.uniprot_db || !params.taxdump) {
+  if (!params.sra || !params.uniprot_db || !params.taxa || !params.taxdump) {
     missingParametersError()
     exit 1
   }
@@ -291,11 +309,15 @@ workflow {
                   .map { row -> row.sra.trim() }
                   .filter { it }
                   .distinct()
+  taxa_ch    = Channel.value( file(params.taxa) )
   uniprot_db_ch = Channel.value( file(params.uniprot_db) )
   taxdump_ch    = Channel.value( file(params.taxdump) )
 
+  // TODO: add validate taxa
+  validated_taxa = VALIDATE_TAXA(taxa_ch, taxdump_ch)
+
   // Step 1: extract metadata & filter SRR
-  filtered_srr = DOWNLOAD_SRA_METADATA(sra_ch)
+  filtered_srr = DOWNLOAD_SRA_METADATA(sra_ch, validated_taxa)
 
   // Build nested channels per CSV, then flatten
   srr_ch = filtered_srr.map { sra, csvfile -> file(csvfile)}
