@@ -258,7 +258,7 @@ process BLOBTOOLS {
     publishDir "${params.outdir}/${sra}/${srr}/", mode: 'copy', overwrite: true
 
     input:
-    tuple val(sra), val(srr), val(assembler), path(assembly_fasta), path(blast), path(assembly_bam), path(assembly_bai)
+    tuple val(sra), val(srr), val(assembler), path(assembly_fasta), path(blast), path(assembly_bam), path(assembly_csi)
     path taxdump
 
     output:
