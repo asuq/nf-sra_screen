@@ -1,5 +1,7 @@
 #!/bin/bash
-# Usage: ./filter_sra.sh ACCESSION.metadata.(tsv|csv)
+# Usage: ./filter_sra.sh ACCESSION
+# Looks for: ACCESSION.metadata.tsv or ACCESSION.metadata.csv
+#
 # Output:
 #   ACCESSION.filtered.csv  # kept SRRs
 #   ACCESSION.skipped.csv   # skipped SRRs with reason
@@ -30,11 +32,11 @@ fi
 out_kept="${acc}.filtered.csv"
 out_skip="${acc}.skipped.csv"
 
-# Whitelist filters (edit easily)
+# Whitelist filters
 ACCESSION="$acc"
 PLATFORMS='^(ILLUMINA|BGISEQ|DNBSEQ|PACBIO_SMRT|OXFORD_NANOPORE)$'
-SOURCES='^(GENOMIC|METAGENOMIC)$'
-STRATEGIES='^WGS$'
+SOURCES='^(GENOMIC|METAGENOMIC|OTHER)$'
+STRATEGIES='^(WGS|METAGENOMIC|GENOME|OTHER)$'
 
 # Always create headers
 printf "accession,run_accession,instrument_platform,instrument_model,library_source,library_strategy,assembler\n" > "$out_kept"
@@ -43,12 +45,13 @@ printf "accession,run_accession,instrument_platform,instrument_model,library_sou
 header="$(head -n1 "$in")"
 
 # ------------------------------ GSA CSV branch -------------------------------
-# GSA header starts with: Run,Center,ReleaseDate,FileType,FileName,FileSize,Download_path,...
 if [[ "$header" == Run,Center,ReleaseDate,FileType,FileName,FileSize,Download_path,* ]]; then
   awk -F',' -v OFS=',' \
       -v P="$PLATFORMS" -v S="$SOURCES" -v T="$STRATEGIES" \
       -v A="$ACCESSION" -v OUT_KEEP="$out_kept" -v OUT_SKIP="$out_skip" '
   function trim(x){ sub(/^[[:space:]]+/,"",x); sub(/[[:space:]]+$/,"",x); return x }
+  function extract(text, re,    dummy){ return match(text, re) ? substr(text, RSTART, RLENGTH) : "" }
+
   NR==1{
     for(i=1;i<=NF;i++){ gsub(/\r$/,"",$i); idx[$i]=i }
     # Required GSA columns
@@ -62,10 +65,10 @@ if [[ "$header" == Run,Center,ReleaseDate,FileType,FileName,FileSize,Download_pa
   }
   {
     gsub(/\r$/,"")
-    run=$ir; model=$im; src=$is; strat=$it
+    run=$ir; platform_raw=$im; src=$is; strat=$it
 
-    # Derive instrument_platform from the model string (GSA puts model in "Platform")
-    lm=tolower(model); gsub(/[[:space:]]+/, " ", lm); lm=trim(lm)
+    # Derive instrument_platform from Platform text
+    lm=tolower(platform_raw); gsub(/[[:space:]]+/, " ", lm); lm=trim(lm)
     plat=""
     if     (lm ~ /illumina/)                                   plat="ILLUMINA"
     else if(lm ~ /dnbseq/)                                     plat="DNBSEQ"
@@ -73,18 +76,40 @@ if [[ "$header" == Run,Center,ReleaseDate,FileType,FileName,FileSize,Download_pa
     else if(lm ~ /oxford|nanopore|minion|gridion|promethion|\bont\b/)             plat="OXFORD_NANOPORE"
     else if(lm ~ /pacbio|sequel|revio|\brs\b/)                 plat="PACBIO_SMRT"
 
-    keep = (plat ~ P) && (src ~ S) && (strat ~ T)
+    # Extract instrument_model if possible; otherwise set to N/A
+    model="N/A"
+    if (plat=="ILLUMINA") {
+      m = extract(platform_raw, /(NovaSeq [0-9]+|HiSeq X Ten|HiSeq [0-9]+|MiSeq|MiniSeq|NextSeq [0-9]+|NextSeq CN500|HiScanSQ|Genome Analyzer IIx|Genome Analyzer II|Genome Analyzer)/)
+      if (m!="") model=m
+    } else if (plat=="DNBSEQ" || plat=="BGISEQ") {
+      m = extract(platform_raw, /(DNBSEQ-[A-Za-z0-9]+|MGISEQ-[A-Za-z0-9]+|BGISEQ-[0-9A-Za-z]+)/)
+      if (m!="") model=m
+    } else if (plat=="OXFORD_NANOPORE") {
+      m = extract(platform_raw, /(PromethION|GridION|MinION)/)
+      if (m!="") model=m
+    } else if (plat=="PACBIO_SMRT") {
+      m = extract(platform_raw, /(Revio|Sequel IIe|Sequel II|Sequel|RS II|RS)/)
+      if (m!="") model=m
+    }
+
+    keep = (toupper(plat) ~ P) && (toupper(src) ~ S) && (toupper(strat) ~ T)
 
     if (keep){
-      # Assembler decision (based on derived platform + model keywords)
+      # assembler decision with model-aware PacBio split
+      lm2=tolower(model); gsub(/[[:space:]]+/, " ", lm2); lm2=trim(lm2)
       asm=""
       if (plat ~ /^(ILLUMINA|DNBSEQ|BGISEQ)$/) asm="short"
       else if (plat=="OXFORD_NANOPORE")        asm="long_nano"
       else if (plat=="PACBIO_SMRT"){
-        if (lm ~ /(^|[^a-z])rs($|[^a-z])|(^|[^a-z])rs[[:space:]]*ii($|[^a-z])|(^|[^a-z])sequel($|[^a-z])/ &&
-            lm !~ /sequel[[:space:]]*ii|sequel[[:space:]]*2|iie|revio/) asm="long_pacbio"
-        else asm="long_hifi"
-      } else asm="short"
+        if (model=="N/A" || model=="") {
+          asm="unknown"
+        } else {
+          lm2=tolower(model); gsub(/[[:space:]]+/, " ", lm2); lm2=trim(lm2)
+          if (lm2 ~ /(^|[^a-z])rs($|[^a-z])|(^|[^a-z])rs[[:space:]]*ii($|[^a-z])|(^|[^a-z])sequel($|[^a-z])/ &&
+              lm2 !~ /sequel[[:space:]]*ii|sequel[[:space:]]*2|iie|revio/) asm="long_pacbio"
+          else asm="long_hifi"
+        }
+      } else asm="unknown"
 
       print A, run, plat, model, src, strat, asm >> OUT_KEEP
     } else {
@@ -92,6 +117,7 @@ if [[ "$header" == Run,Center,ReleaseDate,FileType,FileName,FileSize,Download_pa
       print A, run, plat, model, src, strat, reason >> OUT_SKIP
     }
   }' "$in"
+  echo "Used metadata: $in"
   exit 0
 fi
 
@@ -118,7 +144,7 @@ NR==1{
   # Aliases to cover ENA + NCBI-TSV
   ralts[1]="run_accession"; ralts[2]="run"
   palts[1]="instrument_platform"; palts[2]="platform"
-  malts[1]="instrument_model"; malts[2]="model"
+  malts[1]="instrument_model"; malts[2]="instrumentmodel"; malts[3]="model"
   salts[1]="library_source"; salts[2]="librarysource"
   talts[1]="library_strategy"; talts[2]="librarystrategy"
 
@@ -146,7 +172,7 @@ NR==1{
   src   = $(is)
   strat = $(it)
 
-  keep = (plat ~ P) && (src ~ S) && (strat ~ T)
+  keep = (toupper(plat) ~ P) && (toupper(src) ~ S) && (toupper(strat) ~ T)
 
   if (keep) {
     lmodel = tolower(model); gsub(/[[:space:]]+/, " ", lmodel); lmodel = trim(lmodel)
@@ -156,13 +182,16 @@ NR==1{
       asm = "short"
     } else if (plat == "OXFORD_NANOPORE") {
       asm = "long_nano"
-    } else if (plat == "PACBIO_SMRT") {
-      if (lmodel ~ /(^|[^a-z])rs($|[^a-z])|(^|[^a-z])rs[[:space:]]*ii($|[^a-z])|(^|[^a-z])sequel($|[^a-z])/ &&
-          lmodel !~ /sequel[[:space:]]*ii|sequel[[:space:]]*2|iie|revio/) asm = "long_pacbio"
-      else asm = "long_hifi"
-    } else {
-      asm = "short"
-    }
+    } else if (plat=="PACBIO_SMRT"){
+      if (model=="N/A" || model=="") {
+        asm="unknown"
+      } else {
+        lm2=tolower(model); gsub(/[[:space:]]+/, " ", lm2); lm2=trim(lm2)
+        if (lm2 ~ /(^|[^a-z])rs($|[^a-z])|(^|[^a-z])rs[[:space:]]*ii($|[^a-z])|(^|[^a-z])sequel($|[^a-z])/ &&
+          lm2 !~ /sequel[[:space:]]*ii|sequel[[:space:]]*2|iie|revio/) asm="long_pacbio"
+        else asm="long_hifi"
+      }
+    } else asm="unknown"
 
     print A, run, plat, model, src, strat, asm >> OUT_KEEP
 
