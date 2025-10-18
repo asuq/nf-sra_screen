@@ -64,6 +64,7 @@ process DOWNLOAD_SRA_METADATA {
 
     output:
     tuple val(sra), path("${sra}.filtered.csv"), emit: filtered_sra
+    tuple val(sra), path("${sra}.skipped.csv"),  emit: skipped_sra
 
     script:
     """
@@ -71,7 +72,7 @@ process DOWNLOAD_SRA_METADATA {
     iseq -m -i "${sra}"
 
     # Extract SRR to screen
-    filter_sra.sh "${sra}.metadata.tsv"
+    filter_sra.sh "${sra}"
     """
 }
 
@@ -368,11 +369,14 @@ workflow {
   uniprot_db_ch = Channel.value( file(params.uniprot_db) )
   taxdump_ch    = Channel.value( file(params.taxdump) )
 
-  // TODO: add validate taxa
+  // Validate taxa
   validated_taxa = VALIDATE_TAXA(taxa_ch, taxdump_ch)
 
   // Step 1: extract metadata & filter SRR
-  filtered_srr = DOWNLOAD_SRA_METADATA(sra_ch, validated_taxa)
+  sra_metadata = DOWNLOAD_SRA_METADATA(sra_ch, validated_taxa)
+  filtered_srr = sra_metadata.filtered_sra
+  skipped_srr  = sra_metadata.skipped_sra
+  // skipped_srr.view { sra, csvfile -> "SKIPPED SRA: ${sra} (see ${csvfile})" }
 
   // Build nested channels per CSV, then flatten
   srr_ch = filtered_srr.map { sra, csvfile -> file(csvfile)}
