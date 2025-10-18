@@ -3,19 +3,19 @@
 
 """
 Usage:
-    validate_taxa --taxa <RANK_TAXA.csv> --taxdump <NEWTAXDUMP_DIR>
+    validate_taxa --taxa <RANK_TAXA.csv> --taxdump <NEWTAXDUMP>
 
 Purpose:
     Validate that each (rank, taxa) pair in a taxa CSV exists in the given
-    BlobToolKit-style new_taxdump (taxdump.json), and that its rank matches.
+    taxdump (taxdump.json), and that its rank matches.
     Raises an error (exit 1) if any entry is invalid.
 
 Inputs:
     -t, --taxa      : CSV with header 'rank,taxa'
-    -d, --taxdump   : Directory containing 'taxdump.json' (BlobToolKit style)
+    -d, --taxdump   : Directory containing 'taxdump.json'
 
 Notes:
-    - (rank,taxa) pairs are deduplicated (set semantics)
+    - (rank,taxa) pairs are deduplicated
     - Rank normalization: 'realm' and 'domain' are treated as 'superkingdom'
 
 Author: Akito Shima (ASUQ)
@@ -59,39 +59,54 @@ ALLOWED_RANKS: tuple[str, ...] = tuple(INPUT_RANK_TO_COLUMN.keys())
 
 
 def parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(
-        description="Validate taxa CSV against BlobToolKit taxdump.json.",
+    parser = argparse.ArgumentParser(
+        description="Validate taxa CSV against taxdump.json.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    p.add_argument(
-        "--taxa", "-t", type=Path, required=True, help="CSV with header 'rank,taxa'."
+    parser.add_argument(
+        "--taxa",
+        "-t",
+        type=Path,
+        required=True,
+        help="CSV with header 'rank,taxa' listing taxa to extract.",
     )
-    p.add_argument(
+    parser.add_argument(
         "--taxdump",
         "-d",
         type=Path,
         required=True,
         help="Directory containing 'taxdump.json'.",
     )
-    return p.parse_args()
+    return parser.parse_args()
 
 
 def validate_file(
-    path: Path, kind: str, valid_exts: tuple[str, ...] | None = None
+    path: Path, kind: str = "file", valid_exts: tuple[str, ...] | None = None
 ) -> None:
+    """
+    Validate that the path exists, matches the expected kind, and
+    (optionally) has one of the allowed extensions.
+    """
+
     if kind == "file" and not path.is_file():
         raise FileNotFoundError(f"File not found: {path}")
     if kind == "dir" and not path.is_dir():
         raise FileNotFoundError(f"Directory not found: {path}")
-    if valid_exts and path.suffix.lower() not in tuple(e.lower() for e in valid_exts):
-        raise ValueError(
-            f"Invalid extension for {path.name}. Expected one of: {', '.join(valid_exts)}"
-        )
+
+    if valid_exts:
+        if path.suffix.lower() not in tuple(e.lower() for e in valid_exts):
+            raise ValueError(
+                f"Invalid extension for {path.name}. "
+                f"Expected one of: {', '.join(valid_exts)}"
+            )
 
 
+# --------------------------------------------------------------------------- #
+#  Taxdump loader (JSON-only)
+# --------------------------------------------------------------------------- #
 class TaxdumpIndex(object):
     """
-    Case-insensitive name → list[(taxid, normalized_rank)] built from BlobToolKit-style taxdump.json.
+    Case-insensitive name → list[(taxid, normalized_rank)] built from taxdump.json.
 
     Expected top-level keys:
       - names : {taxid: "canonical name"}
@@ -121,7 +136,7 @@ class TaxdumpIndex(object):
 
         if not isinstance(data, dict) or "names" not in data or "ranks" not in data:
             raise ValueError(
-                "taxdump.json must be a dict with keys 'names' and 'ranks' as per BlobToolKit"
+                "taxdump.json must be a dict with keys 'names' and 'ranks'"
             )
 
         names = data["names"]  # {taxid: name}
@@ -142,6 +157,9 @@ class TaxdumpIndex(object):
         return list(self._map.get(name.strip().lower(), []))
 
 
+# --------------------------------------------------------------------------- #
+#  Core logic
+# --------------------------------------------------------------------------- #
 def load_taxa_file(taxa_csv: Path) -> list[tuple[str, str]]:
     with taxa_csv.open("r", newline="", encoding="utf-8") as fh:
         reader = csv.DictReader(fh)
@@ -160,34 +178,47 @@ def load_taxa_file(taxa_csv: Path) -> list[tuple[str, str]]:
                 )
             pairs.append((rank, taxa))
 
-    return list(set(pairs))
+    seen, dedup = set(), []
+    for p in pairs:
+        if p not in seen:
+            seen.add(p)
+            dedup.append(p)
+    return dedup
 
 
+# --------------------------------------------------------------------------- #
+#  Main
+# --------------------------------------------------------------------------- #
 def main() -> int:
     args = parse_args()
-    validate_file(args.taxa, "file", (".csv",))
-    validate_file(args.taxdump, "file", (".json",))
 
-    logging.info(f"Loading taxdump.json from {args.taxdump}")
-    taxidx = TaxdumpIndex(args.taxdump)
+    # Validate inputs & extensions
+    validate_file(args.taxa, "file", (".csv",))
+    validate_file(args.taxdump, "dir")
+    taxdump_json = args.taxdump / "taxdump.json"
+    validate_file(taxdump_json, "file", (".json",))
+
+    logging.info(f"Loading taxdump.json from {taxdump_json}")
+    taxidx = TaxdumpIndex(taxdump_json)
 
     selections = load_taxa_file(args.taxa)
     logging.info(f"{len(selections)} selection(s) loaded from --taxa.")
 
+    # Validate taxa presence/rank in taxdump (warn-only)
     errors: list[str] = []
-    for rank_req, taxa_name in selections:
+    for rank, taxa in selections:
         # realm/domain → superkingdom
-        requested_norm_rank = INPUT_RANK_TO_COLUMN[rank_req]
-        entries = taxidx.lookup(taxa_name)
+        requested_norm_rank = INPUT_RANK_TO_COLUMN[rank]
+        entries = taxidx.lookup(taxa)
 
         if not entries:
-            errors.append(f"Taxon '{taxa_name}' not found (requested rank={rank_req})")
+            errors.append(f"Taxon '{taxa}' not found (requested rank={rank})")
             continue
 
         ranks_found = sorted({rk for _, rk in entries if rk})
         if not any(rk == requested_norm_rank for rk in ranks_found):
             errors.append(
-                f"Taxon '{taxa_name}' found but rank mismatch: found {ranks_found or 'unknown'}, expected '{requested_norm_rank}' (from requested '{rank_req}')"
+                f"Taxon '{taxa}' found but rank mismatch: found {ranks_found or 'unknown'}, expected '{requested_norm_rank}' (from requested '{rank}')"
             )
 
     if errors:
