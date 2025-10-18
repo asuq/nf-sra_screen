@@ -24,6 +24,7 @@ def helpMessage() {
   Optional parameters:
     --help          Show this help message
     --outdir        Output directory (default: ./output)
+    --max_retries   Maximum number of retries for each process (default: 3)
   """.stripIndent()
 }
 
