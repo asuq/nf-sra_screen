@@ -283,10 +283,33 @@ process BLOBTOOLS {
     # Convert tsv file to csv file
     header=\$(head -n 1 'blobtools.tsv' | cut -f2- | sed 's/bestsumorder_//g' | sed "s/assembly_cov/coverage/" | tr '\t' ',')
     data=\$(tail -n +2 'blobtools.tsv' | cut -f2- | tr '\t' ',')
+    { echo "\${header}"; echo "\${data}"; } > 'blobtools.csv'
+    """
+}
+
+
+process EXTRACT_TAXA {
+    tag { "${sra}:${srr}" }
+    publishDir "${params.outdir}/${sra}/${srr}/", mode: 'copy', overwrite: true
+
+    input:
+    tuple val(sra), val(srr), val(assembler), val(strategy), val(model), path(assembly_fasta), path(blobtable)
+    path(taxa)
+    path(taxdump)
+
+    output:
+    tuple val(sra), val(srr), val(assembler), val(strategy), val(model), path("summary.csv"), emit: summary
+    tuple val(sra), val(srr), path("*.ids.csv"), optional:true,emit: extracted_ids
+    tuple val(sra), val(srr), path("*.fasta"), optional:true, emit: extracted_fasta
+
+    script:
+    """
+    extract_records.py --blobtable "${blobtable}" --fasta "${assembly_fasta}" \\
+      --taxa "${taxa}" --taxdump "${taxdump}"
+    """
+}
+
     {
-    echo "\${header}"
-    echo "\${data}"
-    } > 'blobtools.csv'
     """
 }
 
@@ -394,6 +417,9 @@ workflow {
     tuple(sra, srr, asm, strategy, mdl, assembly, hits, bam, bai)
   }
 
-  blobtools_ch = BLOBTOOLS(blobtools_in, taxdump_ch)
-  // blobtools_ch.view { sra, srr, asm, tbl -> "BLOBTOOLS:\t${sra}\t${srr}\t${asm}\t${tbl}" }
+  blobtools_result = BLOBTOOLS(blobtools_in, taxdump_ch)
+  // blobtools_result.view { sra, srr, asm, tbl -> "BLOBTOOLS:\t${sra}\t${srr}\t${asm}\t${tbl}" }
+
+  // Step 6: extract taxa
+  extracted_taxa = EXTRACT_TAXA(blobtools_result.blobtable, validated_taxa, taxdump_ch)
 }
