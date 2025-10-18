@@ -81,10 +81,11 @@ process DOWNLOAD_SRR {
     tag { "${sra}:${srr}" }
 
     input:
-    tuple val(sra), val(srr), val(platform), val(strategy), val(model), val(assembler)
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler)
 
     output:
-    tuple val(sra), val(srr), val(platform), val(strategy), val(model), val(assembler), path("*.f*q*"), emit: reads
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("*.f*q*"), optional:true, emit: reads
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("FAIL.note"), optional:true, emit: dl_note
 
     script:
     """
@@ -99,10 +100,10 @@ process METASPADES {
     publishDir "${params.outdir}/${sra}/${srr}/", mode: 'copy', overwrite: true
 
     input:
-    tuple val(sra), val(srr), val(platform), val(strategy), val(model), val(assembler), path(reads)
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path(reads)
 
     output:
-    tuple val(sra), val(srr), val(assembler), val(strategy), val(model), path("assembly.fasta"), emit: assembly_fasta
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("assembly.fasta"), emit: assembly_fasta
     tuple val(sra), val(srr), path("assembly.gfa"), emit: assembly_graph
     tuple val(sra), val(srr), path("assembly.log"), emit: assembly_log
     tuple val(sra), val(srr), path("assembly.bam"), path("assembly.bam.csi"), emit: assembly_bam
@@ -149,10 +150,10 @@ process METAFLYE_NANO {
     publishDir "${params.outdir}/${sra}/${srr}/", mode: 'copy', overwrite: true
 
     input:
-    tuple val(sra), val(srr), val(platform), val(strategy), val(model), val(assembler), path(reads)
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path(reads)
 
     output:
-    tuple val(sra), val(srr), val(assembler), val(strategy), val(model), path("assembly.fasta"), emit: assembly_fasta
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("assembly.fasta"), emit: assembly_fasta
     tuple val(sra), val(srr), path("assembly.gfa"), emit: assembly_graph
     tuple val(sra), val(srr), path("assembly.log"), emit: assembly_log
     tuple val(sra), val(srr), path("assembly.bam"), path("assembly.bam.csi"), emit: assembly_bam
@@ -179,10 +180,10 @@ process METAFLYE_PACBIO {
     publishDir "${params.outdir}/${sra}/${srr}/", mode: 'copy', overwrite: true
 
     input:
-    tuple val(sra), val(srr), val(platform), val(strategy), val(model), val(assembler), path(reads)
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path(reads)
 
     output:
-    tuple val(sra), val(srr), val(assembler), val(strategy), val(model), path("assembly.fasta"), emit: assembly_fasta
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("assembly.fasta"), emit: assembly_fasta
     tuple val(sra), val(srr), path("assembly.gfa"), emit: assembly_graph
     tuple val(sra), val(srr), path("assembly.log"), emit: assembly_log
     tuple val(sra), val(srr), path("assembly.bam"), path("assembly.bam.csi"), emit: assembly_bam
@@ -208,10 +209,10 @@ process MYLOASM {
     publishDir "${params.outdir}/${sra}/${srr}/", mode: 'copy', overwrite: true
 
     input:
-    tuple val(sra), val(srr), val(platform), val(strategy), val(model), val(assembler), path(reads)
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path(reads)
 
     output:
-    tuple val(sra), val(srr), val(assembler), val(strategy), val(model), path("assembly.fasta"), emit: assembly_fasta
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("assembly.fasta"), emit: assembly_fasta
     tuple val(sra), val(srr), path("assembly.gfa"), emit: assembly_graph
     tuple val(sra), val(srr), path("myloasm_*.log"), emit: assembly_log
     tuple val(sra), val(srr), path("assembly.bam"), path("assembly.bam.csi"), emit: assembly_bam
@@ -239,7 +240,7 @@ process DIAMOND {
     publishDir "${params.outdir}/${sra}/${srr}/", mode: 'copy', overwrite: true
 
     input:
-    tuple val(sra), val(srr), val(assembler), val(strategy), val(model), path(assembly_fasta)
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path(assembly_fasta)
     path uniprot_db
 
     output:
@@ -260,11 +261,11 @@ process BLOBTOOLS {
     publishDir "${params.outdir}/${sra}/${srr}/", mode: 'copy', overwrite: true
 
     input:
-    tuple val(sra), val(srr), val(assembler), val(strategy), val(model), path(assembly_fasta), path(blast), path(assembly_bam), path(assembly_csi)
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path(assembly_fasta), path(blast), path(assembly_bam), path(assembly_csi)
     path taxdump
 
     output:
-    tuple val(sra), val(srr), val(assembler), val(strategy), val(model), path(assembly_fasta), path("blobtools.csv"), emit: blobtable
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path(assembly_fasta), path("blobtools.csv"), emit: blobtable
     tuple val(sra), val(srr), path("blobtools*.svg"), optional:true, emit: blobplots
 
     script:
@@ -295,12 +296,12 @@ process EXTRACT_TAXA {
     publishDir "${params.outdir}/${sra}/${srr}/", mode: 'copy', overwrite: true
 
     input:
-    tuple val(sra), val(srr), val(assembler), val(strategy), val(model), path(assembly_fasta), path(blobtable)
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path(assembly_fasta), path(blobtable)
     path(taxa)
     path(taxdump)
 
     output:
-    tuple val(sra), val(srr), val(assembler), val(strategy), val(model), path("summary.csv"), emit: summary
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("summary.csv"), emit: summary
     tuple val(sra), val(srr), path("*.ids.csv"), optional:true,emit: extracted_ids
     tuple val(sra), val(srr), path("*.fasta"), optional:true, emit: extracted_fasta
 
@@ -316,7 +317,7 @@ process APPEND_SUMMARY {
     tag { "${sra}:${srr}" }
 
     input:
-    tuple val(sra), val(srr), val(assembler), val(strategy), val(model), path(summary_csv)
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path(summary_csv)
     val outdir
 
     output:
@@ -331,12 +332,11 @@ process APPEND_SUMMARY {
     COUNTS=\$(awk -F, 'NR>1{print \$3}' "${summary_csv}" | paste -sd, -)
 
     # note left blank for successful path
-    LINE="${sra}\t${srr}\t${assembler}\t${strategy}\t${model}\t\${COUNTS}\t"
-
+    LINE="${sra}\t${srr}\t${platform}\t${model}\t${strategy}\t${assembler}\t\${COUNTS}\t"
     {
       flock 200
       if [[ ! -s "\$OUT_TSV" ]]; then
-        echo -e "sra\tsrr\tassembler\tstrategy\tmodel\tcounts\tnote" > "\$OUT_TSV"
+        echo -e "sra\tsrr\tplatform\tmodel\tstrategy\tassembler\tcounts\tnote" > "\$OUT_TSV"
       fi
       echo -e "\$LINE" >> "\$OUT_TSV"
     } 200> "\$OUT_TSV.lock"
@@ -388,26 +388,26 @@ workflow {
                 def model = (row.instrument_model ?: '').trim()
                 def strategy = (row.library_strategy ?: '').trim()
                 def assembler = (row.assembler ?: '').trim()
-                [sra, srr, platform, strategy, model, assembler]
+                [sra, srr, platform, model, strategy, assembler]
             }
             .filter { it[1] }  // Ensure run_accession (SRR) is not empty
             .distinct()
 
-// srr_ch.view { acc, srr, platform, strategy, model, asm ->
-//       "DEBUG: ${acc}\t${srr}\t${platform}\t${strategy}\t${model}\t${asm}"
-//   }
+  // srr_ch.view { acc, srr, platform, model, strategy, asm ->
+  //       "DEBUG: ${acc}\t${srr}\t${platform}\t${model}\t${strategy}\t${asm}"
+  // }
 
   // Step 2: download SRR reads
   srr_reads = DOWNLOAD_SRR(srr_ch)
-  // srr_reads.view { acc, srr, platform, strategy, model, asm, reads ->
-  //   "${acc}\t${srr}\t\t${platform}\t${strategy}\t${model}\t${asm}\t${reads}"
-  // }
+  srr_reads.reads.view { acc, srr, platform, model, strategy, asm, reads ->
+    "${acc}\t${srr}\t\t${platform}\t${model}\t${strategy}\t${asm}\t${reads}"
+  }
 
   // Step 3: assemble reads
-  short_ch       = srr_reads.filter { sra, srr, platform, strategy, model, assembler, reads -> assembler.equalsIgnoreCase('short') }
-  long_nano_ch   = srr_reads.filter { sra, srr, platform, strategy, model, assembler, reads -> assembler.equalsIgnoreCase('long_nano') }
-  long_pacbio_ch = srr_reads.filter { sra, srr, platform, strategy, model, assembler, reads -> assembler.equalsIgnoreCase('long_pacbio') }
-  long_hifi_ch   = srr_reads.filter { sra, srr, platform, strategy, model, assembler, reads -> assembler.equalsIgnoreCase('long_hifi') }
+  short_ch       = srr_reads.filter { sra, srr, platform, model, strategy, assembler, reads -> assembler.equalsIgnoreCase('short') }
+  long_nano_ch   = srr_reads.filter { sra, srr, platform, model, strategy, assembler, reads -> assembler.equalsIgnoreCase('long_nano') }
+  long_pacbio_ch = srr_reads.filter { sra, srr, platform, model, strategy, assembler, reads -> assembler.equalsIgnoreCase('long_pacbio') }
+  long_hifi_ch   = srr_reads.filter { sra, srr, platform, model, strategy, assembler, reads -> assembler.equalsIgnoreCase('long_hifi') }
 
   spades_asm    = METASPADES(short_ch)
   flyenano_asm  = METAFLYE_NANO(long_nano_ch)
@@ -436,9 +436,9 @@ workflow {
                   .mix(hifimeta_asm.assembly_bam)
 
   // Key every stream by (sra,srr,assembler)
-  fasta_by  = asm_fasta_ch.map   { sra, srr, asm, strategy, mdl, fasta -> tuple([sra,srr], [asm, strategy, mdl, fasta]) }
+  fasta_by  = asm_fasta_ch.map   { sra, srr, platform, model, strategy, assembler, fasta -> tuple([sra,srr], [platform,model,strategy,assembler,fasta]) }
   blast_by  = diamond_ch.map     { sra, srr, hits  -> tuple([sra,srr], hits) }
-  bam_by    = bam_ch.map         { sra, srr, bam, bai -> tuple([sra,srr], [bam, bai]) }
+  bam_by    = bam_ch.map         { sra, srr, bam, bai -> tuple([sra,srr], [bam,bai]) }
 
   // Join (fasta * diamond) then * bam
   fasta_blast = fasta_by.join(blast_by)
@@ -448,9 +448,9 @@ workflow {
   // Unkey + call BlobTools
   blobtools_in = fasta_blast_bam.map { key, fasta, hits, pair ->
     def (sra, srr) = key
-    def (asm, strategy, mdl, assembly) = fasta
+    def (platform, model, strategy, assembler, fasta) = fasta
     def (bam, bai) = pair
-    tuple(sra, srr, asm, strategy, mdl, assembly, hits, bam, bai)
+    tuple(sra, srr, platform, model, strategy, assembler, fasta, hits, bam, bai)
   }
 
   blobtools_result = BLOBTOOLS(blobtools_in, taxdump_ch)
