@@ -448,9 +448,9 @@ workflow {
   // Unkey + call BlobTools
   blobtools_in = fasta_blast_bam.map { key, fasta, hits, pair ->
     def (sra, srr) = key
-    def (platform, model, strategy, assembler, fasta) = fasta
+    def (platform, model, strategy, assembler, assembly) = fasta
     def (bam, bai) = pair
-    tuple(sra, srr, platform, model, strategy, assembler, fasta, hits, bam, bai)
+    tuple(sra, srr, platform, model, strategy, assembler, assembly, hits, bam, bai)
   }
 
   blobtools_result = BLOBTOOLS(blobtools_in, taxdump_ch)
