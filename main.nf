@@ -18,8 +18,8 @@ def helpMessage() {
   Required parameters:
     --sra           Path to sra.csv (header: sra)
     --taxa          Taxa for extraction (e.g., phylum, genus)
-    --uniprot_db    Path to Uniprot database (.dmnd)
     --taxdump       Path to taxdump json database
+    --uniprot_db    Path to Uniprot database (.dmnd)
 
   Optional parameters:
     --help          Show this help message
