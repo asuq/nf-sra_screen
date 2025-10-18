@@ -309,7 +309,37 @@ process EXTRACT_TAXA {
     """
 }
 
+
+process APPEND_SUMMARY {
+    tag { "${sra}:${srr}" }
+
+    input:
+    tuple val(sra), val(srr), val(assembler), val(strategy), val(model), path(summary_csv)
+    val outdir
+
+    output:
+    path("summary.tsv"), optional: true, emit: global_summary
+
+    script:
+    """
+    OUT_TSV="${outdir}/summary.tsv"
+    mkdir -p "${outdir}"
+
+    # counts = comma-joined n_identifiers in the order of rows in summary.csv
+    COUNTS=\$(awk -F, 'NR>1{print \$3}' "${summary_csv}" | paste -sd, -)
+
+    # note left blank for successful path
+    LINE="${sra}\t${srr}\t${assembler}\t${strategy}\t${model}\t\${COUNTS}\t"
+
     {
+      flock 200
+      if [[ ! -s "\$OUT_TSV" ]]; then
+        echo -e "sra\tsrr\tassembler\tstrategy\tmodel\tcounts\tnote" > "\$OUT_TSV"
+      fi
+      echo -e "\$LINE" >> "\$OUT_TSV"
+    } 200> "\$OUT_TSV.lock"
+
+    ln -sf "\$OUT_TSV" .
     """
 }
 
@@ -327,6 +357,7 @@ workflow {
   }
 
   // Channel setup
+  outdir = file(params.outdir).toAbsolutePath().toString()
   sra_ch = Channel.fromPath(params.sra, checkIfExists: true)
                   .splitCsv(header: true, strip: true)
                   .map { row -> row.sra.trim() }
@@ -422,4 +453,7 @@ workflow {
 
   // Step 6: extract taxa
   extracted_taxa = EXTRACT_TAXA(blobtools_result.blobtable, validated_taxa, taxdump_ch)
+
+  // Step 7: append to global summary
+  global_summary = APPEND_SUMMARY(extracted_taxa.summary, outdir)
 }
