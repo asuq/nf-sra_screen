@@ -172,24 +172,31 @@ process METAFLYE_NANO {
     tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path(reads)
 
     output:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("assembly.fasta"), emit: assembly_fasta
-    tuple val(sra), val(srr), path("assembly.gfa"), emit: assembly_graph
-    tuple val(sra), val(srr), path("assembly.log"), emit: assembly_log
-    tuple val(sra), val(srr), path("assembly.bam"), path("assembly.bam.csi"), emit: assembly_bam
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("assembly.fasta"), optional:true, emit: assembly_fasta
+    tuple val(sra), val(srr), path("assembly.gfa"),                                                             optional:true, emit: assembly_graph
+    tuple val(sra), val(srr), path("flye.log"),                                                                 optional:true, emit: assembly_log
+    tuple val(sra), val(srr), path("assembly.bam"), path("assembly.bam.csi"),                                   optional:true, emit: assembly_bam
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("FAIL.note"),      optional:true, emit: note
 
     script:
     """
     # Run metaFlye
-    flye --nano-raw ${reads} --threads ${task.cpus} --scaffold --out-dir '.' --meta
+    if ! flye --nano-raw ${reads} --threads ${task.cpus} --scaffold --out-dir '.' --meta; then
+      if [[ ${task.attempt} -lt ${params.max_retries} ]]; then exit 1; fi
+      echo "Assembly failed at metaFlye (ONT)" > FAIL.note; exit 0
+    fi
 
     # Run minimap2
-    minimap2 -ax map-ont -t ${task.cpus} assembly.fasta ${reads} \\
-      | samtools sort --output-fmt BAM -@ ${task.cpus} -o assembly.bam
-    samtools index -c -o assembly.bam.csi -@ ${task.cpus} assembly.bam
+    if ! ( minimap2 -ax map-ont -t ${task.cpus} assembly.fasta ${reads} \\
+      | samtools sort --output-fmt BAM -@ ${task.cpus} -o assembly.bam \\
+      && samtools index -c -o assembly.bam.csi -@ ${task.cpus} assembly.bam ); then
+
+      if [[ ${task.attempt} -lt ${params.max_retries} ]]; then exit 1; fi
+      echo "Assembly failed at mapping/indexing (ONT)" > FAIL.note; exit 0
+    fi
 
     # Rename outputs
     mv -v assembly_graph.gfa assembly.gfa
-    mv -v flye.log assembly.log
     """
 }
 
