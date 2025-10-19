@@ -368,6 +368,22 @@ process EXTRACT_TAXA {
 }
 
 
+process LOG_FAILED_PROCESS {
+  tag { "${sra}" }
+
+  input:
+  tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), val(note)
+
+  output:
+  tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("empty_summary.csv"), val(note), emit: skipped_rows
+
+  script:
+  """
+  echo 'rank,taxa,n_identifiers,output_ids_csv,output_fasta' > empty_summary.csv
+  """
+}
+
+
 process APPEND_SUMMARY {
     tag { "${sra}:${srr}" }
 
