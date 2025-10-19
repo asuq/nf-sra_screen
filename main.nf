@@ -84,8 +84,8 @@ process DOWNLOAD_SRR {
     tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler)
 
     output:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("*.f*q*"),    optional:true, emit: reads
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("FAIL.note"), optional:true, emit: note
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("*.f*q*"), path("assembler.txt"), optional:true, emit: reads
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("FAIL.note"),                     optional:true, emit: note
 
     script:
     """
@@ -97,6 +97,22 @@ process DOWNLOAD_SRR {
       echo "Download raw data failed" > FAIL.note
       rm -f *.f*q* "${srr}"  # remove sra and fastq files that didn't download properly
       exit 0
+    fi
+
+    # Pacbio assembler check
+    final_asm="${assembler}"
+    if [[ "${platform}" == "PACBIO_SMRT" && ( -z "${assembler}" || "${assembler}" == "unknown" ) ]]; then
+      echo "Checking PacBio reads to determine assembler"
+      if zcat -f *.f*q* 2>/dev/null \
+        | awk 'NR%4==1{ h=tolower(\$0); if (h ~ /\\/ccs(\s|\$)/) { found=1; exit } } END{ exit(!found) }'
+      then
+        final_asm="long_hifi"
+      else
+        final_asm="long_pacbio"
+      fi
+      echo "\${final_asm}" > assembler.txt
+    else
+      touch assembler.txt
     fi
     """
 }
@@ -469,10 +485,14 @@ workflow {
 
   // Step 2: download SRR reads
   download_srr = DOWNLOAD_SRR(srr_ch)
-  srr_reads = download_srr.reads
-  // srr_reads.reads.view { acc, srr, platform, model, strategy, asm, reads ->
-  //   "${acc}\t${srr}\t\t${platform}\t${model}\t${strategy}\t${asm}\t${reads}"
-  // }
+  srr_reads = download_srr.reads.map { sra, srr, platform, model, strategy, asm, reads, asm_txt ->
+    def fixedAsm = file(asm_txt)?.text?.trim() ?: asm
+    tuple(sra, srr, platform, model, strategy, fixedAsm, reads)
+  }
+
+  srr_reads.view { acc, srr, platform, model, strategy, asm, reads ->
+    "${acc}\t${srr}\t${platform}\t${model}\t${strategy}\t${asm}\t${reads}"
+  }
 
   // Step 3: assemble reads
   short_ch       = srr_reads.filter { sra, srr, platform, model, strategy, assembler, reads -> assembler.equalsIgnoreCase('short') }
