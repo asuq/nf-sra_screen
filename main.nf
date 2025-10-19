@@ -84,13 +84,20 @@ process DOWNLOAD_SRR {
     tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler)
 
     output:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("*.f*q*"), optional:true, emit: reads
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("FAIL.note"), optional:true, emit: dl_note
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("*.f*q*"),    optional:true, emit: reads
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("FAIL.note"), optional:true, emit: note
 
     script:
     """
     # Download sequence data
-    iseq -g -t ${task.cpus} -p 8 -i "${srr}"
+    if ! iseq -g -t ${task.cpus} -p 8 -i "${srr}"; then
+      if [[ ${task.attempt} -lt ${params.max_retries} ]]; then
+        exit 1
+      fi
+      echo "Download raw data failed" > FAIL.note
+      rm -f *.f*q* "${srr}"  # remove sra and fastq files that didn't download properly
+      exit 0
+    fi
     """
 }
 
