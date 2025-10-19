@@ -388,7 +388,7 @@ process APPEND_SUMMARY {
     tag { "${sra}:${srr}" }
 
     input:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path(summary_csv)
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path(summary_csv), val(note)
     val outdir
 
     output:
@@ -403,7 +403,7 @@ process APPEND_SUMMARY {
     COUNTS=\$(awk -F, 'NR>1{print \$3}' "${summary_csv}" | paste -sd, -)
 
     # note left blank for successful path
-    LINE="${sra}\t${srr}\t${platform}\t${model}\t${strategy}\t${assembler}\t\${COUNTS}\t"
+    LINE="${sra}\t${srr}\t${platform}\t${model}\t${strategy}\t${assembler}\t\${COUNTS}\t${note}"
     {
       flock 200
       if [[ ! -s "\$OUT_TSV" ]]; then
