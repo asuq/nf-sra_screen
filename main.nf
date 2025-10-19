@@ -446,7 +446,6 @@ workflow {
   // Step 1: extract metadata & filter SRR
   sra_metadata = DOWNLOAD_SRA_METADATA(sra_ch, validated_taxa)
   filtered_srr = sra_metadata.filtered_sra
-  skipped_srr  = sra_metadata.skipped_sra
   // skipped_srr.view { sra, csvfile -> "SKIPPED SRA: ${sra} (see ${csvfile})" }
 
   // Build nested channels per CSV, then flatten
@@ -531,5 +530,48 @@ workflow {
   taxa_extraction = EXTRACT_TAXA(blobtools.blobtable, validated_taxa, taxdump_ch)
 
   // Step 7: append to global summary
-  global_summary = APPEND_SUMMARY(extracted_taxa.summary, outdir)
+  skipped_srr = sra_metadata.skipped_sra
+    .map { sra, csvfile -> file(csvfile) }
+    .splitCsv(header: true, strip: true)
+    .map { row ->
+      def sra   = (row.accession ?: '').trim()
+      def srr   = (row.run_accession ?: '').trim()
+      def plat  = (row.instrument_platform ?: '').trim()
+      def model = (row.instrument_model ?: '').trim()
+      def strat = (row.library_strategy ?: '').trim()
+      def note  = "did not match the criteria: ${(row.skip_reason ?: '').trim()}"
+      // assembler is empty for skipped rows
+      tuple(sra, srr, plat, model, strat, '', note)
+    }
+    .filter { it[1] } // keep only rows with srr
+
+                  // .mix(skipped_srr)
+
+  errors = Channel.empty()
+                  .mix(download_srr.note)
+                  .mix(spades_asm.note)
+                  .mix(flyenano_asm.note)
+                  .mix(flyepacbio_asm.note)
+                  .mix(hifimeta_asm.note)
+                  .mix(diamond.note)
+                  .mix(blobtools.note)
+                  .mix(taxa_extraction.note)
+                  .map { sra, srr, platform, model, strategy, assembler, note_path ->
+                    def note = file(note_path).text.trim()
+                    tuple(sra, srr, platform, model, strategy, assembler, note)
+                  }
+                  .mix(skipped_srr)
+
+
+  failed_sra = LOG_FAILED_PROCESS(errors)
+  succeeded_sra = taxa_extraction.summary.map { sra, srr, platform, model, strategy, assembler, summary_csv ->
+                                                tuple(sra, srr, platform, model, strategy, assembler, summary_csv, '')
+                                              }
+
+
+  summary = Channel.empty()
+                   .mix(succeeded_sra)
+                   .mix(failed_sra)
+
+  APPEND_SUMMARY(summary, outdir)
 }
