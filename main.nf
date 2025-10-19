@@ -469,10 +469,11 @@ workflow {
   // }
 
   // Step 2: download SRR reads
-  srr_reads = DOWNLOAD_SRR(srr_ch)
-  srr_reads.reads.view { acc, srr, platform, model, strategy, asm, reads ->
-    "${acc}\t${srr}\t\t${platform}\t${model}\t${strategy}\t${asm}\t${reads}"
-  }
+  download_srr = DOWNLOAD_SRR(srr_ch)
+  srr_reads = download_srr.reads
+  // srr_reads.reads.view { acc, srr, platform, model, strategy, asm, reads ->
+  //   "${acc}\t${srr}\t\t${platform}\t${model}\t${strategy}\t${asm}\t${reads}"
+  // }
 
   // Step 3: assemble reads
   short_ch       = srr_reads.filter { sra, srr, platform, model, strategy, assembler, reads -> assembler.equalsIgnoreCase('short') }
@@ -493,9 +494,9 @@ workflow {
                         .mix(hifimeta_asm.assembly_fasta)
 
 
-  diamond_ch = DIAMOND(asm_fasta_ch, uniprot_db_ch)
-  // diamond_ch.view { sra, srr, asm, blast ->
-  //   "DIAMOND: ${sra}\t${srr}\t${asm}\t${blast}"
+  diamond = DIAMOND(asm_fasta_ch, uniprot_db_ch)
+  // diamond.blast.view { sra, srr, blast ->
+  //   "DIAMOND: ${sra}\t${srr}\t${blast}"
   // }
 
   // Step 5. run BlobTools
@@ -508,13 +509,12 @@ workflow {
 
   // Key every stream by (sra,srr,assembler)
   fasta_by  = asm_fasta_ch.map   { sra, srr, platform, model, strategy, assembler, fasta -> tuple([sra,srr], [platform,model,strategy,assembler,fasta]) }
-  blast_by  = diamond_ch.map     { sra, srr, hits  -> tuple([sra,srr], hits) }
+  blast_by  = diamond.blast.map     { sra, srr, hits  -> tuple([sra,srr], hits) }
   bam_by    = bam_ch.map         { sra, srr, bam, bai -> tuple([sra,srr], [bam,bai]) }
 
   // Join (fasta * diamond) then * bam
   fasta_blast = fasta_by.join(blast_by)
   fasta_blast_bam = fasta_blast.join(bam_by)
-  // -> ( [sra,srr,asm], fasta, hits, [bam,bai] )
 
   // Unkey + call BlobTools
   blobtools_in = fasta_blast_bam.map { key, fasta, hits, pair ->
@@ -524,11 +524,11 @@ workflow {
     tuple(sra, srr, platform, model, strategy, assembler, assembly, hits, bam, bai)
   }
 
-  blobtools_result = BLOBTOOLS(blobtools_in, taxdump_ch)
-  // blobtools_result.view { sra, srr, asm, tbl -> "BLOBTOOLS:\t${sra}\t${srr}\t${asm}\t${tbl}" }
+  blobtools = BLOBTOOLS(blobtools_in, taxdump_ch)
+  // blobtools.blobtable.view { sra, srr, platform, model, strategy, assembler, assembly, tbl -> "BLOBTOOLS:\t${sra}\t${srr}\t${platform}\t${model}\t${strategy}\t${assembler}\t${assembly}\t${tbl}" }
 
   // Step 6: extract taxa
-  extracted_taxa = EXTRACT_TAXA(blobtools_result.blobtable, validated_taxa, taxdump_ch)
+  taxa_extraction = EXTRACT_TAXA(blobtools.blobtable, validated_taxa, taxdump_ch)
 
   // Step 7: append to global summary
   global_summary = APPEND_SUMMARY(extracted_taxa.summary, outdir)
