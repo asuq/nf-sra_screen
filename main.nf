@@ -24,6 +24,7 @@ def helpMessage() {
   Optional parameters:
     --help          Show this help message
     --outdir        Output directory (default: ./output)
+    --max_retries   Maximum number of retries for each process (default: 3)
   """.stripIndent()
 }
 
@@ -63,6 +64,7 @@ process DOWNLOAD_SRA_METADATA {
 
     output:
     tuple val(sra), path("${sra}.filtered.csv"), emit: filtered_sra
+    tuple val(sra), path("${sra}.skipped.csv"),  emit: skipped_sra
 
     script:
     """
@@ -70,7 +72,7 @@ process DOWNLOAD_SRA_METADATA {
     iseq -m -i "${sra}"
 
     # Extract SRR to screen
-    filter_sra.sh "${sra}.metadata.tsv"
+    filter_sra.sh "${sra}"
     """
 }
 
@@ -79,15 +81,39 @@ process DOWNLOAD_SRR {
     tag { "${sra}:${srr}" }
 
     input:
-    tuple val(sra), val(srr), val(platform), val(strategy), val(model), val(assembler)
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler)
 
     output:
-    tuple val(sra), val(srr), val(platform), val(strategy), val(model), val(assembler), path("*.f*q*"), emit: reads
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("*.f*q*"), path("assembler.txt"), optional:true, emit: reads
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("FAIL.note"),                     optional:true, emit: note
 
     script:
     """
     # Download sequence data
-    iseq -g -t ${task.cpus} -p 8 -i "${srr}"
+    if ! iseq -g -t ${task.cpus} -p 8 -i "${srr}"; then
+      if [[ ${task.attempt} -lt ${params.max_retries} ]]; then
+        exit 1
+      fi
+      echo "Download raw data failed" > FAIL.note
+      rm -f *.f*q* "${srr}"  # remove sra and fastq files that didn't download properly
+      exit 0
+    fi
+
+    # Pacbio assembler check
+    final_asm="${assembler}"
+    if [[ "${platform}" == "PACBIO_SMRT" && ( -z "${assembler}" || "${assembler}" == "unknown" ) ]]; then
+      echo "Checking PacBio reads to determine assembler"
+      if zcat -f *.f*q* 2>/dev/null \
+        | awk 'NR%4==1{ h=tolower(\$0); if (h ~ /\\/ccs(\s|\$)/) { found=1; exit } } END{ exit(!found) }'
+      then
+        final_asm="long_hifi"
+      else
+        final_asm="long_pacbio"
+      fi
+      echo "\${final_asm}" > assembler.txt
+    else
+      touch assembler.txt
+    fi
     """
 }
 
@@ -97,31 +123,40 @@ process METASPADES {
     publishDir "${params.outdir}/${sra}/${srr}/", mode: 'copy', overwrite: true
 
     input:
-    tuple val(sra), val(srr), val(platform), val(strategy), val(model), val(assembler), path(reads)
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path(reads)
 
     output:
-    tuple val(sra), val(srr), val(assembler), val(strategy), val(model), path("assembly.fasta"), emit: assembly_fasta
-    tuple val(sra), val(srr), path("assembly.gfa"), emit: assembly_graph
-    tuple val(sra), val(srr), path("assembly.log"), emit: assembly_log
-    tuple val(sra), val(srr), path("assembly.bam"), path("assembly.bam.csi"), emit: assembly_bam
-    tuple val(sra), val(srr), path("fastp.html"), emit: fastp_html
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("assembly.fasta"), optional:true, emit: assembly_fasta
+    tuple val(sra), val(srr), path("assembly.gfa"),                                                             optional:true, emit: assembly_graph
+    tuple val(sra), val(srr), path("spades.log"),                                                               optional:true, emit: assembly_log
+    tuple val(sra), val(srr), path("assembly.bam"), path("assembly.bam.csi"),                                   optional:true, emit: assembly_bam
+    tuple val(sra), val(srr), path("fastp.html"),                                                               optional:true, emit: fastp_html
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("FAIL.note"),      optional:true, emit: note
 
     script:
     """
     R1=\$(ls *_1.fastq.gz || ls *_R1*.fastq.gz || true)
     R2=\$(ls *_2.fastq.gz || ls *_R2*.fastq.gz || true)
     if [[ -z "\$R1" || -z "\$R2" ]]; then
-      echo "ERROR: Paired-end reads not found for ${srr}. Got R1='\$R1' R2='\$R2'" >&2
-      exit 1
+      if [[ ${task.attempt} -lt ${params.max_retries} ]]; then exit 1; fi
+      echo "Assembly failed: paired-end reads not found" > FAIL.note; exit 0
     fi
 
     # Run fastp
-    fastp --in1 "\${R1}" --in2 "\${R2}" --out1 "${srr}_fastp_R1.fastq.gz" --out2 "${srr}_fastp_R2.fastq.gz" --thread ${task.cpus} \\
-      --length_required 50 --detect_adapter_for_pe --html fastp.html
+    if ! fastp --in1 "\${R1}" --in2 "\${R2}" --out1 "${srr}_fastp_R1.fastq.gz" --out2 "${srr}_fastp_R2.fastq.gz" \\
+        --thread ${task.cpus} --length_required 50 --detect_adapter_for_pe --html fastp.html; then
+
+      if [[ ${task.attempt} -lt ${params.max_retries} ]]; then exit 1; fi
+      echo "Assembly failed at fastp" > FAIL.note; exit 0
+    fi
 
     # Run SPAdes
-    spades.py -1 "${srr}_fastp_R1.fastq.gz" -2 "${srr}_fastp_R2.fastq.gz" -o '.' \\
-      -k 21,33,55,77,99,119,127 --meta --threads ${task.cpus} --memory ${task.memory.toGiga()}
+    if ! spades.py -1 "${srr}_fastp_R1.fastq.gz" -2 "${srr}_fastp_R2.fastq.gz" -o '.' \\
+      -k 21,33,55,77,99,119,127 --meta --threads ${task.cpus} --memory ${task.memory.toGiga()}; then
+
+      if [[ ${task.attempt} -lt ${params.max_retries} ]]; then exit 1; fi
+      echo "Assembly failed at SPAdes" > FAIL.note; exit 0
+    fi
 
     # Rename outputs
     if [ -f scaffolds.fasta ]; then
@@ -130,14 +165,17 @@ process METASPADES {
       mv -v contigs.fasta assembly.fasta ;
     fi
     mv -v assembly_graph_with_scaffolds.gfa assembly.gfa
-    mv -v spades.log assembly.log
 
     # Run bowtie2
-    bowtie2-build -f -q --threads ${task.cpus} assembly.fasta assembly_index
-    bowtie2 -q --reorder --threads ${task.cpus} --time --met-stderr --met 10 \\
-      -x assembly_index -1 "${srr}_fastp_R1.fastq.gz" -2 "${srr}_fastp_R2.fastq.gz" \\
-      | samtools sort --output-fmt BAM -@ ${task.cpus} -o assembly.bam
-    samtools index -c -o assembly.bam.csi -@ ${task.cpus} assembly.bam
+    if ! ( bowtie2-build -f -q --threads ${task.cpus} assembly.fasta assembly_index \\
+          && bowtie2 -q --reorder --threads ${task.cpus} --time --met-stderr --met 10 \\
+            -x assembly_index -1 "${srr}_fastp_R1.fastq.gz" -2 "${srr}_fastp_R2.fastq.gz" \\
+            | samtools sort --output-fmt BAM -@ ${task.cpus} -o assembly.bam \\
+          && samtools index -c -o assembly.bam.csi -@ ${task.cpus} assembly.bam ); then
+
+      if [[ ${task.attempt} -lt ${params.max_retries} ]]; then exit 1; fi
+      echo "Assembly failed at bowtie2 mapping/indexing" > FAIL.note; exit 0
+    fi
     """
 }
 
@@ -147,27 +185,34 @@ process METAFLYE_NANO {
     publishDir "${params.outdir}/${sra}/${srr}/", mode: 'copy', overwrite: true
 
     input:
-    tuple val(sra), val(srr), val(platform), val(strategy), val(model), val(assembler), path(reads)
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path(reads)
 
     output:
-    tuple val(sra), val(srr), val(assembler), val(strategy), val(model), path("assembly.fasta"), emit: assembly_fasta
-    tuple val(sra), val(srr), path("assembly.gfa"), emit: assembly_graph
-    tuple val(sra), val(srr), path("assembly.log"), emit: assembly_log
-    tuple val(sra), val(srr), path("assembly.bam"), path("assembly.bam.csi"), emit: assembly_bam
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("assembly.fasta"), optional:true, emit: assembly_fasta
+    tuple val(sra), val(srr), path("assembly.gfa"),                                                             optional:true, emit: assembly_graph
+    tuple val(sra), val(srr), path("flye.log"),                                                                 optional:true, emit: assembly_log
+    tuple val(sra), val(srr), path("assembly.bam"), path("assembly.bam.csi"),                                   optional:true, emit: assembly_bam
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("FAIL.note"),      optional:true, emit: note
 
     script:
     """
     # Run metaFlye
-    flye --nano-raw ${reads} --threads ${task.cpus} --scaffold --out-dir '.' --meta
+    if ! flye --nano-raw ${reads} --threads ${task.cpus} --scaffold --out-dir '.' --meta; then
+      if [[ ${task.attempt} -lt ${params.max_retries} ]]; then exit 1; fi
+      echo "Assembly failed at metaFlye (ONT)" > FAIL.note; exit 0
+    fi
 
     # Run minimap2
-    minimap2 -ax map-ont -t ${task.cpus} assembly.fasta ${reads} \\
-      | samtools sort --output-fmt BAM -@ ${task.cpus} -o assembly.bam
-    samtools index -c -o assembly.bam.csi -@ ${task.cpus} assembly.bam
+    if ! ( minimap2 -ax map-ont -t ${task.cpus} assembly.fasta ${reads} \\
+      | samtools sort --output-fmt BAM -@ ${task.cpus} -o assembly.bam \\
+      && samtools index -c -o assembly.bam.csi -@ ${task.cpus} assembly.bam ); then
+
+      if [[ ${task.attempt} -lt ${params.max_retries} ]]; then exit 1; fi
+      echo "Assembly failed at mapping/indexing (ONT)" > FAIL.note; exit 0
+    fi
 
     # Rename outputs
     mv -v assembly_graph.gfa assembly.gfa
-    mv -v flye.log assembly.log
     """
 }
 
@@ -177,57 +222,72 @@ process METAFLYE_PACBIO {
     publishDir "${params.outdir}/${sra}/${srr}/", mode: 'copy', overwrite: true
 
     input:
-    tuple val(sra), val(srr), val(platform), val(strategy), val(model), val(assembler), path(reads)
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path(reads)
 
     output:
-    tuple val(sra), val(srr), val(assembler), val(strategy), val(model), path("assembly.fasta"), emit: assembly_fasta
-    tuple val(sra), val(srr), path("assembly.gfa"), emit: assembly_graph
-    tuple val(sra), val(srr), path("assembly.log"), emit: assembly_log
-    tuple val(sra), val(srr), path("assembly.bam"), path("assembly.bam.csi"), emit: assembly_bam
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("assembly.fasta"), optional:true, emit: assembly_fasta
+    tuple val(sra), val(srr), path("assembly.gfa"),                                                             optional:true, emit: assembly_graph
+    tuple val(sra), val(srr), path("flye.log"),                                                                 optional:true, emit: assembly_log
+    tuple val(sra), val(srr), path("assembly.bam"), path("assembly.bam.csi"),                                   optional:true, emit: assembly_bam
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("FAIL.note"),      optional:true, emit: note
 
     script:
     """
     # Run metaFlye
-    flye --pacbio-raw ${reads} --threads ${task.cpus} --scaffold --out-dir '.' --meta
+    if ! flye --pacbio-raw ${reads} --threads ${task.cpus} --scaffold --out-dir '.' --meta; then
+      if [[ ${task.attempt} -lt ${params.max_retries} ]]; then exit 1; fi
+      echo "Assembly failed at metaFlye (PacBio)" > FAIL.note; exit 0
+    fi
 
     # Run minimap2
-    minimap2 -ax map-pb -t ${task.cpus} assembly.fasta ${reads} \\
-      | samtools sort --output-fmt BAM -@ ${task.cpus} -o assembly.bam
-    samtools index -c -o assembly.bam.csi -@ ${task.cpus} assembly.bam
+    if ! ( minimap2 -ax map-pb -t ${task.cpus} assembly.fasta ${reads} \\
+      | samtools sort --output-fmt BAM -@ ${task.cpus} -o assembly.bam \\
+      && samtools index -c -o assembly.bam.csi -@ ${task.cpus} assembly.bam ); then
+
+      if [[ ${task.attempt} -lt ${params.max_retries} ]]; then exit 1; fi
+      echo "Assembly failed at mapping/indexing (PacBio)" > FAIL.note; exit 0
+    fi
 
     # Rename outputs
     mv -v assembly_graph.gfa assembly.gfa
-    mv -v flye.log assembly.log
     """
 }
+
 
 process MYLOASM {
     tag { "${sra}:${srr}" }
     publishDir "${params.outdir}/${sra}/${srr}/", mode: 'copy', overwrite: true
 
     input:
-    tuple val(sra), val(srr), val(platform), val(strategy), val(model), val(assembler), path(reads)
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path(reads)
 
     output:
-    tuple val(sra), val(srr), val(assembler), val(strategy), val(model), path("assembly.fasta"), emit: assembly_fasta
-    tuple val(sra), val(srr), path("assembly.gfa"), emit: assembly_graph
-    tuple val(sra), val(srr), path("myloasm_*.log"), emit: assembly_log
-    tuple val(sra), val(srr), path("assembly.bam"), path("assembly.bam.csi"), emit: assembly_bam
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("assembly.fasta"), optional:true, emit: assembly_fasta
+    tuple val(sra), val(srr), path("assembly.gfa"),                                                             optional:true, emit: assembly_graph
+    tuple val(sra), val(srr), path("myloasm_*.log"),                                                            optional:true, emit: assembly_log
+    tuple val(sra), val(srr), path("assembly.bam"), path("assembly.bam.csi"),                                   optional:true, emit: assembly_bam
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("FAIL.note"),      optional:true, emit: note
 
     script:
     """
     # Run myloasm
-    myloasm ${reads} -o . -t ${task.cpus} --hifi
+    if ! myloasm ${reads} -o . -t ${task.cpus} --hifi; then
+      if [[ ${task.attempt} -lt ${params.max_retries} ]]; then exit 1; fi
+      echo "Assembly failed at myloasm" > FAIL.note; exit 0
+    fi
 
     # Rename outputs
     mv -v assembly_primary.fa assembly.fasta
     mv -v final_contig_graph.gfa assembly.gfa
 
     # Run minimap2
-    minimap2 -ax map-hifi -t ${task.cpus} assembly.fasta ${reads} \\
-      | samtools sort --output-fmt BAM -@ ${task.cpus} -o assembly.bam
+    if ! ( minimap2 -ax map-hifi -t ${task.cpus} assembly.fasta ${reads} \\
+      | samtools sort --output-fmt BAM -@ ${task.cpus} -o assembly.bam \\
+      && samtools index -c -o assembly.bam.csi -@ ${task.cpus} assembly.bam ); then
 
-    samtools index -c -o assembly.bam.csi -@ ${task.cpus} assembly.bam
+      if [[ ${task.attempt} -lt ${params.max_retries} ]]; then exit 1; fi
+      echo "Assembly failed at mapping/indexing (HiFi)" > FAIL.note; exit 0
+    fi
     """
 }
 
@@ -237,18 +297,22 @@ process DIAMOND {
     publishDir "${params.outdir}/${sra}/${srr}/", mode: 'copy', overwrite: true
 
     input:
-    tuple val(sra), val(srr), val(assembler), val(strategy), val(model), path(assembly_fasta)
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path(assembly_fasta)
     path uniprot_db
 
     output:
-    tuple val(sra), val(srr), path("assembly_vs_uniprot.tsv"), emit: blast
+    tuple val(sra), val(srr), path("assembly_vs_uniprot.tsv"),                                             optional:true, emit: blast
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("FAIL.note"), optional:true, emit: note
 
     script:
     """
-		diamond blastx --sensitive --query "${assembly_fasta}" \\
-			--out "assembly_vs_uniprot.tsv" --db "${uniprot_db}" \\
-			--outfmt 6 qseqid staxids bitscore qseqid sseqid pident length mismatch gapopen qstart qend sstart send evalue bitscore \\
-			--verbose --threads ${task.cpus} --evalue 1e-25 --max-target-seqs 5
+    if ! diamond blastx --sensitive --query "${assembly_fasta}" \\
+        --out "assembly_vs_uniprot.tsv" --db "${uniprot_db}" \\
+        --outfmt 6 qseqid staxids bitscore qseqid sseqid pident length mismatch gapopen qstart qend sstart send evalue bitscore \\
+        --verbose --threads ${task.cpus} --evalue 1e-25 --max-target-seqs 5; then
+      if [[ ${task.attempt} -lt ${params.max_retries} ]]; then exit 1; fi
+      echo "Diamond failed" > FAIL.note; exit 0
+    fi
     """
 }
 
@@ -258,22 +322,27 @@ process BLOBTOOLS {
     publishDir "${params.outdir}/${sra}/${srr}/", mode: 'copy', overwrite: true
 
     input:
-    tuple val(sra), val(srr), val(assembler), val(strategy), val(model), path(assembly_fasta), path(blast), path(assembly_bam), path(assembly_csi)
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path(assembly_fasta), path(blast), path(assembly_bam), path(assembly_csi)
     path taxdump
 
     output:
-    tuple val(sra), val(srr), val(assembler), val(strategy), val(model), path(assembly_fasta), path("blobtools.csv"), emit: blobtable
-    tuple val(sra), val(srr), path("blobtools*.svg"), optional:true, emit: blobplots
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path(assembly_fasta), path("blobtools.csv"), optional:true, emit: blobtable
+    tuple val(sra), val(srr), path("blobtools*.svg"),                                                                                optional:true, emit: blobplots
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("FAIL.note"),                           optional:true, emit: note
 
     script:
     """
-		blobtools create --fasta "${assembly_fasta}" \
-			--cov "${assembly_bam}" --hits "${blast}" --taxdump "${taxdump}" \
-			--threads  ${task.cpus} 'blobtools'
+    if ! blobtools create --fasta "${assembly_fasta}" --cov "${assembly_bam}" \\
+      --hits "${blast}" --taxdump "${taxdump}" --threads  ${task.cpus} 'blobtools'; then
+      if [[ ${task.attempt} -lt ${params.max_retries} ]]; then exit 1; fi
+      echo "Blobtools failed at create" > FAIL.note; exit 0
+    fi
 
-    blobtools filter --table 'blobtools.tsv' \
-      --table-fields gc,length,ncount,assembly_cov,bestsumorder_superkingdom,bestsumorder_kingdom,bestsumorder_phylum,bestsumorder_class,bestsumorder_order,bestsumorder_family,bestsumorder_genus,bestsumorder_species \
-			'blobtools'
+    if ! blobtools filter --table 'blobtools.tsv' \\
+      --table-fields gc,length,ncount,assembly_cov,bestsumorder_superkingdom,bestsumorder_kingdom,bestsumorder_phylum,bestsumorder_class,bestsumorder_order,bestsumorder_family,bestsumorder_genus,bestsumorder_species 'blobtools'; then
+      if [[ ${task.attempt} -lt ${params.max_retries} ]]; then exit 1; fi
+      echo "Blobtools failed at filter" > FAIL.note; exit 0
+    fi
 
     blobtools view --format svg --plot 'blobtools' || {
       echo "blobtools view failed; leaving note and continuing." >&2
@@ -293,20 +362,41 @@ process EXTRACT_TAXA {
     publishDir "${params.outdir}/${sra}/${srr}/", mode: 'copy', overwrite: true
 
     input:
-    tuple val(sra), val(srr), val(assembler), val(strategy), val(model), path(assembly_fasta), path(blobtable)
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path(assembly_fasta), path(blobtable)
     path(taxa)
     path(taxdump)
 
     output:
-    tuple val(sra), val(srr), val(assembler), val(strategy), val(model), path("summary.csv"), emit: summary
-    tuple val(sra), val(srr), path("*.ids.csv"), optional:true,emit: extracted_ids
-    tuple val(sra), val(srr), path("*.fasta"), optional:true, emit: extracted_fasta
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("summary.csv"), optional:true, emit: summary
+    tuple val(sra), val(srr), path("*.ids.csv"),                                                             optional:true, emit: extracted_ids
+    tuple val(sra), val(srr), path("*.fasta"),                                                               optional:true, emit: extracted_fasta
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("FAIL.note"),   optional:true, emit: note
+
 
     script:
     """
-    extract_records.py --blobtable "${blobtable}" --fasta "${assembly_fasta}" \\
-      --taxa "${taxa}" --taxdump "${taxdump}"
+    if ! extract_records.py --blobtable "${blobtable}" \\
+      --fasta "${assembly_fasta}" --taxa "${taxa}" --taxdump "${taxdump}"; then
+      if [[ ${task.attempt} -lt ${params.max_retries} ]]; then exit 1; fi
+      echo "Extraction failed" > FAIL.note; exit 0
+    fi
     """
+}
+
+
+process LOG_FAILED_PROCESS {
+  tag { "${sra}" }
+
+  input:
+  tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), val(note)
+
+  output:
+  tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("empty_summary.csv"), val(note), emit: skipped_rows
+
+  script:
+  """
+  echo 'rank,taxa,n_identifiers,output_ids_csv,output_fasta' > empty_summary.csv
+  """
 }
 
 
@@ -314,7 +404,7 @@ process APPEND_SUMMARY {
     tag { "${sra}:${srr}" }
 
     input:
-    tuple val(sra), val(srr), val(assembler), val(strategy), val(model), path(summary_csv)
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path(summary_csv), val(note)
     val outdir
 
     output:
@@ -329,12 +419,11 @@ process APPEND_SUMMARY {
     COUNTS=\$(awk -F, 'NR>1{print \$3}' "${summary_csv}" | paste -sd, -)
 
     # note left blank for successful path
-    LINE="${sra}\t${srr}\t${assembler}\t${strategy}\t${model}\t\${COUNTS}\t"
-
+    LINE="${sra}\t${srr}\t${platform}\t${model}\t${strategy}\t${assembler}\t\${COUNTS}\t${note}"
     {
       flock 200
       if [[ ! -s "\$OUT_TSV" ]]; then
-        echo -e "sra\tsrr\tassembler\tstrategy\tmodel\tcounts\tnote" > "\$OUT_TSV"
+        echo -e "sra\tsrr\tplatform\tmodel\tstrategy\tassembler\tcounts\tnote" > "\$OUT_TSV"
       fi
       echo -e "\$LINE" >> "\$OUT_TSV"
     } 200> "\$OUT_TSV.lock"
@@ -367,11 +456,13 @@ workflow {
   uniprot_db_ch = Channel.value( file(params.uniprot_db) )
   taxdump_ch    = Channel.value( file(params.taxdump) )
 
-  // TODO: add validate taxa
+  // Validate taxa
   validated_taxa = VALIDATE_TAXA(taxa_ch, taxdump_ch)
 
   // Step 1: extract metadata & filter SRR
-  filtered_srr = DOWNLOAD_SRA_METADATA(sra_ch, validated_taxa)
+  sra_metadata = DOWNLOAD_SRA_METADATA(sra_ch, validated_taxa)
+  filtered_srr = sra_metadata.filtered_sra
+  // skipped_srr.view { sra, csvfile -> "SKIPPED SRA: ${sra} (see ${csvfile})" }
 
   // Build nested channels per CSV, then flatten
   srr_ch = filtered_srr.map { sra, csvfile -> file(csvfile)}
@@ -383,26 +474,31 @@ workflow {
                 def model = (row.instrument_model ?: '').trim()
                 def strategy = (row.library_strategy ?: '').trim()
                 def assembler = (row.assembler ?: '').trim()
-                [sra, srr, platform, strategy, model, assembler]
+                [sra, srr, platform, model, strategy, assembler]
             }
             .filter { it[1] }  // Ensure run_accession (SRR) is not empty
             .distinct()
 
-// srr_ch.view { acc, srr, platform, strategy, model, asm ->
-//       "DEBUG: ${acc}\t${srr}\t${platform}\t${strategy}\t${model}\t${asm}"
-//   }
-
-  // Step 2: download SRR reads
-  srr_reads = DOWNLOAD_SRR(srr_ch)
-  // srr_reads.view { acc, srr, platform, strategy, model, asm, reads ->
-  //   "${acc}\t${srr}\t\t${platform}\t${strategy}\t${model}\t${asm}\t${reads}"
+  // srr_ch.view { acc, srr, platform, model, strategy, asm ->
+  //       "DEBUG: ${acc}\t${srr}\t${platform}\t${model}\t${strategy}\t${asm}"
   // }
 
+  // Step 2: download SRR reads
+  download_srr = DOWNLOAD_SRR(srr_ch)
+  srr_reads = download_srr.reads.map { sra, srr, platform, model, strategy, asm, reads, asm_txt ->
+    def fixedAsm = file(asm_txt)?.text?.trim() ?: asm
+    tuple(sra, srr, platform, model, strategy, fixedAsm, reads)
+  }
+
+  srr_reads.view { acc, srr, platform, model, strategy, asm, reads ->
+    "${acc}\t${srr}\t${platform}\t${model}\t${strategy}\t${asm}\t${reads}"
+  }
+
   // Step 3: assemble reads
-  short_ch       = srr_reads.filter { sra, srr, platform, strategy, model, assembler, reads -> assembler.equalsIgnoreCase('short') }
-  long_nano_ch   = srr_reads.filter { sra, srr, platform, strategy, model, assembler, reads -> assembler.equalsIgnoreCase('long_nano') }
-  long_pacbio_ch = srr_reads.filter { sra, srr, platform, strategy, model, assembler, reads -> assembler.equalsIgnoreCase('long_pacbio') }
-  long_hifi_ch   = srr_reads.filter { sra, srr, platform, strategy, model, assembler, reads -> assembler.equalsIgnoreCase('long_hifi') }
+  short_ch       = srr_reads.filter { sra, srr, platform, model, strategy, assembler, reads -> assembler.equalsIgnoreCase('short') }
+  long_nano_ch   = srr_reads.filter { sra, srr, platform, model, strategy, assembler, reads -> assembler.equalsIgnoreCase('long_nano') }
+  long_pacbio_ch = srr_reads.filter { sra, srr, platform, model, strategy, assembler, reads -> assembler.equalsIgnoreCase('long_pacbio') }
+  long_hifi_ch   = srr_reads.filter { sra, srr, platform, model, strategy, assembler, reads -> assembler.equalsIgnoreCase('long_hifi') }
 
   spades_asm    = METASPADES(short_ch)
   flyenano_asm  = METAFLYE_NANO(long_nano_ch)
@@ -417,9 +513,9 @@ workflow {
                         .mix(hifimeta_asm.assembly_fasta)
 
 
-  diamond_ch = DIAMOND(asm_fasta_ch, uniprot_db_ch)
-  // diamond_ch.view { sra, srr, asm, blast ->
-  //   "DIAMOND: ${sra}\t${srr}\t${asm}\t${blast}"
+  diamond = DIAMOND(asm_fasta_ch, uniprot_db_ch)
+  // diamond.blast.view { sra, srr, blast ->
+  //   "DIAMOND: ${sra}\t${srr}\t${blast}"
   // }
 
   // Step 5. run BlobTools
@@ -431,29 +527,71 @@ workflow {
                   .mix(hifimeta_asm.assembly_bam)
 
   // Key every stream by (sra,srr,assembler)
-  fasta_by  = asm_fasta_ch.map   { sra, srr, asm, strategy, mdl, fasta -> tuple([sra,srr], [asm, strategy, mdl, fasta]) }
-  blast_by  = diamond_ch.map     { sra, srr, hits  -> tuple([sra,srr], hits) }
-  bam_by    = bam_ch.map         { sra, srr, bam, bai -> tuple([sra,srr], [bam, bai]) }
+  fasta_by  = asm_fasta_ch.map   { sra, srr, platform, model, strategy, assembler, fasta -> tuple([sra,srr], [platform,model,strategy,assembler,fasta]) }
+  blast_by  = diamond.blast.map     { sra, srr, hits  -> tuple([sra,srr], hits) }
+  bam_by    = bam_ch.map         { sra, srr, bam, bai -> tuple([sra,srr], [bam,bai]) }
 
   // Join (fasta * diamond) then * bam
   fasta_blast = fasta_by.join(blast_by)
   fasta_blast_bam = fasta_blast.join(bam_by)
-  // -> ( [sra,srr,asm], fasta, hits, [bam,bai] )
 
   // Unkey + call BlobTools
   blobtools_in = fasta_blast_bam.map { key, fasta, hits, pair ->
     def (sra, srr) = key
-    def (asm, strategy, mdl, assembly) = fasta
+    def (platform, model, strategy, assembler, assembly) = fasta
     def (bam, bai) = pair
-    tuple(sra, srr, asm, strategy, mdl, assembly, hits, bam, bai)
+    tuple(sra, srr, platform, model, strategy, assembler, assembly, hits, bam, bai)
   }
 
-  blobtools_result = BLOBTOOLS(blobtools_in, taxdump_ch)
-  // blobtools_result.view { sra, srr, asm, tbl -> "BLOBTOOLS:\t${sra}\t${srr}\t${asm}\t${tbl}" }
+  blobtools = BLOBTOOLS(blobtools_in, taxdump_ch)
+  // blobtools.blobtable.view { sra, srr, platform, model, strategy, assembler, assembly, tbl -> "BLOBTOOLS:\t${sra}\t${srr}\t${platform}\t${model}\t${strategy}\t${assembler}\t${assembly}\t${tbl}" }
 
   // Step 6: extract taxa
-  extracted_taxa = EXTRACT_TAXA(blobtools_result.blobtable, validated_taxa, taxdump_ch)
+  taxa_extraction = EXTRACT_TAXA(blobtools.blobtable, validated_taxa, taxdump_ch)
 
   // Step 7: append to global summary
-  global_summary = APPEND_SUMMARY(extracted_taxa.summary, outdir)
+  skipped_srr = sra_metadata.skipped_sra
+    .map { sra, csvfile -> file(csvfile) }
+    .splitCsv(header: true, strip: true)
+    .map { row ->
+      def sra   = (row.accession ?: '').trim()
+      def srr   = (row.run_accession ?: '').trim()
+      def plat  = (row.instrument_platform ?: '').trim()
+      def model = (row.instrument_model ?: '').trim()
+      def strat = (row.library_strategy ?: '').trim()
+      def note  = "did not match the criteria: ${(row.skip_reason ?: '').trim()}"
+      // assembler is empty for skipped rows
+      tuple(sra, srr, plat, model, strat, '', note)
+    }
+    .filter { it[1] } // keep only rows with srr
+
+                  // .mix(skipped_srr)
+
+  errors = Channel.empty()
+                  .mix(download_srr.note)
+                  .mix(spades_asm.note)
+                  .mix(flyenano_asm.note)
+                  .mix(flyepacbio_asm.note)
+                  .mix(hifimeta_asm.note)
+                  .mix(diamond.note)
+                  .mix(blobtools.note)
+                  .mix(taxa_extraction.note)
+                  .map { sra, srr, platform, model, strategy, assembler, note_path ->
+                    def note = file(note_path).text.trim()
+                    tuple(sra, srr, platform, model, strategy, assembler, note)
+                  }
+                  .mix(skipped_srr)
+
+
+  failed_sra = LOG_FAILED_PROCESS(errors)
+  succeeded_sra = taxa_extraction.summary.map { sra, srr, platform, model, strategy, assembler, summary_csv ->
+                                                tuple(sra, srr, platform, model, strategy, assembler, summary_csv, '')
+                                              }
+
+
+  summary = Channel.empty()
+                   .mix(succeeded_sra)
+                   .mix(failed_sra)
+
+  APPEND_SUMMARY(summary, outdir)
 }
