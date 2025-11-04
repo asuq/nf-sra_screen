@@ -18,7 +18,8 @@ def helpMessage() {
   Required parameters:
     --sra           Path to sra.csv (header: sra)
     --taxa          Taxa for extraction (e.g., phylum, genus)
-    --taxdump       Path to taxdump json database
+    --taxdump       Path to taxdump database folder
+    --gtdb_ncbi_map Path to folder with GTDB-NCBI mapping Excel files
     --uniprot_db    Path to Uniprot database (.dmnd)
 
   Optional parameters:
@@ -42,14 +43,16 @@ process VALIDATE_TAXA {
     input:
     path(taxa_file)
     path(taxdump)
+    path(gtdb_ncbi_map)
 
     output:
     path("validated_taxa.csv"), emit: valid_taxa
 
     script:
     """
-    validate_taxa.py --taxa ${taxa_file} --taxdump ${taxdump} \\
-      && cp -v ${taxa_file} validated_taxa.csv
+    jsonify_taxdump.py ${taxdump} \\
+      && validate_taxa.py --taxa ${taxa_file} --taxdump ${taxdump} \\
+        --gtdb-map --ncbi_to_gtdb ${gtdb_ncbi_map} --out validated_taxa.csv
     """
 }
 
@@ -469,7 +472,7 @@ workflow {
     exit 0
   }
 
-  if (!params.sra || !params.uniprot_db || !params.taxa || !params.taxdump) {
+  if (!params.sra || !params.uniprot_db || !params.taxa || !params.taxdump || !params.gtdb_ncbi_map) {
     missingParametersError()
     exit 1
   }
@@ -481,12 +484,13 @@ workflow {
                   .map { row -> row.sra.trim() }
                   .filter { it }
                   .distinct()
-  taxa_ch    = Channel.value( file(params.taxa) )
-  uniprot_db_ch = Channel.value( file(params.uniprot_db) )
+  taxa_ch       = Channel.value( file(params.taxa) )
   taxdump_ch    = Channel.value( file(params.taxdump) )
+  gtdb_ncbi_map = Channel.value( file(params.gtdb_ncbi_map) )
+  uniprot_db_ch = Channel.value( file(params.uniprot_db) )
 
   // Validate taxa
-  validated_taxa = VALIDATE_TAXA(taxa_ch, taxdump_ch)
+  validated_taxa = VALIDATE_TAXA(taxa_ch, taxdump_ch, gtdb_ncbi_map)
 
   // Step 1: extract metadata & filter SRR
   sra_metadata = DOWNLOAD_SRA_METADATA(sra_ch, validated_taxa)
