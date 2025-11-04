@@ -78,7 +78,7 @@ process DOWNLOAD_SRA_METADATA {
 
 
 process DOWNLOAD_SRR {
-    tag { "${sra}:${srr}" }
+    tag "${sra}:${srr}"
 
     input:
     tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler)
@@ -118,8 +118,37 @@ process DOWNLOAD_SRR {
 }
 
 
+// add singlem process
+process SINGLEM {
+    tag "${sra}:${srr}"
+    publishDir "${params.outdir}/${sra}/${srr}/", mode: 'copy', overwrite: true
+
+    input:
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path(reads)
+    path singlem_db_ch
+
+    output:
+    // tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("assembly.fasta"), optional:true, emit: assembly_fasta
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("FAIL.note"),      optional:true, emit: note
+
+    script:
+    """
+    # Run singlem pipe
+    R1=\$(ls *_1.fastq.gz || ls *_R1*.fastq.gz || true)
+    R2=\$(ls *_2.fastq.gz || ls *_R2*.fastq.gz || true)
+    if [[ -z "\$R1" || -z "\$R2" ]]; then
+      singlem pipe -1 \$R1 -2 \$R2 --taxonomic-profile singlem_taxonomic_profile.tsv \\
+        --taxonomic-profile-krona singlem_taxonomic_profile_krona --metadata ${singlem_db_ch} --threads ${task.cpus}
+    else
+      singlem pipe -1 ${reads} --taxonomic-profile singlem_taxonomic_profile.tsv \\
+        --taxonomic-profile-krona singlem_taxonomic_profile_krona --metadata ${singlem_db_ch} --threads ${task.cpus}
+    fi
+    """
+}
+
+
 process METASPADES {
-    tag { "${sra}:${srr}" }
+    tag "${sra}:${srr}"
     publishDir "${params.outdir}/${sra}/${srr}/", mode: 'copy', overwrite: true
 
     input:
@@ -181,7 +210,7 @@ process METASPADES {
 
 
 process METAFLYE_NANO {
-    tag { "${sra}:${srr}" }
+    tag "${sra}:${srr}"
     publishDir "${params.outdir}/${sra}/${srr}/", mode: 'copy', overwrite: true
 
     input:
@@ -218,7 +247,7 @@ process METAFLYE_NANO {
 
 
 process METAFLYE_PACBIO {
-    tag { "${sra}:${srr}" }
+    tag "${sra}:${srr}"
     publishDir "${params.outdir}/${sra}/${srr}/", mode: 'copy', overwrite: true
 
     input:
@@ -255,7 +284,7 @@ process METAFLYE_PACBIO {
 
 
 process MYLOASM {
-    tag { "${sra}:${srr}" }
+    tag "${sra}:${srr}"
     publishDir "${params.outdir}/${sra}/${srr}/", mode: 'copy', overwrite: true
 
     input:
@@ -293,7 +322,7 @@ process MYLOASM {
 
 
 process DIAMOND {
-    tag { "${sra}:${srr}" }
+    tag "${sra}:${srr}"
     publishDir "${params.outdir}/${sra}/${srr}/", mode: 'copy', overwrite: true
 
     input:
@@ -318,7 +347,7 @@ process DIAMOND {
 
 
 process BLOBTOOLS {
-    tag { "${sra}:${srr}" }
+    tag "${sra}:${srr}"
     publishDir "${params.outdir}/${sra}/${srr}/", mode: 'copy', overwrite: true
 
     input:
@@ -358,7 +387,7 @@ process BLOBTOOLS {
 
 
 process EXTRACT_TAXA {
-    tag { "${sra}:${srr}" }
+    tag "${sra}:${srr}"
     publishDir "${params.outdir}/${sra}/${srr}/", mode: 'copy', overwrite: true
 
     input:
@@ -385,7 +414,7 @@ process EXTRACT_TAXA {
 
 
 process LOG_FAILED_PROCESS {
-  tag { "${sra}" }
+  tag "${sra}"
 
   input:
   tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), val(note)
@@ -401,7 +430,7 @@ process LOG_FAILED_PROCESS {
 
 
 process APPEND_SUMMARY {
-    tag { "${sra}:${srr}" }
+    tag "${sra}:${srr}"
 
     input:
     tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path(summary_csv), val(note)
