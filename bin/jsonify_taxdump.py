@@ -395,8 +395,8 @@ def main_taxidlineage(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     taxdump_dir = Path(args.taxdump)
     if args.out.exists():
-        logging.warning(f"{args.out} exists; aborting")
-        return 1
+        logging.warning(f"{args.out} already exists; skipping")
+        return 0
 
     # Locate nodes and optional merged/delnodes (gz-aware)
     nodes_path = find_file(taxdump_dir, "nodes.dmp")
@@ -728,8 +728,8 @@ def build_lineage_and_json(taxdump_dir: Path) -> int:
         "taxdump.json.gz" if ".gz" in lineage_path.suffixes else "taxdump.json"
     )
     if json_out.exists():
-        logging.warning(f"{json_out} exists; aborting")
-        return 1
+        logging.warning(f"{json_out} already exists; skipping")
+        return 0
 
     # Build JSON using Taxdump class (gz-aware readers)
     try:
