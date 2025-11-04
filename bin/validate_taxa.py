@@ -16,7 +16,7 @@ Purpose:
        to GTDB phylum(s) using the Phylum sheets in:
         - ncbi_vs_gtdb_bacteria.xlsx
         - ncbi_vs_gtdb_archaea.xlsx
-       Output header (exact): rank,ncbi_taxa,gtdb_phylum
+       Output header: rank,ncbi_taxa,gtdb_phylum
 
 Inputs:
     -t, --taxa      : CSV with header 'rank,taxa'
@@ -134,7 +134,7 @@ def parse_args() -> argparse.Namespace:
         "--out",
         type=Path,
         default=Path("mapping.csv"),
-        help="Output CSV for mapping results (header: rank,ncbi_taxa,gtdb_phylum).",
+        help="Output CSV for mapping results (header: rank,ncbi_taxa,ncbi_phylum,gtdb_phylum).",
     )
     parser.add_argument(
         "--threshold",
@@ -470,7 +470,7 @@ def main() -> int:
     out_path = args.out
     with out_path.open("w", newline="", encoding="utf-8") as out_fh:
         writer = csv.writer(out_fh, delimiter=",", lineterminator="\n")
-        writer.writerow(["rank", "ncbi_taxa", "gtdb_phylum"])
+        writer.writerow(["rank", "ncbi_taxa", "ncbi_phylum", "gtdb_phylum"])
 
         threshold = float(args.threshold)
 
@@ -478,20 +478,20 @@ def main() -> int:
             # 1) Resolve to NCBI phylum + superkingdom
             ncbi_phylum, superkingdom = taxidx.resolve_to_phylum(taxa, rank)
 
-            # 2) Skip Eukaryotes / Viruses (but keep row)
+            # 2) Skip Eukaryotes / Viruses (but keep row).
             sk_lower = (superkingdom or "").strip().lower()
             if sk_lower in {"eukaryota", "eukarya"}:
                 logging.info(f"{taxa} is Eukaryotes")
-                writer.writerow([rank, taxa, ""])
+                writer.writerow([rank, taxa, ncbi_phylum or "", ""])
                 continue
             elif sk_lower == "viruses" or sk_lower in VIRUSES_REALM:
                 logging.info(f"{taxa} is Viruses")
-                writer.writerow([rank, taxa, ""])
+                writer.writerow([rank, taxa, ncbi_phylum or "", ""])
                 continue
 
-            # If cannot resolve, still emit a row (empty gtdb_phylum)
+            # If cannot resolve phylum, still emit row (empty gtdb_phylum)
             if ncbi_phylum is None:
-                writer.writerow([rank, taxa, ""])
+                writer.writerow([rank, taxa, "", ""])
                 logging.info(f"no ncbi_phylum found for {taxa}")
                 continue
 
@@ -518,25 +518,35 @@ def main() -> int:
                     mapping = None
 
             if not mapping:
-                logging.warning(f"no gtdb phylum found for {taxa}")
-                writer.writerow([rank, taxa, ""])
+                logging.warning(
+                    f"No GTDB mapping source available for NCBI phylum '{ncbi_phylum}' "
+                    f"(taxon '{taxa}', superkingdom='{superkingdom or ''}'); emitting empty gtdb_phylum."
+                )
+                writer.writerow([rank, taxa, ncbi_phylum, ""])
                 continue
 
             candidate = mapping.get(key_lower)
             if not candidate:
-                # phylum not found in the selected mapping
-                writer.writerow([rank, taxa, ""])
+                logging.warning(
+                    f"NCBI phylum '{ncbi_phylum}' (taxon '{taxa}') not present in selected GTDB mapping; "
+                    f"emitting empty gtdb_phylum."
+                )
+                writer.writerow([rank, taxa, ncbi_phylum, ""])
                 continue
 
             # 4) Filter strictly > threshold; emit one row per passing GTDB phylum
             passed = [g for (g, pct) in candidate if pct > threshold]
 
             if not passed:
-                writer.writerow([rank, taxa, ""])
+                logging.warning(
+                    f"No GTDB phylum above threshold {threshold}% for NCBI phylum '{ncbi_phylum}' "
+                    f"(taxon '{taxa}'); emitting empty gtdb_phylum."
+                )
+                writer.writerow([rank, taxa, ncbi_phylum, ""])
                 continue
 
             for gtdb_phylum in passed:
-                writer.writerow([rank, taxa, gtdb_phylum])
+                writer.writerow([rank, taxa, ncbi_phylum, gtdb_phylum])
 
     logging.info(f"Mapping written to {out_path}")
     return 0
