@@ -28,7 +28,7 @@ Notes:
 
 Required Packages: Biopython, Pandas
 
-Author: Akito Shima (ASUQ)
+Author: Akito Shima (asuq)
 Email: asuq.4096@gmail.com
 """
 
