@@ -57,3 +57,7 @@ Desktop.ini
 # others
 source/
 test/
+db/
+output/
+test.sh
+*.csv
