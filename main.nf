@@ -90,7 +90,7 @@ process DOWNLOAD_SRR {
     script:
     """
     # Download sequence data
-    if ! iseq -g -t ${task.cpus} -p 8 -i "${srr}"; then
+    if ! iseq -Q -g -t ${task.cpus} -p 8 -i "${srr}"; then
       if [[ ${task.attempt} -lt ${params.max_retries} ]]; then
         exit 1
       fi
