@@ -15,12 +15,12 @@ Inputs:
     -b, --blobtable : CSV output from blobtools2 with columns:
         identifiers,gc,length,ncount,coverage,superkingdom,kingdom,phylum,class,order,family,genus,species
     -f, --fasta     : Assembly FASTA (record.id must match 'identifiers')
-    -t, --taxa      : CSV with header 'rank,taxa' (one or more rows)
+    -t, --taxa      : CSV with header 'rank,ncbi_taxa' (one or more rows)
     -d, --taxdump   : Directory containing 'taxdump.json'. No .dmp parsing.
     -o, --out_dir   : Output directory path [default: ./]
 
 Notes:
-    - (rank,taxa) pairs are deduplicated
+    - (rank,ncbi_taxa) pairs are deduplicated
     - If a taxon name is not found in taxdump.json → WARN (continue)
     - If a taxon exists but at a different rank → WARN (continue)
     - Rank normalization: 'realm' and 'domain' are treated as 'superkingdom'
@@ -76,7 +76,7 @@ ALLOWED_RANKS: tuple[str, ...] = tuple(INPUT_RANK_TO_COLUMN.keys())
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Extract FASTA records per (rank,taxa) using BlobTools CSV and taxdump.json.",
+        description="Extract FASTA records per (rank,ncbi_taxa) using BlobTools CSV and taxdump.json.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument(
@@ -98,7 +98,7 @@ def parse_args() -> argparse.Namespace:
         "-t",
         type=Path,
         required=True,
-        help="CSV with header 'rank,taxa' listing taxa to extract.",
+        help="CSV with header 'rank,ncbi_taxa' listing taxa to extract.",
     )
     parser.add_argument(
         "--taxdump",
@@ -205,16 +205,16 @@ class TaxdumpIndex(object):
 #  Core logic
 # --------------------------------------------------------------------------- #
 def load_taxa_file(taxa_csv: Path) -> list[tuple[str, str]]:
-    """Read --taxa CSV (header rank,taxa), deduplicate preserving order."""
+    """Read --taxa CSV (header rank,ncbi_taxa), deduplicate preserving order."""
     with taxa_csv.open("r", newline="", encoding="utf-8") as fh:
         reader = csv.DictReader(fh)
-        if reader.fieldnames is None or {"rank", "taxa"} - set(reader.fieldnames):
-            raise ValueError("--taxa must have header 'rank,taxa'")
+        if reader.fieldnames is None or {"rank", "ncbi_taxa"} - set(reader.fieldnames):
+            raise ValueError("--taxa must have header 'rank,ncbi_taxa'")
 
         pairs: list[tuple[str, str]] = []
         for row in reader:
             rank = (row["rank"] or "").strip().lower()
-            taxa = (row["taxa"] or "").strip()
+            taxa = (row["ncbi_taxa"] or "").strip()
             if not rank or not taxa:
                 continue
             if rank not in ALLOWED_RANKS:
@@ -340,7 +340,7 @@ def main() -> int:
     summary_csv = args.out_dir / "summary.csv"
     with summary_csv.open("w", newline="", encoding="utf-8") as fh:
         w = csv.writer(fh)
-        w.writerow(["rank", "taxa", "n_contigs", "output_ids_csv", "output_fasta"])
+        w.writerow(["rank", "ncbi_taxa", "n_contigs", "output_ids_csv", "output_fasta"])
         w.writerows(summary_rows)
     logging.info(f"Wrote summary: {summary_csv}")
 
