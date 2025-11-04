@@ -12,6 +12,7 @@ RUN mamba create -y -n "${CONDA_ENV_NAME}" \
     -c bioconda -c conda-forge \
     "biopython" \
     "numpy" \
+    "openpyxl" \
     "pandas" \
     "pyyaml" \
     "ujson" \
