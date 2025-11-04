@@ -75,18 +75,18 @@ INPUT_RANK_TO_COLUMN: dict[str, str] = {
 ALLOWED_RANKS: tuple[str, ...] = tuple(INPUT_RANK_TO_COLUMN.keys())
 TAXA_PCT_RE = re.compile(r"([^\s%]+)\s*([0-9]+(?:\.[0-9]+)?)\s*%?")
 VIRUSES_REALM = {
-    "Adnaviria",
-    "Duplodnaviria",
-    "Monodnaviria",
-    "Riboviria",
-    "Ribozyviria",
-    "Singelaviria",
-    "Varidnaviria",
+    "adnaviria",
+    "duplodnaviria",
+    "monodnaviria",
+    "riboviria",
+    "ribozyviria",
+    "singelaviria",
+    "varidnaviria",
 }
 
 
 def _fmt_not_found(taxa: str, rank: str) -> str:
-    return f"Taxon '{taxa}' not found in the NCBI Taxonomy ({TAXDUMP_TIMESTAMP}) (requested rank={rank}). "
+    return f"Taxon '{taxa}' not found in the NCBI Taxonomy ({TAXDUMP_TIMESTAMP}) (requested rank={rank})."
 
 
 def _fmt_rank_mismatch(
@@ -140,7 +140,7 @@ def parse_args() -> argparse.Namespace:
         "--threshold",
         type=float,
         default=20.0,
-        help="Percent threshold for reporting GTDB phyla.",
+        help="Percent threshold (strictly greater) for reporting GTDB phyla.",
     )
     return parser.parse_args()
 
@@ -217,6 +217,9 @@ class TaxdumpIndex(object):
                 continue
             rank = self._norm_rank(ranks.get(tid, ""))
             key = name.strip().lower()
+            if key == "viruses" and rank != "superkingdom":
+                # Treat “Viruses” as superkingdom for legacy compatibility
+                rank = "superkingdom"
             self._name_index.setdefault(key, []).append((str(tid), rank))
             self._ranks_by_id[str(tid)] = rank
             self._names_by_id[str(tid)] = name.strip()
@@ -247,13 +250,13 @@ class TaxdumpIndex(object):
         if not entries:
             return None, None
 
-        # req_rank = INPUT_RANK_TO_COLUMN.get(requested_rank, requested_rank)
-        candidates = [tid for (tid, rk) in entries if rk == requested_rank]
+        req_rank = INPUT_RANK_TO_COLUMN.get(requested_rank, requested_rank)
+        candidates = [tid for (tid, rk) in entries if rk == req_rank]
         if not candidates:
             # Fallback to any entry if the requested rank doesn't match any
             candidates = [tid for (tid, _) in entries]
             logging.warning(
-                f"Name ${name} found but no entry matched requested rank ${requested_rank}; using first match",
+                f"Name {name} found but no entry matched requested rank {requested_rank}; using first match",
             )
 
         # Prefer canonical name match; else take the first
@@ -266,9 +269,7 @@ class TaxdumpIndex(object):
                     chosen = tid
                     break
             else:
-                logging.warning(
-                    f"Ambiguous matches for ${name}; picked taxid ${chosen}"
-                )
+                logging.warning(f"Ambiguous matches for {name}; picked taxid {chosen}")
 
         # Ancestor table lookup
         anc = self.ancestors.get(chosen, {})
@@ -477,11 +478,6 @@ def main() -> int:
             # 1) Resolve to NCBI phylum + superkingdom
             ncbi_phylum, superkingdom = taxidx.resolve_to_phylum(taxa, rank)
 
-            # If cannot resolve, still emit a row (empty gtdb_phylum)
-            if ncbi_phylum is None:
-                writer.writerow([rank, taxa, ""])
-                continue
-
             # 2) Skip Eukaryotes / Viruses (but keep row)
             sk_lower = (superkingdom or "").strip().lower()
             if sk_lower in {"eukaryota", "eukarya"}:
@@ -491,6 +487,12 @@ def main() -> int:
             elif sk_lower == "viruses" or sk_lower in VIRUSES_REALM:
                 logging.info(f"{taxa} is Viruses")
                 writer.writerow([rank, taxa, ""])
+                continue
+
+            # If cannot resolve, still emit a row (empty gtdb_phylum)
+            if ncbi_phylum is None:
+                writer.writerow([rank, taxa, ""])
+                logging.info(f"no ncbi_phylum found for {taxa}")
                 continue
 
             # 3) Choose the correct crosswalk

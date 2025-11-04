@@ -47,6 +47,11 @@ type TaxID = int
 type ParentMap = dict[TaxID, TaxID]
 type ChildrenMap = dict[TaxID, list[TaxID]]
 
+ALIAS_TO_SUPERKINGDOM = {
+    "realm": "superkingdom",
+    "domain": "superkingdom",
+    "superkingdom": "superkingdom",
+}
 
 # -------------------------- generic helpers --------------------------
 
@@ -541,8 +546,8 @@ class Taxdump:
 
     def load_ranks(self):
         """Load ranks from file."""
-        filename = self._file("nodes.dmp")
         try:
+            filename = self._file("nodes.dmp")
             for line in stream_file(filename):
                 row = self.parse_taxdump_row(line)
                 if len(row) > 2:
@@ -565,33 +570,71 @@ class Taxdump:
 
     def load_ancestors(self):
         """Load ancestors from file."""
-        filename = self._file("taxidlineage.dmp")
         try:
+            filename = self._file("taxidlineage.dmp")
+            saw_domain = False
+            saw_realm = False
+
+            ranks_list = self.list_ranks()
+
             for line in stream_file(filename):
                 row = self.parse_taxdump_row(line)
                 if len(row) > 1 and row[1]:
                     taxid = int(row[0])
 
-                    mapping = {}
+                    mapping: dict[str, int] = {}
                     for tok in row[1].split():
                         try:
                             anc_id = int(tok)
                         except ValueError:
                             continue
-                        if anc_id in self.ranks:
-                            r = self.ranks[anc_id]
-                            if r in self.list_ranks():
-                                mapping[r] = anc_id
+                        if anc_id not in self.ranks:
+                            continue
+
+                        raw = self.ranks[anc_id]
+                        if raw == "domain":
+                            saw_domain = True
+                        elif raw == "realm":
+                            saw_realm = True
+
+                        key = ALIAS_TO_SUPERKINGDOM.get(raw, raw)
+                        # First-wins policy for each key; do not overwrite if already set.
+                        if key in ranks_list and key not in mapping:
+                            mapping[key] = anc_id
+
+                    # Consider the node's own rank as well (after ancestors).
+                    if taxid in self.ranks:
+                        raw_self = self.ranks[taxid]
+                        if raw_self == "domain":
+                            saw_domain = True
+                        elif raw_self == "realm":
+                            saw_realm = True
+
+                        key_self = ALIAS_TO_SUPERKINGDOM.get(raw_self, raw_self)
+                        if key_self in ranks_list and key_self not in mapping:
+                            mapping[key_self] = taxid
+
+                    # Fill fixed rank axis with negative sentinels, top-down.
+                    last = 0
+                    for rank in ranks_list:
+                        if rank in mapping:
+                            last = -mapping[rank]
+                        else:
+                            mapping[rank] = last
+
                     self.ancestors[taxid] = mapping
 
-                    if taxid in self.ranks and self.ranks[taxid] in self.list_ranks():
-                        self.ancestors[taxid].update({self.ranks[taxid]: taxid})
-                    last = 0
-                    for rank in self.list_ranks():
-                        if rank in self.ancestors[taxid]:
-                            last = -self.ancestors[taxid][rank]
-                        else:
-                            self.ancestors[taxid].update({rank: last})
+            # Warn once if we observed modern top ranks being aliased.
+            if saw_domain or saw_realm:
+                kinds = []
+                if saw_domain:
+                    kinds.append("domain")
+                if saw_realm:
+                    kinds.append("realm")
+                logging.warning(
+                    f"Detected {kinds} in taxonomy; mapping to 'superkingdom' in JSON 'ancestors' for compatibility."
+                )
+
         except TypeError:
             logging.error(f"Unable to parse {filename}.")
             exit(1)
