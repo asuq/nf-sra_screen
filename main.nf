@@ -34,7 +34,7 @@ def helpMessage() {
 def missingParametersError() {
     log.error "Missing input parameters"
     helpMessage()
-    error "Please provide all required parameters: --sra, --taxa, --taxdump, and --uniprot_db"
+    error "Please provide all required parameters: --sra, --taxa, --taxdump, --gtdb_ncbi_map, --singlem_db, and --uniprot_db"
 }
 
 
@@ -147,7 +147,7 @@ process SINGLEM {
     function fail() {
       local msg="\$1"
       echo "\$msg" >&2
-      if [[ \${task.attempt} -lt \${params.max_retries} ]]; then
+      if [[ ${task.attempt} -lt ${params.max_retries} ]]; then
         exit 1
       fi
       echo "\$msg" > FAIL.note
@@ -205,7 +205,7 @@ process SINGLEM {
           for f in *.f*q*; do
             ln -s "../\$f" "reads.ok/\$(basename "\$f")"
           done
-        )
+        ) \\
     || rc=\$?
 
     case "\$rc" in
@@ -238,9 +238,9 @@ process METASPADES {
 
     script:
     """
-    R1=\$(ls *_1.fastq.gz || ls *_R1*.fastq.gz || true)
-    R2=\$(ls *_2.fastq.gz || ls *_R2*.fastq.gz || true)
-    if [[ -z "\$R1" || -z "\$R2" ]]; then
+    R1=\$(ls *_1.fastq.gz *_R1*.fastq.gz 2>/dev/null | head -n1 || true)
+    R2=\$(ls *_2.fastq.gz *_R2*.fastq.gz 2>/dev/null | head -n1 || true)
+    if [[ -n "\$R1" || -n "\$R2" ]]; then
       if [[ ${task.attempt} -lt ${params.max_retries} ]]; then exit 1; fi
       echo "Assembly failed: paired-end reads not found" > FAIL.note; exit 0
     fi
@@ -543,7 +543,9 @@ workflow {
     exit 0
   }
 
-  if (!params.sra || !params.uniprot_db || !params.taxa || !params.taxdump || !params.gtdb_ncbi_map) {
+  if (!params.sra || !params.uniprot_db || !params.taxa \
+      || !params.taxdump || !params.gtdb_ncbi_map \
+      || !params.singlem_db || !params.uniprot_db) {
     missingParametersError()
     exit 1
   }
