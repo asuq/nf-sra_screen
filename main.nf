@@ -20,6 +20,7 @@ def helpMessage() {
     --taxa          Taxa for extraction (e.g., phylum, genus)
     --taxdump       Path to taxdump database folder
     --gtdb_ncbi_map Path to folder with GTDB-NCBI mapping Excel files
+    --singlem_db    Path to SingleM database folder
     --uniprot_db    Path to Uniprot database (.dmnd)
 
   Optional parameters:
@@ -121,34 +122,104 @@ process DOWNLOAD_SRR {
 }
 
 
-// add singlem process
+// TODO: add singlem process
+// 1. Read validated_taxa.csv
+// 2. Extract taxa of interest from gtdb_phylum column
+// 3. Run singlem to check presence of taxa in reads
+// 4. If present, continue to assembly; if absent, write FAIL.note and skip assembly
 process SINGLEM {
     tag "${sra}:${srr}"
     publishDir "${params.outdir}/${sra}/${srr}/", mode: 'copy', overwrite: true
 
     input:
     tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path(reads)
+    path valid_taxa
     path singlem_db_ch
 
     output:
-    // tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("assembly.fasta"), optional:true, emit: assembly_fasta
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("FAIL.note"),      optional:true, emit: note
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("reads.ok/*.f*q*"), optional:true, emit: reads
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("FAIL.note"),       optional:true, emit: note
+    tuple val(sra), val(srr), path("singlem_taxonomic_profile*"),                                                optional:true, emit: singlem_summary
+    tuple val(sra), val(srr), path("singlem_output.tsv"),                                                        optional:true, emit: singlem_phyla_check
 
     script:
     """
+    function fail() {
+      local msg="\$1"
+      echo "\$msg" >&2
+      if [[ \${task.attempt} -lt \${params.max_retries} ]]; then
+        exit 1
+      fi
+      echo "\$msg" > FAIL.note
+      exit 0
+    }
+
+    # Extract validated phyla
+    awk -F',' '
+      NR==1 {
+        for (i = 1; i <= NF; i++) if (\$i == "gtdb_phylum") { c = i; break }
+        next
+      }
+      c && \$c != "" { seen[\$c] = 1 }
+
+      END {
+        print "phyla"
+        for (v in seen) print v
+      }
+      ' "${valid_taxa}" > phyla_to_check.txt \\
+    || fail "SingleM: failed to parse validated_taxa"
+
     # Run singlem pipe
-    R1=\$(ls *_1.fastq.gz || ls *_R1*.fastq.gz || true)
-    R2=\$(ls *_2.fastq.gz || ls *_R2*.fastq.gz || true)
-    if [[ -z "\$R1" || -z "\$R2" ]]; then
-      singlem pipe -1 \$R1 -2 \$R2 --taxonomic-profile singlem_taxonomic_profile.tsv \\
-        --taxonomic-profile-krona singlem_taxonomic_profile_krona --metadata ${singlem_db_ch} --threads ${task.cpus}
+    R1=\$(ls *_1.fastq.gz *_R1*.fastq.gz 2>/dev/null | head -n1 || true)
+    R2=\$(ls *_2.fastq.gz *_R2*.fastq.gz 2>/dev/null | head -n1 || true)
+    if [[ -n "\$R1" || -n "\$R2" ]]; then
+      singlem pipe -1 \$R1 -2 \$R2 \\
+        --taxonomic-profile singlem_taxonomic_profile.tsv \\
+        --taxonomic-profile-krona singlem_taxonomic_profile_krona \\
+        --metapackage ${singlem_db_ch} --threads ${task.cpus} \\
+        || fail "SingleM pipe failed"
     else
-      singlem pipe -1 ${reads} --taxonomic-profile singlem_taxonomic_profile.tsv \\
-        --taxonomic-profile-krona singlem_taxonomic_profile_krona --metadata ${singlem_db_ch} --threads ${task.cpus}
+      singlem pipe -1 ${reads} \\
+        --taxonomic-profile singlem_taxonomic_profile.tsv \\
+        --taxonomic-profile-krona singlem_taxonomic_profile_krona \\
+        --metapackage ${singlem_db_ch} --threads ${task.cpus} \\
+        || fail "SingleM pipe failed"
     fi
+
+    if [[ ! -s singlem_taxonomic_profile.tsv ]]; then
+      fail "SingleM produced empty taxonomic profile"
+    fi
+
+    # Summarise singlem output
+    singlem summarise \\
+      --input-taxonomic-profile singlem_taxonomic_profile.tsv \\
+      --output-species-by-site-relative-abundance-prefix singlem_taxonomic_profile_summary \\
+      || fail "SingleM summarise failed"
+
+    # Check for presence of target phyla
+    check_singlem_phyla.py \\
+      -i singlem_taxonomic_profile.tsv \\
+      -p phyla_to_check.txt \\
+      -o singlem_output.tsv \\
+    && \$(mkdir -p reads.ok
+          for f in *.f*q*; do
+            ln -s "../\$f" "reads.ok/\$(basename "\$f")"
+          done
+        )
+    || rc=\$?
+
+    case "\$rc" in
+      1)
+        fail "SingleM phylum check internal error"
+        ;;
+      2)
+        fail "No target phyla detected by SingleM"
+        ;;
+    esac
     """
 }
 
+// TODO: NGS_STATS from ncbi
 
 process METASPADES {
     tag "${sra}:${srr}"
@@ -487,6 +558,7 @@ workflow {
   taxa_ch       = Channel.value( file(params.taxa) )
   taxdump_ch    = Channel.value( file(params.taxdump) )
   gtdb_ncbi_map = Channel.value( file(params.gtdb_ncbi_map) )
+  singlem_db_ch = Channel.value( file(params.singlem_db) )
   uniprot_db_ch = Channel.value( file(params.uniprot_db) )
 
   // Validate taxa
@@ -523,22 +595,26 @@ workflow {
     tuple(sra, srr, platform, model, strategy, fixedAsm, reads)
   }
 
-  srr_reads.view { acc, srr, platform, model, strategy, asm, reads ->
-    "${acc}\t${srr}\t${platform}\t${model}\t${strategy}\t${asm}\t${reads}"
-  }
+  // srr_reads.view { acc, srr, platform, model, strategy, asm, reads ->
+  //   "${acc}\t${srr}\t${platform}\t${model}\t${strategy}\t${asm}\t${reads}"
+  // }
 
-  // Step 3: assemble reads
-  short_ch       = srr_reads.filter { sra, srr, platform, model, strategy, assembler, reads -> assembler.equalsIgnoreCase('short') }
-  long_nano_ch   = srr_reads.filter { sra, srr, platform, model, strategy, assembler, reads -> assembler.equalsIgnoreCase('long_nano') }
-  long_pacbio_ch = srr_reads.filter { sra, srr, platform, model, strategy, assembler, reads -> assembler.equalsIgnoreCase('long_pacbio') }
-  long_hifi_ch   = srr_reads.filter { sra, srr, platform, model, strategy, assembler, reads -> assembler.equalsIgnoreCase('long_hifi') }
+  // Step 3: run SingleM to screen reads
+  singlem = SINGLEM(srr_reads, validated_taxa, singlem_db_ch)
+  singlem_reads = singlem.reads
 
-  spades_asm    = METASPADES(short_ch)
-  flyenano_asm  = METAFLYE_NANO(long_nano_ch)
-  flyepacbio_asm= METAFLYE_PACBIO(long_pacbio_ch)
-  hifimeta_asm  = MYLOASM(long_hifi_ch)
+  // Step 4: assemble reads
+  short_ch       = singlem_reads.filter { sra, srr, platform, model, strategy, assembler, reads -> assembler.equalsIgnoreCase('short') }
+  long_nano_ch   = singlem_reads.filter { sra, srr, platform, model, strategy, assembler, reads -> assembler.equalsIgnoreCase('long_nano') }
+  long_pacbio_ch = singlem_reads.filter { sra, srr, platform, model, strategy, assembler, reads -> assembler.equalsIgnoreCase('long_pacbio') }
+  long_hifi_ch   = singlem_reads.filter { sra, srr, platform, model, strategy, assembler, reads -> assembler.equalsIgnoreCase('long_hifi') }
 
-  // Step 4: run DIAMOND
+  spades_asm     = METASPADES(short_ch)
+  flyenano_asm   = METAFLYE_NANO(long_nano_ch)
+  flyepacbio_asm = METAFLYE_PACBIO(long_pacbio_ch)
+  hifimeta_asm   = MYLOASM(long_hifi_ch)
+
+  // Step 5: run DIAMOND
   asm_fasta_ch = Channel.empty()
                         .mix(spades_asm.assembly_fasta)
                         .mix(flyenano_asm.assembly_fasta)
@@ -551,7 +627,7 @@ workflow {
   //   "DIAMOND: ${sra}\t${srr}\t${blast}"
   // }
 
-  // Step 5. run BlobTools
+  // Step 6. run BlobTools
   // Merge all BAM+Bai streams
   bam_ch = Channel.empty()
                   .mix(spades_asm.assembly_bam)
@@ -579,10 +655,10 @@ workflow {
   blobtools = BLOBTOOLS(blobtools_in, taxdump_ch)
   // blobtools.blobtable.view { sra, srr, platform, model, strategy, assembler, assembly, tbl -> "BLOBTOOLS:\t${sra}\t${srr}\t${platform}\t${model}\t${strategy}\t${assembler}\t${assembly}\t${tbl}" }
 
-  // Step 6: extract taxa
+  // Step 7: extract taxa
   taxa_extraction = EXTRACT_TAXA(blobtools.blobtable, validated_taxa, taxdump_ch)
 
-  // Step 7: append to global summary
+  // Step 8: append to global summary
   skipped_srr = sra_metadata.skipped_sra
     .map { sra, csvfile -> file(csvfile) }
     .splitCsv(header: true, strip: true)
@@ -598,10 +674,10 @@ workflow {
     }
     .filter { it[1] } // keep only rows with srr
 
-                  // .mix(skipped_srr)
-
+  // Collect all errors
   errors = Channel.empty()
                   .mix(download_srr.note)
+                  .mix(singlem.note)
                   .mix(spades_asm.note)
                   .mix(flyenano_asm.note)
                   .mix(flyepacbio_asm.note)
@@ -621,7 +697,7 @@ workflow {
                                                 tuple(sra, srr, platform, model, strategy, assembler, summary_csv, '')
                                               }
 
-
+  // Combine succeeded and failed
   summary = Channel.empty()
                    .mix(succeeded_sra)
                    .mix(failed_sra)
