@@ -41,9 +41,9 @@ def missingParametersError() {
 
 process VALIDATE_TAXA {
     input:
-    path(taxa_file)
-    path(taxdump)
-    path(gtdb_ncbi_map)
+    path taxa_file
+    path taxdump
+    path gtdb_ncbi_map
 
     output:
     path("validated_taxa.csv"), emit: valid_taxa
@@ -63,7 +63,7 @@ process DOWNLOAD_SRA_METADATA {
 
     input:
     val sra
-    path(valid_taxa)
+    path valid_taxa
 
     output:
     tuple val(sra), path("${sra}.filtered.csv"), emit: filtered_sra
