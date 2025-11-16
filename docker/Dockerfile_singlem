@@ -10,7 +10,7 @@ WORKDIR /work
 
 RUN mamba create -y -n "${CONDA_ENV_NAME}" \
     -c bioconda -c conda-forge \
-    "singlem==0.19.0" \
+    "singlem==0.20.2" \
     && mamba clean --all --yes
 
 CMD ["/bin/bash"]
