@@ -229,7 +229,6 @@ process SINGLEM {
     """
 }
 
-// TODO: NGS_STATS from ncbi
 
 process METASPADES {
     tag "${sra}:${srr}"
