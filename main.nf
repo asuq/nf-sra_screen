@@ -176,13 +176,13 @@ process SINGLEM {
       singlem pipe -1 \$R1 -2 \$R2 \\
         --taxonomic-profile singlem_taxonomic_profile.tsv \\
         --taxonomic-profile-krona singlem_taxonomic_profile_krona \\
-        --metapackage ${singlem_db_ch} --threads ${task.cpus} \\
+        --metapackage "${singlem_db_ch}" --threads ${task.cpus} \\
         || fail "SingleM pipe failed"
     else
       singlem pipe -1 ${reads} \\
         --taxonomic-profile singlem_taxonomic_profile.tsv \\
         --taxonomic-profile-krona singlem_taxonomic_profile_krona \\
-        --metapackage ${singlem_db_ch} --threads ${task.cpus} \\
+        --metapackage "${singlem_db_ch}" --threads ${task.cpus} \\
         || fail "SingleM pipe failed"
     fi
 
@@ -552,16 +552,16 @@ workflow {
 
   // Channel setup
   outdir = file(params.outdir).toAbsolutePath().toString()
-  sra_ch = Channel.fromPath(params.sra, checkIfExists: true)
+  sra_ch = channel.fromPath(params.sra, checkIfExists: true)
                   .splitCsv(header: true, strip: true)
                   .map { row -> row.sra.trim() }
                   .filter { it }
                   .distinct()
-  taxa_ch       = Channel.value( file(params.taxa) )
-  taxdump_ch    = Channel.value( file(params.taxdump) )
-  gtdb_ncbi_map = Channel.value( file(params.gtdb_ncbi_map) )
-  singlem_db_ch = Channel.value( file(params.singlem_db) )
-  uniprot_db_ch = Channel.value( file(params.uniprot_db) )
+  taxa_ch       = channel.value( file(params.taxa) )
+  taxdump_ch    = channel.value( file(params.taxdump) )
+  gtdb_ncbi_map = channel.value( file(params.gtdb_ncbi_map) )
+  singlem_db_ch = channel.value( file(params.singlem_db) )
+  uniprot_db_ch = channel.value( file(params.uniprot_db) )
 
   // Validate taxa
   validated_taxa = VALIDATE_TAXA(taxa_ch, taxdump_ch, gtdb_ncbi_map)
@@ -617,7 +617,7 @@ workflow {
   hifimeta_asm   = MYLOASM(long_hifi_ch)
 
   // Step 5: run DIAMOND
-  asm_fasta_ch = Channel.empty()
+  asm_fasta_ch = channel.empty()
                         .mix(spades_asm.assembly_fasta)
                         .mix(flyenano_asm.assembly_fasta)
                         .mix(flyepacbio_asm.assembly_fasta)
@@ -631,7 +631,7 @@ workflow {
 
   // Step 6. run BlobTools
   // Merge all BAM+Bai streams
-  bam_ch = Channel.empty()
+  bam_ch = channel.empty()
                   .mix(spades_asm.assembly_bam)
                   .mix(flyenano_asm.assembly_bam)
                   .mix(flyepacbio_asm.assembly_bam)
@@ -677,7 +677,7 @@ workflow {
     .filter { it[1] } // keep only rows with srr
 
   // Collect all errors
-  errors = Channel.empty()
+  errors = channel.empty()
                   .mix(download_srr.note)
                   .mix(singlem.note)
                   .mix(spades_asm.note)
@@ -700,7 +700,7 @@ workflow {
                                               }
 
   // Combine succeeded and failed
-  summary = Channel.empty()
+  summary = channel.empty()
                    .mix(succeeded_sra)
                    .mix(failed_sra)
 
