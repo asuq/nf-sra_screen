@@ -196,19 +196,29 @@ process SINGLEM {
       --output-species-by-site-relative-abundance-prefix singlem_taxonomic_profile_summary \\
       || fail "SingleM summarise failed"
 
-    # Check for presence of target phyla
-    check_singlem_phyla.py \\
-      -i singlem_taxonomic_profile.tsv \\
-      -p phyla_to_check.txt \\
-      -o singlem_output.tsv \\
-    && \$(mkdir -p reads.ok
-          for f in *.f*q*; do
-            ln -s "../\$f" "reads.ok/\$(basename "\$f")"
-          done
-        ) \\
-    || rc=\$?
+    # Check for presence of target phyla (exit: 0 yes, 1 internal error, 2 none)
+    rc=0
+    if check_singlem_phyla.py \
+          -i singlem_taxonomic_profile.tsv \
+          -p phyla_to_check.txt \
+          -o singlem_output.tsv; then
+
+      shopt -s nullglob
+      mkdir -p reads.ok
+      for f in *.f*q*; do
+        ln -sf "../\$f" "reads.ok/\$(basename "\$f")"
+      done
+      shopt -u nullglob
+      rc=0
+
+    else
+      rc=\$?
+    fi
 
     case "\$rc" in
+      0)
+        : # all good; emit reads.ok/*
+        ;;
       1)
         fail "SingleM phylum check internal error"
         ;;
