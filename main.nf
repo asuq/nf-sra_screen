@@ -199,7 +199,7 @@ process SINGLEM {
     path singlem_db_ch
 
     output:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("reads.ok/*.f*q*"), optional:true, emit: reads
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("reads_ok/*.f*q*"), optional:true, emit: reads
     tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("FAIL.note"),       optional:true, emit: note
     tuple val(sra), val(srr), path("singlem_taxonomic_profile*"),                                                optional:true, emit: singlem_summary
     tuple val(sra), val(srr), path("singlem_output.tsv"),                                                        optional:true, emit: singlem_phyla_check
@@ -219,8 +219,8 @@ process SINGLEM {
     # Check if sandpiper already passed
     if [[ "${sandpiper}" == "PASS" ]]; then
       echo "Reads already passed Sandpiper check; skipping SingleM"
-      mkdir -p reads.ok
-      cp -v *.f*q* reads.ok/
+      mkdir -p reads_ok
+      cp -v *.f*q* reads_ok/
       exit 0
     fi
 
