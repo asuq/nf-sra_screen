@@ -20,6 +20,7 @@ def helpMessage() {
     --taxa          Taxa for extraction (e.g., phylum, genus)
     --taxdump       Path to taxdump database folder
     --gtdb_ncbi_map Path to folder with GTDB-NCBI mapping Excel files
+    --sandpiper_db  Path to Sandpiper database folder
     --singlem_db    Path to SingleM database folder
     --uniprot_db    Path to Uniprot database (.dmnd)
 
@@ -34,7 +35,7 @@ def helpMessage() {
 def missingParametersError() {
     log.error "Missing input parameters"
     helpMessage()
-    error "Please provide all required parameters: --sra, --taxa, --taxdump, --gtdb_ncbi_map, --singlem_db, and --uniprot_db"
+    error "Please provide all required parameters: --sra, --taxa, --taxdump, --gtdb_ncbi_map, --sandpiper_db, --singlem_db, and --uniprot_db"
 }
 
 
@@ -80,16 +81,86 @@ process DOWNLOAD_SRA_METADATA {
     """
 }
 
+process SANDPIPER {
+    tag "${sra}:${srr}"
+    publishDir "${params.outdir}/${sra}/${srr}/", mode: 'copy', overwrite: true
+
+    input:
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler)
+    path valid_taxa
+    path sandpiper_db_ch
+
+    output:
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("sandpiper_decision.txt"),   emit: decision
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("FAIL.note"), optional:true, emit: note
+    tuple val(sra), val(srr), path("sandpiper_report.txt"),                                                optional:true, emit: sandpiper_report
+    tuple val(sra), val(srr), path("sandpiper_output.tsv"),                                                optional:true, emit: sandpiper_summary
+
+    script:
+    """
+    function hard_fail() {
+      local msg="\$1"
+      echo "\$msg" >&2
+      if [[ ${task.attempt} -lt ${params.max_retries} ]]; then
+        exit 1
+      fi
+      echo "\$msg" > FAIL.note
+      echo "NEGATIVE" > sandpiper_decision.txt
+      exit 0
+    }
+
+    function soft_fallback() {
+      # Sandpiper can’t decide; we’ll let SingleM handle it
+      echo "RUN_SINGLEM" > sandpiper_decision.txt
+      exit 0
+    }
+
+    # Extract validated phyla
+    awk -F',' '
+      NR==1 {
+        for (i = 1; i <= NF; i++) if (\$i == "gtdb_phylum") { c = i; break }
+        next
+      }
+      c && \$c != "" { seen[\$c] = 1 }
+
+      END {
+        print "phyla"
+        for (v in seen) print v
+      }
+      ' "${valid_taxa}" > phyla_to_check.txt \\
+    || soft_fallback
+
+    # Lookup SRR in Sandpiper DB
+    sandpiper_lookup.sh "${srr}" "${sandpiper_db_ch}" > sandpiper_report.txt \\
+      || soft_fallback
+
+    # Check if sandpiper result has taxa interested
+    if check_singlem_phyla.py -i sandpiper_report.txt -p phyla_to_check.txt -o sandpiper_output.tsv; then
+      # at least one target phylum found
+      echo "PASS" > sandpiper_decision.txt
+      exit 0
+    else
+      rc=\$?
+      case "\$rc" in
+        2)  # no target phyla
+            hard_fail "No target phyla detected by Sandpiper";;
+        1|*) # internal error – don’t kill the sample, just fallback
+            soft_fallback;;
+      esac
+    fi
+    """
+}
+
 
 process DOWNLOAD_SRR {
     tag "${sra}:${srr}"
 
     input:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler)
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), val(sandpiper)
 
     output:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("*.f*q*"), path("assembler.txt"), optional:true, emit: reads
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("FAIL.note"),                     optional:true, emit: note
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), val(sandpiper), path("*.f*q*"), path("assembler.txt"), optional:true, emit: reads
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), val(sandpiper), path("FAIL.note"),                     optional:true, emit: note
 
     script:
     """
@@ -122,17 +193,12 @@ process DOWNLOAD_SRR {
 }
 
 
-// TODO: add singlem process
-// 1. Read validated_taxa.csv
-// 2. Extract taxa of interest from gtdb_phylum column
-// 3. Run singlem to check presence of taxa in reads
-// 4. If present, continue to assembly; if absent, write FAIL.note and skip assembly
 process SINGLEM {
     tag "${sra}:${srr}"
     publishDir "${params.outdir}/${sra}/${srr}/", mode: 'copy', overwrite: true
 
     input:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path(reads)
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), val(sandpiper), path(reads)
     path valid_taxa
     path singlem_db_ch
 
@@ -153,6 +219,14 @@ process SINGLEM {
       echo "\$msg" > FAIL.note
       exit 0
     }
+
+    # Check if sandpiper already passed
+    if [[ "${sandpiper}" == "PASS" ]]; then
+      echo "Reads already passed Sandpiper check; skipping SingleM"
+      mkdir -p reads.ok
+      cp -v *.f*q* reads.ok/
+      exit 0
+    fi
 
     # Extract validated phyla
     awk -F',' '
@@ -196,36 +270,9 @@ process SINGLEM {
       --output-species-by-site-relative-abundance-prefix singlem_taxonomic_profile_summary \\
       || fail "SingleM summarise failed"
 
-    # Check for presence of target phyla (exit: 0 yes, 1 internal error, 2 none)
-    rc=0
-    if check_singlem_phyla.py \
-          -i singlem_taxonomic_profile.tsv \
-          -p phyla_to_check.txt \
-          -o singlem_output.tsv; then
-
-      shopt -s nullglob
-      mkdir -p reads.ok
-      for f in *.f*q*; do
-        ln -sf "../\$f" "reads.ok/\$(basename "\$f")"
-      done
-      shopt -u nullglob
-      rc=0
-
-    else
-      rc=\$?
-    fi
-
-    case "\$rc" in
-      0)
-        : # all good; emit reads.ok/*
-        ;;
-      1)
-        fail "SingleM phylum check internal error"
-        ;;
-      2)
-        fail "No target phyla detected by SingleM"
-        ;;
-    esac
+    # Check for presence of target phyla
+    check_singlem_phyla.sh singlem_taxonomic_profile.tsv phyla_to_check.txt singlem_output.tsv \\
+      ${task.attempt} ${params.max_retries}
     """
 }
 
@@ -554,7 +601,7 @@ workflow {
 
   if (!params.sra || !params.uniprot_db || !params.taxa \
       || !params.taxdump || !params.gtdb_ncbi_map \
-      || !params.singlem_db || !params.uniprot_db) {
+      || !params.sandpiper_db || !params.singlem_db) {
     missingParametersError()
     exit 1
   }
@@ -566,14 +613,15 @@ workflow {
                   .map { row -> row.sra.trim() }
                   .filter { it }
                   .distinct()
-  taxa_ch       = channel.value( file(params.taxa) )
-  taxdump_ch    = channel.value( file(params.taxdump) )
-  gtdb_ncbi_map = channel.value( file(params.gtdb_ncbi_map) )
-  singlem_db_ch = channel.value( file(params.singlem_db) )
-  uniprot_db_ch = channel.value( file(params.uniprot_db) )
+  taxa_ch         = channel.value( file(params.taxa) )
+  taxdump_ch      = channel.value( file(params.taxdump) )
+  gtdb_ncbi_map   = channel.value( file(params.gtdb_ncbi_map) )
+  singlem_db_ch   = channel.value( file(params.singlem_db) )
+  sandpiper_db_ch = channel.value( file(params.sandpiper_db) )
+  uniprot_db_ch   = channel.value( file(params.uniprot_db) )
 
   // Validate taxa
-  validated_taxa = VALIDATE_TAXA(taxa_ch, taxdump_ch, gtdb_ncbi_map)
+  validated_taxa = VALIDATE_TAXA(taxa_ch, taxdump_ch, gtdb_ncbi_map).valid_taxa
 
   // Step 1: extract metadata & filter SRR
   sra_metadata = DOWNLOAD_SRA_METADATA(sra_ch, validated_taxa)
@@ -599,22 +647,35 @@ workflow {
   //       "DEBUG: ${acc}\t${srr}\t${platform}\t${model}\t${strategy}\t${asm}"
   // }
 
-  // Step 2: download SRR reads
-  download_srr = DOWNLOAD_SRR(srr_ch)
-  srr_reads = download_srr.reads.map { sra, srr, platform, model, strategy, asm, reads, asm_txt ->
+  // Step 2: check if srr has sandpiper results
+  sandpiper = SANDPIPER(srr_ch, validated_taxa, sandpiper_db_ch)
+  // decision: NEGATIVE / RUN_SINGLEM / PASS
+  sandpiper_decision_ch = sandpiper.decision.map { sra, srr, platform, model, strategy, assembler, dec_path ->
+      def decision = file(dec_path).text.trim()
+      tuple(sra, srr, platform, model, strategy, assembler, decision)
+  }
+
+  srr_prescreened = sandpiper_decision_ch
+    .filter { sra, srr, platform, model, strategy, assembler, decision ->
+        decision == 'PASS' || decision == 'RUN_SINGLEM'
+    }
+
+  // Step 3: download SRR reads
+  download_srr = DOWNLOAD_SRR(srr_prescreened)
+  srr_reads = download_srr.reads.map { sra, srr, platform, model, strategy, asm, sandpiper_dec, reads, asm_txt ->
     def fixedAsm = file(asm_txt)?.text?.trim() ?: asm
-    tuple(sra, srr, platform, model, strategy, fixedAsm, reads)
+    tuple(sra, srr, platform, model, strategy, fixedAsm, sandpiper_dec, reads)
   }
 
   // srr_reads.view { acc, srr, platform, model, strategy, asm, reads ->
   //   "${acc}\t${srr}\t${platform}\t${model}\t${strategy}\t${asm}\t${reads}"
   // }
 
-  // Step 3: run SingleM to screen reads
+  // Step 4: run SingleM to screen reads
   singlem = SINGLEM(srr_reads, validated_taxa, singlem_db_ch)
   singlem_reads = singlem.reads
 
-  // Step 4: assemble reads
+  // Step 5: assemble reads
   short_ch       = singlem_reads.filter { sra, srr, platform, model, strategy, assembler, reads -> assembler.equalsIgnoreCase('short') }
   long_nano_ch   = singlem_reads.filter { sra, srr, platform, model, strategy, assembler, reads -> assembler.equalsIgnoreCase('long_nano') }
   long_pacbio_ch = singlem_reads.filter { sra, srr, platform, model, strategy, assembler, reads -> assembler.equalsIgnoreCase('long_pacbio') }
@@ -625,7 +686,7 @@ workflow {
   flyepacbio_asm = METAFLYE_PACBIO(long_pacbio_ch)
   hifimeta_asm   = MYLOASM(long_hifi_ch)
 
-  // Step 5: run DIAMOND
+  // Step 6: run DIAMOND
   asm_fasta_ch = channel.empty()
                         .mix(spades_asm.assembly_fasta)
                         .mix(flyenano_asm.assembly_fasta)
@@ -638,7 +699,7 @@ workflow {
   //   "DIAMOND: ${sra}\t${srr}\t${blast}"
   // }
 
-  // Step 6. run BlobTools
+  // Step 7. run BlobTools
   // Merge all BAM+Bai streams
   bam_ch = channel.empty()
                   .mix(spades_asm.assembly_bam)
@@ -648,7 +709,7 @@ workflow {
 
   // Key every stream by (sra,srr,assembler)
   fasta_by  = asm_fasta_ch.map   { sra, srr, platform, model, strategy, assembler, fasta -> tuple([sra,srr], [platform,model,strategy,assembler,fasta]) }
-  blast_by  = diamond.blast.map     { sra, srr, hits  -> tuple([sra,srr], hits) }
+  blast_by  = diamond.blast.map  { sra, srr, hits  -> tuple([sra,srr], hits) }
   bam_by    = bam_ch.map         { sra, srr, bam, bai -> tuple([sra,srr], [bam,bai]) }
 
   // Join (fasta * diamond) then * bam
@@ -666,10 +727,10 @@ workflow {
   blobtools = BLOBTOOLS(blobtools_in, taxdump_ch)
   // blobtools.blobtable.view { sra, srr, platform, model, strategy, assembler, assembly, tbl -> "BLOBTOOLS:\t${sra}\t${srr}\t${platform}\t${model}\t${strategy}\t${assembler}\t${assembly}\t${tbl}" }
 
-  // Step 7: extract taxa
+  // Step 8: extract taxa
   taxa_extraction = EXTRACT_TAXA(blobtools.blobtable, validated_taxa, taxdump_ch)
 
-  // Step 8: append to global summary
+  // Step 9: append to global summary
   skipped_srr = sra_metadata.skipped_sra
     .map { sra, csvfile -> file(csvfile) }
     .splitCsv(header: true, strip: true)
@@ -687,6 +748,7 @@ workflow {
 
   // Collect all errors
   errors = channel.empty()
+                  .mix(sandpiper.note)
                   .mix(download_srr.note)
                   .mix(singlem.note)
                   .mix(spades_asm.note)
