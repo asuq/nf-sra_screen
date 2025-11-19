@@ -105,12 +105,6 @@ process SANDPIPER {
         exit 1
       fi
       echo "\$msg" > FAIL.note
-      echo "NEGATIVE" > sandpiper_decision.txt
-      exit 0
-    }
-
-    function soft_fallback() {
-      # Sandpiper can’t decide; we’ll let SingleM handle it
       echo "RUN_SINGLEM" > sandpiper_decision.txt
       exit 0
     }
@@ -128,11 +122,11 @@ process SANDPIPER {
         for (v in seen) print v
       }
       ' "${valid_taxa}" > phyla_to_check.txt \\
-    || soft_fallback
+    || hard_fail "Sandpiper: failed to parse validated_taxa"
 
     # Lookup SRR in Sandpiper DB
     sandpiper_lookup.sh "${srr}" "${sandpiper_db_ch}" > sandpiper_report.txt \\
-      || soft_fallback
+      || hard_fail "Sandpiper lookup failed"
 
     # Check if sandpiper result has taxa interested
     if check_singlem_phyla.py -i sandpiper_report.txt -p phyla_to_check.txt -o sandpiper_output.tsv; then
@@ -143,9 +137,11 @@ process SANDPIPER {
       rc=\$?
       case "\$rc" in
         2)  # no target phyla
-            hard_fail "No target phyla detected by Sandpiper";;
+            echo "NEGATIVE" > sandpiper_decision.txt
+            echo "No target phyla detected by Sandpiper" > FAIL.note
+            exit 0;;
         1|*) # internal error – don’t kill the sample, just fallback
-            soft_fallback;;
+            hard_fail "Sandpiper phylum check error";;
       esac
     fi
     """
