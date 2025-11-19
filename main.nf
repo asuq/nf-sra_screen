@@ -296,7 +296,7 @@ process METASPADES {
     """
     R1=\$(ls *_1.fastq.gz *_R1*.fastq.gz 2>/dev/null | head -n1 || true)
     R2=\$(ls *_2.fastq.gz *_R2*.fastq.gz 2>/dev/null | head -n1 || true)
-    if [[ -n "\$R1" && -n "\$R2" ]]; then
+    if [[ -z "\$R1" || -z "\$R2" ]]; then
       if [[ ${task.attempt} -lt ${params.max_retries} ]]; then exit 1; fi
       echo "Assembly failed: paired-end reads not found" > FAIL.note; exit 0
     fi
