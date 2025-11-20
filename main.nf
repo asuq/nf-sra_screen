@@ -611,6 +611,7 @@ workflow {
 
   // Collect all errors
   errors = channel.empty()
+                  .mix(sra_metadata.note)
                   .mix(sandpiper.note)
                   .mix(download_srr.note)
                   .mix(singlem.note)
