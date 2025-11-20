@@ -390,23 +390,25 @@ process EXTRACT_TAXA {
 
     input:
     tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path(assembly_fasta), path(blobtable)
-    path(taxa)
-    path(taxdump)
+    path valid_taxa
+    path taxdump
 
     output:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("summary.csv"), optional:true, emit: summary
-    tuple val(sra), val(srr), path("*.ids.csv"),                                                             optional:true, emit: extracted_ids
-    tuple val(sra), val(srr), path("*.fasta"),                                                               optional:true, emit: extracted_fasta
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("FAIL.note"),   optional:true, emit: note
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("summary.csv"), optional: true, emit: summary
+    tuple val(sra), val(srr), path("*.ids.csv"),                                                             optional: true, emit: extracted_ids
+    tuple val(sra), val(srr), path("*.fasta"),                                                               optional: true, emit: extracted_fasta
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("FAIL.note"),   optional: true, emit: note
 
 
     script:
     """
-    if ! extract_records.py --blobtable "${blobtable}" \\
-      --fasta "${assembly_fasta}" --taxa "${taxa}" --taxdump "${taxdump}"; then
-      if [[ ${task.attempt} -lt ${params.max_retries} ]]; then exit 1; fi
-      echo "Extraction failed" > FAIL.note; exit 0
-    fi
+    run_extract_taxa.sh \\
+      --blobtable "${blobtable}" \\
+      --fasta "${assembly_fasta}" \\
+      --taxa "${valid_taxa}" \\
+      --taxdump "${taxdump}" \\
+      --attempt ${task.attempt} \\
+      --max-retries ${params.max_retries}
     """
 }
 
