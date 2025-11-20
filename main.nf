@@ -365,33 +365,21 @@ process BLOBTOOLS {
     path taxdump
 
     output:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path(assembly_fasta), path("blobtools.csv"), optional:true, emit: blobtable
-    tuple val(sra), val(srr), path("blobtools*.svg"),                                                                                optional:true, emit: blobplots
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("FAIL.note"),                           optional:true, emit: note
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path(assembly_fasta), path("blobtools.csv"), optional: true, emit: blobtable
+    tuple val(sra), val(srr), path("blobtools*.svg"),                                                                                optional: true, emit: blobplots
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("FAIL.note"),                           optional: true, emit: note
 
     script:
     """
-    if ! blobtools create --fasta "${assembly_fasta}" --cov "${assembly_bam}" \\
-      --hits "${blast}" --taxdump "${taxdump}" --threads  ${task.cpus} 'blobtools'; then
-      if [[ ${task.attempt} -lt ${params.max_retries} ]]; then exit 1; fi
-      echo "Blobtools failed at create" > FAIL.note; exit 0
-    fi
-
-    if ! blobtools filter --table 'blobtools.tsv' \\
-      --table-fields gc,length,ncount,assembly_cov,bestsumorder_superkingdom,bestsumorder_kingdom,bestsumorder_phylum,bestsumorder_class,bestsumorder_order,bestsumorder_family,bestsumorder_genus,bestsumorder_species 'blobtools'; then
-      if [[ ${task.attempt} -lt ${params.max_retries} ]]; then exit 1; fi
-      echo "Blobtools failed at filter" > FAIL.note; exit 0
-    fi
-
-    blobtools view --format svg --plot 'blobtools' || {
-      echo "blobtools view failed; leaving note and continuing." >&2
-      echo "blobtools view failed" > blobtools/_view_failed.txt
-    }
-
-    # Convert tsv file to csv file
-    header=\$(head -n 1 'blobtools.tsv' | cut -f2- | sed 's/bestsumorder_//g' | sed "s/assembly_cov/coverage/" | tr '\t' ',')
-    data=\$(tail -n +2 'blobtools.tsv' | cut -f2- | tr '\t' ',')
-    { echo "\${header}"; echo "\${data}"; } > 'blobtools.csv'
+    run_blobtools.sh \\
+      --assembly "${assembly_fasta}" \\
+      --bam "${assembly_bam}" \\
+      --csi "${assembly_csi}" \\
+      --blast "${blast}" \\
+      --taxdump "${taxdump}" \\
+      --cpus ${task.cpus} \\
+      --attempt ${task.attempt} \\
+      --max-retries ${params.max_retries}
     """
 }
 
