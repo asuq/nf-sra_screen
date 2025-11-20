@@ -17,7 +17,7 @@ def helpMessage() {
 
   Required parameters:
     --sra           Path to sra.csv (header: sra)
-    --taxa          Taxa for extraction (e.g., phylum, genus)
+    --taxa          Path to taxa.csv for extraction (header: rank, taxa)
     --taxdump       Path to taxdump database folder
     --gtdb_ncbi_map Path to folder with GTDB-NCBI mapping Excel files
     --sandpiper_db  Path to Sandpiper database folder
@@ -65,7 +65,7 @@ process DOWNLOAD_SRA_METADATA {
         mode: 'copy',
         overwrite: true,
         saveAs: { filename ->
-            if (filename == 'FAIL.note') {
+            if (filename == "FAIL.note") {
                 return "${sra}.FAIL.note"
             }
             return filename
@@ -152,9 +152,9 @@ process SINGLEM {
       mode: 'copy',
       overwrite: true,
       saveAs: { filename ->
-        if( filename == 'singlem_output.tsv' ) return filename
-        if( filename.startsWith('singlem_taxonomic_profile') ) return filename
-        if( filename == 'FAIL.note' ) return filename
+        if (filename == "singlem_output.tsv") return filename
+        if (filename.startsWith("singlem_taxonomic_profile")) return filename
+        if (filename == "FAIL.note") return filename
         return null
       }
 
@@ -256,7 +256,7 @@ process METAFLYE_NANO {
       --cpus ${task.cpus} \\
       --attempt ${task.attempt} \\
       --max-retries ${params.max_retries} \\
-      --reads "${reads}"
+      --reads ${reads}
     """
 }
 
@@ -292,7 +292,7 @@ process METAFLYE_PACBIO {
       --cpus ${task.cpus} \\
       --attempt ${task.attempt} \\
       --max-retries ${params.max_retries} \\
-      --reads "${reads}"
+      --reads ${reads}
     """
 }
 
@@ -303,11 +303,11 @@ process MYLOASM {
       mode: 'copy',
       overwrite: true,
       saveAs: { filename ->
-        if( filename == 'assembly.fasta' ) return filename
-        if( filename == 'assembly.gfa' ) return filename
-        if( filename == 'assembly.bam.csi' ) return filename
-        if( filename.startsWith('myloasm_') && filename.endsWith('.log') ) return filename
-        if( filename == 'FAIL.note' ) return filename
+        if (filename == "assembly.fasta") return filename
+        if (filename == "assembly.gfa") return filename
+        if (filename == "assembly.bam.csi") return filename
+        if (filename.startsWith("myloasm_") && filename.endsWith(".log")) return filename
+        if (filename == "FAIL.note") return filename
         return null
       }
 
@@ -327,7 +327,7 @@ process MYLOASM {
       --cpus ${task.cpus} \\
       --attempt ${task.attempt} \\
       --max-retries ${params.max_retries} \\
-      --reads "${reads}"
+      --reads ${reads}
     """
 }
 
@@ -399,7 +399,6 @@ process EXTRACT_TAXA {
     tuple val(sra), val(srr), path("*.fasta"),                                                               optional: true, emit: extracted_fasta
     tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("FAIL.note"),   optional: true, emit: note
 
-
     script:
     """
     run_extract_taxa.sh \\
@@ -466,7 +465,6 @@ workflow {
       || !params.taxdump || !params.gtdb_ncbi_map \
       || !params.sandpiper_db || !params.singlem_db) {
     missingParametersError()
-    exit 1
   }
 
   // Channel setup
@@ -476,20 +474,19 @@ workflow {
                   .map { row -> row.sra.trim() }
                   .filter { it }
                   .distinct()
-  taxa_ch         = channel.value( file(params.taxa) )
-  taxdump_ch      = channel.value( file(params.taxdump) )
-  gtdb_ncbi_map   = channel.value( file(params.gtdb_ncbi_map) )
-  singlem_db_ch   = channel.value( file(params.singlem_db) )
-  sandpiper_db_ch = channel.value( file(params.sandpiper_db) )
-  uniprot_db_ch   = channel.value( file(params.uniprot_db) )
+  taxa_ch           = channel.value( file(params.taxa) )
+  taxdump_ch        = channel.value( file(params.taxdump) )
+  gtdb_ncbi_map_ch  = channel.value( file(params.gtdb_ncbi_map) )
+  singlem_db_ch     = channel.value( file(params.singlem_db) )
+  sandpiper_db_ch   = channel.value( file(params.sandpiper_db) )
+  uniprot_db_ch     = channel.value( file(params.uniprot_db) )
 
   // Validate taxa
-  validated_taxa = VALIDATE_TAXA(taxa_ch, taxdump_ch, gtdb_ncbi_map).valid_taxa
+  validated_taxa = VALIDATE_TAXA(taxa_ch, taxdump_ch, gtdb_ncbi_map_ch).valid_taxa
 
   // Step 1: extract metadata & filter SRR
   sra_metadata = DOWNLOAD_SRA_METADATA(sra_ch, validated_taxa)
   filtered_srr = sra_metadata.filtered_sra
-  // skipped_srr.view { sra, csvfile -> "SKIPPED SRA: ${sra} (see ${csvfile})" }
 
   // Build nested channels per CSV, then flatten
   srr_ch = filtered_srr.map { sra, csvfile -> file(csvfile)}
@@ -505,10 +502,6 @@ workflow {
             }
             .filter { it[1] }  // Ensure run_accession (SRR) is not empty
             .distinct()
-
-  // srr_ch.view { acc, srr, platform, model, strategy, asm ->
-  //       "DEBUG: ${acc}\t${srr}\t${platform}\t${model}\t${strategy}\t${asm}"
-  // }
 
   // Step 2: check if srr has sandpiper results
   sandpiper = SANDPIPER(srr_ch, validated_taxa, sandpiper_db_ch)
@@ -529,10 +522,6 @@ workflow {
     def fixedAsm = file(asm_txt)?.text?.trim() ?: asm
     tuple(sra, srr, platform, model, strategy, fixedAsm, sandpiper_dec, reads)
   }
-
-  // srr_reads.view { acc, srr, platform, model, strategy, asm, reads ->
-  //   "${acc}\t${srr}\t${platform}\t${model}\t${strategy}\t${asm}\t${reads}"
-  // }
 
   // Step 4: run SingleM to screen reads
   singlem = SINGLEM(srr_reads, validated_taxa, singlem_db_ch)
@@ -558,9 +547,6 @@ workflow {
 
 
   diamond = DIAMOND(asm_fasta_ch, uniprot_db_ch)
-  // diamond.blast.view { sra, srr, blast ->
-  //   "DIAMOND: ${sra}\t${srr}\t${blast}"
-  // }
 
   // Step 7. run BlobTools
   // Merge all BAM+Bai streams
@@ -572,7 +558,7 @@ workflow {
 
   // Key every stream by (sra,srr,assembler)
   fasta_by  = asm_fasta_ch.map   { sra, srr, platform, model, strategy, assembler, fasta -> tuple([sra,srr], [platform,model,strategy,assembler,fasta]) }
-  blast_by  = diamond.blast.map  { sra, srr, hits  -> tuple([sra,srr], hits) }
+  blast_by  = diamond.blast.map  { sra, srr, blast  -> tuple([sra,srr], blast) }
   bam_by    = bam_ch.map         { sra, srr, bam, csi -> tuple([sra,srr], [bam,csi]) }
 
   // Join (fasta * diamond) then * bam
@@ -580,15 +566,14 @@ workflow {
   fasta_blast_bam = fasta_blast.join(bam_by)
 
   // Unkey + call BlobTools
-  blobtools_in = fasta_blast_bam.map { key, fasta, hits, pair ->
+  blobtools_in = fasta_blast_bam.map { key, fasta, blast, pair ->
     def (sra, srr) = key
     def (platform, model, strategy, assembler, assembly) = fasta
     def (bam, csi) = pair
-    tuple(sra, srr, platform, model, strategy, assembler, assembly, hits, bam, csi)
+    tuple(sra, srr, platform, model, strategy, assembler, assembly, blast, bam, csi)
   }
 
   blobtools = BLOBTOOLS(blobtools_in, taxdump_ch)
-  // blobtools.blobtable.view { sra, srr, platform, model, strategy, assembler, assembly, tbl -> "BLOBTOOLS:\t${sra}\t${srr}\t${platform}\t${model}\t${strategy}\t${assembler}\t${assembly}\t${tbl}" }
 
   // Step 8: extract taxa
   taxa_extraction = EXTRACT_TAXA(blobtools.blobtable, validated_taxa, taxdump_ch)
@@ -598,14 +583,14 @@ workflow {
     .map { sra, csvfile -> file(csvfile) }
     .splitCsv(header: true, strip: true)
     .map { row ->
-      def sra   = (row.accession ?: '').trim()
-      def srr   = (row.run_accession ?: '').trim()
-      def plat  = (row.instrument_platform ?: '').trim()
-      def model = (row.instrument_model ?: '').trim()
-      def strat = (row.library_strategy ?: '').trim()
-      def note  = "did not match the criteria: ${(row.skip_reason ?: '').trim()}"
+      def sra       = (row.accession ?: '').trim()
+      def srr       = (row.run_accession ?: '').trim()
+      def platform  = (row.instrument_platform ?: '').trim()
+      def model     = (row.instrument_model ?: '').trim()
+      def strategy  = (row.library_strategy ?: '').trim()
+      def note      = "did not match the criteria: ${(row.skip_reason ?: '').trim()}"
       // assembler is empty for skipped rows
-      tuple(sra, srr, plat, model, strat, '', note)
+      tuple(sra, srr, platform, model, strategy, '', note)
     }
     .filter { it[1] } // keep only rows with srr
 
@@ -639,5 +624,6 @@ workflow {
                    .mix(succeeded_sra)
                    .mix(failed_sra)
 
+  // Write summary.tsv into output dir (not work dir)
   APPEND_SUMMARY(summary, outdir)
 }

@@ -28,13 +28,21 @@ read_files=()
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-		--reads)
-			shift
-			while [[ $# -gt 0 ]]; do
-				read_files+=("$1")
-				shift
-			done
-			;;
+    --reads)
+      shift
+      while [[ $# -gt 0 ]]; do
+        # Stop when we hit the next flag
+        case "$1" in
+          --sandpiper-decision|--valid-taxa|--singlem-db|--cpus|--attempt|--max-retries)
+            break
+            ;;
+          *)
+            read_files+=("$1")
+            shift
+            ;;
+        esac
+      done
+      ;;
     --srr)         srr="$2"; shift 2 ;;
     --cpus)        threads="$2"; shift 2 ;;
     --memory-gb)   mem_gb="$2"; shift 2 ;;

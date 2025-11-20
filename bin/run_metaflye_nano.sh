@@ -16,18 +16,26 @@
 
 set -euo pipefail
 
-read_files=()
 cpus=1
 attempt=0
 max_retries=1
+read_files=()
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --reads)
       shift
       while [[ $# -gt 0 ]]; do
-        read_files+=( "$1" )
-        shift
+        # Stop when we hit the next flag
+        case "$1" in
+          --sandpiper-decision|--valid-taxa|--singlem-db|--cpus|--attempt|--max-retries)
+            break
+            ;;
+          *)
+            read_files+=("$1")
+            shift
+            ;;
+        esac
       done
       ;;
     --cpus) cpus="$2"; shift 2 ;;

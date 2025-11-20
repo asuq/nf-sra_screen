@@ -136,21 +136,21 @@ fi
 
 case "$rc" in
   0)
-		shopt -s nullglob
-		mkdir -p reads_ok
-		for f in *.f*q*; do
-			ln -sf "../$f" "reads_ok/$(basename "$f")"
-		done
-		shopt -u nullglob
+    shopt -s nullglob
+    mkdir -p reads_ok
+    for f in *.f*q*; do
+    ln -sf "../$f" "reads_ok/$(basename "$f")"
+    done
+    shopt -u nullglob
     ;;
   1)
     fail "SingleM: phylum check internal error"
     ;;
   2)
     echo "SingleM: No target phyla detected" > FAIL.note
-		exit 0
+    exit 0
     ;;
-	*)
+  *)
     fail "SingleM: phylum check unexpected exit code ${rc}"
     ;;
 esac
