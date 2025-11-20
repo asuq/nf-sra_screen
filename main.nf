@@ -441,23 +441,16 @@ process APPEND_SUMMARY {
 
     script:
     """
-    OUT_TSV="${outdir}/summary.tsv"
-    mkdir -p "${outdir}"
-
-    # counts = comma-joined n_identifiers in the order of rows in summary.csv
-    COUNTS=\$(awk -F, 'NR>1{print \$3}' "${summary_csv}" | paste -sd, -)
-
-    # note left blank for successful path
-    LINE="${sra}\t${srr}\t${platform}\t${model}\t${strategy}\t${assembler}\t\${COUNTS}\t${note}"
-    {
-      flock 200
-      if [[ ! -s "\$OUT_TSV" ]]; then
-        echo -e "sra\tsrr\tplatform\tmodel\tstrategy\tassembler\tcounts\tnote" > "\$OUT_TSV"
-      fi
-      echo -e "\$LINE" >> "\$OUT_TSV"
-    } 200> "\$OUT_TSV.lock"
-
-    ln -sf "\$OUT_TSV" .
+    run_append_summary.sh \\
+      --outdir "${outdir}" \\
+      --sra "${sra}" \\
+      --srr "${srr}" \\
+      --platform "${platform}" \\
+      --model "${model}" \\
+      --strategy "${strategy}" \\
+      --assembler "${assembler}" \\
+      --summary-csv "${summary_csv}" \\
+      --note "${note}"
     """
 }
 
