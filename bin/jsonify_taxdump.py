@@ -7,7 +7,7 @@ Purpose:
   1) make-taxidlineage: Create new_taxdump-style taxidlineage.dmp from an old-format taxdump.
   2) jsonify-taxdump (default action): Build taxdump.json using nodes/names/taxidlineage.
 
-Behavior:
+Behaviour:
   - Default CLI (positional TAXDUMP dir): If taxidlineage.dmp(.gz) is absent,
     first generate it from nodes.dmp(.gz) with exclude-self & skip-deleted,
     then write taxdump.json (or taxdump.json.gz if lineage is gz).
@@ -38,6 +38,12 @@ import ujson
 
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
+
+if sys.version_info < (3, 12):
+    logging.fatal(
+        f"Python 3.12 or newer is required. Current version: {sys.version.split()[0]}"
+    )
+    sys.exit(1)
 
 # =============================================================================
 #  PART 1: make_taxidlineage
@@ -79,9 +85,7 @@ def parse_dmp_line(line: str) -> list[str]:
     return parts
 
 
-def write_ncbi_dmp_line(
-    outfh: TextIO, taxid: TaxID, lineage_tokens: Iterable[TaxID]
-) -> None:
+def write_ncbi_dmp_line(outfh: TextIO, taxid: TaxID, lineage_tokens: Iterable[TaxID]) -> None:
     """
     Write: tax_id <TAB>|<TAB> <space-separated lineage> <space if non-empty> <TAB>|
 
@@ -132,9 +136,7 @@ def read_nodes(nodes_path: Path) -> tuple[ParentMap, ChildrenMap]:
                 tax_id: TaxID = int(cols[0])
                 parent_id: TaxID = int(cols[1])
             except ValueError as e:
-                raise ValueError(
-                    f"Non-integer at nodes.dmp line {i}: {cols[:2]}"
-                ) from e
+                raise ValueError(f"Non-integer at nodes.dmp line {i}: {cols[:2]}") from e
 
             parent_of[tax_id] = parent_id
 
@@ -169,9 +171,7 @@ def read_merged(merged_path: Path | None) -> dict[TaxID, TaxID]:
                 old_id: TaxID = int(cols[0])
                 new_id: TaxID = int(cols[1])
             except ValueError as e:
-                raise ValueError(
-                    f"Non-integer at merged.dmp line {i}: {cols[:2]}"
-                ) from e
+                raise ValueError(f"Non-integer at merged.dmp line {i}: {cols[:2]}") from e
             merged[old_id] = new_id
     return merged
 
@@ -195,9 +195,7 @@ def read_delnodes(delnodes_path: Path | None) -> set[TaxID]:
             try:
                 deleted.add(int(cols[0]))
             except ValueError as e:
-                raise ValueError(
-                    f"Non-integer at delnodes.dmp line {i}: {cols[:1]}"
-                ) from e
+                raise ValueError(f"Non-integer at delnodes.dmp line {i}: {cols[:1]}") from e
     return deleted
 
 
@@ -404,9 +402,7 @@ def main_taxidlineage(argv: list[str] | None = None) -> int:
         logging.error(f"nodes.dmp(.gz) not found in {taxdump_dir}")
         return 2
 
-    merged_path: Path | None = (
-        find_file(taxdump_dir, "merged.dmp") if args.add_merged else None
-    )
+    merged_path: Path | None = find_file(taxdump_dir, "merged.dmp") if args.add_merged else None
     delnodes_path: Path | None = (
         find_file(taxdump_dir, "delnodes.dmp") if args.skip_deleted else None
     )
@@ -471,14 +467,10 @@ def write_file(filename, data, plain=False):
     if ".json" in fname:
         content = ujson.dumps(data, indent=1, escape_forward_slashes=False)
     elif filename == "STDOUT":
-        sys.stdout.write(
-            ujson.dumps(data, indent=1, escape_forward_slashes=False) + "\n"
-        )
+        sys.stdout.write(ujson.dumps(data, indent=1, escape_forward_slashes=False) + "\n")
         return True
     elif filename == "STDERR":
-        sys.stderr.write(
-            ujson.dumps(data, indent=1, escape_forward_slashes=False) + "\n"
-        )
+        sys.stderr.write(ujson.dumps(data, indent=1, escape_forward_slashes=False) + "\n")
         return True
     elif plain:
         content = "\n".join(data)
@@ -540,9 +532,7 @@ class Taxdump:
         gz = self.directory / f"{base}.gz"
         if gz.exists():
             return gz
-        raise FileNotFoundError(
-            f"Required file not found: {base}(.gz) in {self.directory}"
-        )
+        raise FileNotFoundError(f"Required file not found: {base}(.gz) in {self.directory}")
 
     def load_ranks(self):
         """Load ranks from file."""

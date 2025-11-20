@@ -52,9 +52,9 @@ process VALIDATE_TAXA {
 
     script:
     """
-    jsonify_taxdump.py ${taxdump} \\
-      && validate_taxa.py --taxa ${taxa_file} --taxdump ${taxdump} \\
-        --gtdb-map --ncbi_to_gtdb ${gtdb_ncbi_map} --out validated_taxa.csv
+    jsonify_taxdump.py "${taxdump}" \\
+    && validate_taxa.py --taxa "${taxa_file}" --taxdump "${taxdump}" \\
+      --gtdb-map --ncbi_to_gtdb "${gtdb_ncbi_map}" --out validated_taxa.csv
     """
 }
 
