@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Usage: ./filter_sra.sh ACCESSION
 # Looks for: ACCESSION.metadata.tsv or ACCESSION.metadata.csv
 #
@@ -45,7 +45,7 @@ printf "accession,run_accession,instrument_platform,instrument_model,library_sou
 header="$(head -n1 "$in")"
 
 # ------------------------------ GSA CSV branch -------------------------------
-if [[ "$header" == Run,Center,ReleaseDate,FileType,FileName,FileSize,Download_path,* ]]; then
+if [[ $header == Run,Center,ReleaseDate,FileType,FileName,FileSize,Download_path,* ]]; then
   awk -F',' -v OFS=',' \
       -v P="$PLATFORMS" -v S="$SOURCES" -v T="$STRATEGIES" \
       -v A="$ACCESSION" -v OUT_KEEP="$out_kept" -v OUT_SKIP="$out_skip" '
@@ -113,7 +113,7 @@ if [[ "$header" == Run,Center,ReleaseDate,FileType,FileName,FileSize,Download_pa
 
       print A, run, plat, model, src, strat, asm >> OUT_KEEP
     } else {
-      reason = (src !~ S ? "source" : (strat !~ T ? "strategy" : (plat !~ P ? "platform" : "other")))
+      reason = (toupper(src) !~ S ? "source" : (toupper(strat) !~ T ? "strategy" : (toupper(plat) !~ P ? "platform" : "other")))
       print A, run, plat, model, src, strat, reason >> OUT_SKIP
     }
   }' "$in"
@@ -196,7 +196,7 @@ NR==1{
     print A, run, plat, model, src, strat, asm >> OUT_KEEP
 
   } else {
-    reason = (src !~ S ? "source" : (strat !~ T ? "strategy" : (plat !~ P ? "platform" : "other")))
+    reason = (toupper(src) !~ S ? "source" : (toupper(strat) !~ T ? "strategy" : (toupper(plat) !~ P ? "platform" : "other")))
     print A, run, plat, model, src, strat, reason >> OUT_SKIP
   }
 }
