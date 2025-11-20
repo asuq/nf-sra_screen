@@ -28,8 +28,7 @@ Inputs:
 Notes:
     - (rank,taxa) pairs are deduplicated
     - Rank normalization: 'realm' and 'domain' are treated as 'superkingdom'
-    - Skip Eukaryotes and Viruses for GTDB mapping but still emit a row
-      with empty gtdb_phylum.
+    - GTDB mapping is only for Bacteria/Archaea; others get blank gtdb_phylum
 
 Author: Akito Shima (asuq)
 Email: asuq.4096@gmail.com
@@ -51,9 +50,9 @@ import pandas as pd
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 
-if sys.version_info < (3, 10):
+if sys.version_info < (3, 12):
     logging.fatal(
-        f"Python 3.10 or newer is required. Current version: {sys.version.split()[0]}"
+        f"Python 3.12 or newer is required. Current version: {sys.version.split()[0]}"
     )
     sys.exit(1)
 
@@ -89,9 +88,7 @@ def _fmt_not_found(taxa: str, rank: str) -> str:
     return f"Taxon '{taxa}' not found in the NCBI Taxonomy ({TAXDUMP_TIMESTAMP}) (requested rank={rank})."
 
 
-def _fmt_rank_mismatch(
-    taxa: str, requested_norm_rank: str, found_ranks: list[str]
-) -> str:
+def _fmt_rank_mismatch(taxa: str, requested_norm_rank: str, found_ranks: list[str]) -> str:
     found = ", ".join(found_ranks) if found_ranks else "unknown"
     return (
         f"Taxon '{taxa}' found but rank mismatch: taxdump has {found}; "
@@ -204,9 +201,7 @@ class TaxdumpIndex(object):
             data: Any = json.load(fh)
 
         if not isinstance(data, dict) or "names" not in data or "ranks" not in data:
-            raise ValueError(
-                "taxdump.json must be a dict with keys 'names' and 'ranks'"
-            )
+            raise ValueError("taxdump.json must be a dict with keys 'names' and 'ranks'")
 
         names: dict[str, str] = data["names"]  # {taxid: name}
         ranks: dict[str, str] = data["ranks"]  # {taxid: rank}
@@ -315,9 +310,7 @@ def load_taxa_file(taxa_csv: Path) -> list[tuple[str, str]]:
             if not rank or not taxa:
                 continue
             if rank not in ALLOWED_RANKS:
-                raise ValueError(
-                    f"Invalid rank '{rank}'. Allowed: {', '.join(ALLOWED_RANKS)}"
-                )
+                raise ValueError(f"Invalid rank '{rank}'. Allowed: {', '.join(ALLOWED_RANKS)}")
             pairs.append((rank, taxa))
 
     seen, dedup = set(), []
