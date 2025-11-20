@@ -573,7 +573,7 @@ workflow {
   // Key every stream by (sra,srr,assembler)
   fasta_by  = asm_fasta_ch.map   { sra, srr, platform, model, strategy, assembler, fasta -> tuple([sra,srr], [platform,model,strategy,assembler,fasta]) }
   blast_by  = diamond.blast.map  { sra, srr, hits  -> tuple([sra,srr], hits) }
-  bam_by    = bam_ch.map         { sra, srr, bam, bai -> tuple([sra,srr], [bam,bai]) }
+  bam_by    = bam_ch.map         { sra, srr, bam, csi -> tuple([sra,srr], [bam,csi]) }
 
   // Join (fasta * diamond) then * bam
   fasta_blast = fasta_by.join(blast_by)
@@ -583,8 +583,8 @@ workflow {
   blobtools_in = fasta_blast_bam.map { key, fasta, hits, pair ->
     def (sra, srr) = key
     def (platform, model, strategy, assembler, assembly) = fasta
-    def (bam, bai) = pair
-    tuple(sra, srr, platform, model, strategy, assembler, assembly, hits, bam, bai)
+    def (bam, csi) = pair
+    tuple(sra, srr, platform, model, strategy, assembler, assembly, hits, bam, csi)
   }
 
   blobtools = BLOBTOOLS(blobtools_in, taxdump_ch)
