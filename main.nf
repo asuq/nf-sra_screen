@@ -150,13 +150,19 @@ process SANDPIPER {
 
 process DOWNLOAD_SRR {
     tag "${sra}:${srr}"
+    publishDir "${params.outdir}/${sra}/${srr}/",
+      mode: 'copy',
+      overwrite: true,
+      saveAs: { filename ->
+        filename in ["FAIL.note"] ? filename : null
+      }
 
     input:
     tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), val(sandpiper)
 
     output:
     tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), val(sandpiper), path("*.f*q*"), path("assembler.txt"), optional:true, emit: reads
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), val(sandpiper), path("FAIL.note"),                     optional:true, emit: note
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("FAIL.note"),                                     optional:true, emit: note
 
     script:
     """
@@ -191,7 +197,15 @@ process DOWNLOAD_SRR {
 
 process SINGLEM {
     tag "${sra}:${srr}"
-    publishDir "${params.outdir}/${sra}/${srr}/", mode: 'copy', overwrite: true
+    publishDir "${params.outdir}/${sra}/${srr}/",
+      mode: 'copy',
+      overwrite: true,
+      saveAs: { filename ->
+        if( filename == 'singlem_output.tsv' ) return filename
+        if( filename.startsWith('singlem_taxonomic_profile') ) return filename
+        if( filename == 'FAIL.note' ) return filename
+        return null
+      }
 
     input:
     tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), val(sandpiper), path(reads)
@@ -275,7 +289,19 @@ process SINGLEM {
 
 process METASPADES {
     tag "${sra}:${srr}"
-    publishDir "${params.outdir}/${sra}/${srr}/", mode: 'copy', overwrite: true
+    publishDir "${params.outdir}/${sra}/${srr}/",
+      mode: 'copy',
+      overwrite: true,
+      saveAs: { filename ->
+        filename in [
+          "assembly.fasta",
+          "assembly.gfa",
+          "spades.log",
+          "assembly.bam.csi",
+          "fastp.html",
+          "FAIL.note"
+        ] ? filename : null
+      }
 
     input:
     tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path(reads)
@@ -337,7 +363,18 @@ process METASPADES {
 
 process METAFLYE_NANO {
     tag "${sra}:${srr}"
-    publishDir "${params.outdir}/${sra}/${srr}/", mode: 'copy', overwrite: true
+    publishDir "${params.outdir}/${sra}/${srr}/",
+      mode: 'copy',
+      overwrite: true,
+      saveAs: { filename ->
+        filename in [
+          "assembly.fasta",
+          "assembly.gfa",
+          "flye.log",
+          "assembly.bam.csi",
+          "FAIL.note"
+        ] ? filename : null
+      }
 
     input:
     tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path(reads)
@@ -374,7 +411,18 @@ process METAFLYE_NANO {
 
 process METAFLYE_PACBIO {
     tag "${sra}:${srr}"
-    publishDir "${params.outdir}/${sra}/${srr}/", mode: 'copy', overwrite: true
+    publishDir "${params.outdir}/${sra}/${srr}/",
+      mode: 'copy',
+      overwrite: true,
+      saveAs: { filename ->
+        filename in [
+          "assembly.fasta",
+          "assembly.gfa",
+          "flye.log",
+          "assembly.bam.csi",
+          "FAIL.note"
+        ] ? filename : null
+      }
 
     input:
     tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path(reads)
@@ -411,7 +459,21 @@ process METAFLYE_PACBIO {
 
 process MYLOASM {
     tag "${sra}:${srr}"
-    publishDir "${params.outdir}/${sra}/${srr}/", mode: 'copy', overwrite: true
+    publishDir "${params.outdir}/${sra}/${srr}/", mode: 'copy', overwrite: true,
+      saveAs: { filename ->
+        filename in ["assembly.fasta", "assembly.gfa", "myloasm_*.log", "assembly.bam.csi", "FAIL.note"] ? filename : null
+      }
+    publishDir "${params.outdir}/${sra}/${srr}/",
+      mode: 'copy',
+      overwrite: true,
+      saveAs: { filename ->
+        if( filename == 'assembly.fasta' ) return filename
+        if( filename == 'assembly.gfa' ) return filename
+        if( filename == 'assembly.bam.csi' ) return filename
+        if( filename.startsWith('myloasm_') && filename.endsWith('.log') ) return filename
+        if( filename == 'FAIL.note' ) return filename
+        return null
+      }
 
     input:
     tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path(reads)
