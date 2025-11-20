@@ -299,10 +299,6 @@ process METAFLYE_PACBIO {
 
 process MYLOASM {
     tag "${sra}:${srr}"
-    publishDir "${params.outdir}/${sra}/${srr}/", mode: 'copy', overwrite: true,
-      saveAs: { filename ->
-        filename in ["assembly.fasta", "assembly.gfa", "myloasm_*.log", "assembly.bam.csi", "FAIL.note"] ? filename : null
-      }
     publishDir "${params.outdir}/${sra}/${srr}/",
       mode: 'copy',
       overwrite: true,
@@ -319,32 +315,19 @@ process MYLOASM {
     tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path(reads)
 
     output:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("assembly.fasta"), optional:true, emit: assembly_fasta
-    tuple val(sra), val(srr), path("assembly.gfa"),                                                             optional:true, emit: assembly_graph
-    tuple val(sra), val(srr), path("myloasm_*.log"),                                                            optional:true, emit: assembly_log
-    tuple val(sra), val(srr), path("assembly.bam"), path("assembly.bam.csi"),                                   optional:true, emit: assembly_bam
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("FAIL.note"),      optional:true, emit: note
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("assembly.fasta"), optional: true, emit: assembly_fasta
+    tuple val(sra), val(srr), path("assembly.gfa"),                                                             optional: true, emit: assembly_graph
+    tuple val(sra), val(srr), path("myloasm_*.log"),                                                            optional: true, emit: assembly_log
+    tuple val(sra), val(srr), path("assembly.bam"), path("assembly.bam.csi"),                                   optional: true, emit: assembly_bam
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("FAIL.note"),      optional: true, emit: note
 
     script:
     """
-    # Run myloasm
-    if ! myloasm ${reads} -o . -t ${task.cpus} --hifi; then
-      if [[ ${task.attempt} -lt ${params.max_retries} ]]; then exit 1; fi
-      echo "Assembly failed at myloasm" > FAIL.note; exit 0
-    fi
-
-    # Rename outputs
-    mv -v assembly_primary.fa assembly.fasta
-    mv -v final_contig_graph.gfa assembly.gfa
-
-    # Run minimap2
-    if ! ( minimap2 -ax map-hifi -t ${task.cpus} assembly.fasta ${reads} \\
-      | samtools sort --output-fmt BAM -@ ${task.cpus} -o assembly.bam \\
-      && samtools index -c -o assembly.bam.csi -@ ${task.cpus} assembly.bam ); then
-
-      if [[ ${task.attempt} -lt ${params.max_retries} ]]; then exit 1; fi
-      echo "Assembly failed at mapping/indexing (HiFi)" > FAIL.note; exit 0
-    fi
+    run_myloasm_hifi.sh \\
+      --cpus ${task.cpus} \\
+      --attempt ${task.attempt} \\
+      --max-retries ${params.max_retries} \\
+      --reads "${reads}"
     """
 }
 
