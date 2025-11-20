@@ -100,59 +100,19 @@ process SANDPIPER {
     path sandpiper_db_ch
 
     output:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("sandpiper_decision.txt"),   emit: decision
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("FAIL.note"), optional:true, emit: note
-    tuple val(sra), val(srr), path("sandpiper_report.txt"),                                                optional:true, emit: sandpiper_report
-    tuple val(sra), val(srr), path("sandpiper_output.tsv"),                                                optional:true, emit: sandpiper_summary
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("sandpiper_decision.txt"),    emit: decision
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("FAIL.note"), optional: true, emit: note
+    tuple val(sra), val(srr), path("sandpiper_report.txt"),                                                optional: true, emit: sandpiper_report
+    tuple val(sra), val(srr), path("sandpiper_output.tsv"),                                                optional: true, emit: sandpiper_summary
 
     script:
     """
-    function hard_fail() {
-      local msg="\$1"
-      echo "\$msg" >&2
-      if [[ ${task.attempt} -lt ${params.max_retries} ]]; then
-        exit 1
-      fi
-      echo "\$msg" > FAIL.note
-      echo "RUN_SINGLEM" > sandpiper_decision.txt
-      exit 0
-    }
-
-    # Extract validated phyla
-    awk -F',' '
-      NR==1 {
-        for (i = 1; i <= NF; i++) if (\$i == "gtdb_phylum") { c = i; break }
-        next
-      }
-      c && \$c != "" { seen[\$c] = 1 }
-
-      END {
-        print "phyla"
-        for (v in seen) print v
-      }
-      ' "${valid_taxa}" > phyla_to_check.txt \\
-    || hard_fail "Sandpiper: failed to parse validated_taxa"
-
-    # Lookup SRR in Sandpiper DB
-    sandpiper_lookup.sh "${srr}" "${sandpiper_db_ch}" > sandpiper_report.txt \\
-      || hard_fail "Sandpiper lookup failed"
-
-    # Check if sandpiper result has taxa interested
-    if check_singlem_phyla.py -i sandpiper_report.txt -p phyla_to_check.txt -o sandpiper_output.tsv; then
-      # at least one target phylum found
-      echo "PASS" > sandpiper_decision.txt
-      exit 0
-    else
-      rc=\$?
-      case "\$rc" in
-        2)  # no target phyla
-            echo "NEGATIVE" > sandpiper_decision.txt
-            echo "No target phyla detected by Sandpiper" > FAIL.note
-            exit 0;;
-        1|*) # internal error – don’t kill the sample, just fallback
-            hard_fail "Sandpiper phylum check error";;
-      esac
-    fi
+    run_sandpiper.sh \\
+      --srr "${srr}" \\
+      --valid-taxa "${valid_taxa}" \\
+      --db "${sandpiper_db_ch}" \\
+      --attempt ${task.attempt} \\
+      --max-retries ${params.max_retries}
     """
 }
 
