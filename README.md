@@ -30,9 +30,15 @@ Now, you can run the pipeline using:
 
 ```bash
 nextflow run asuq/nf-sra_screen \
-   -profile <docker/singularity/.../institute> \
-   --sample sample.csv \
-   --outdir <OUTDIR>
+  -profile <docker/singularity/.../institute> \
+  --sra sample.csv \
+  --taxa taxa.csv \
+  --taxdump <taxdump_dir> \
+  --gtdb_ncbi_map <ncbi_vs_gtdb_dir> \
+  --sandpiper_db <sandpiper_db_dir> \
+  --singlem_db <singlem_db> \
+  --uniprot_db <uniprot.dmnd> \
+  --outdir <OUTDIR>
 ```
 
 <!--　> [!WARNING]
