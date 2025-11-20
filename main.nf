@@ -204,56 +204,23 @@ process METASPADES {
     tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path(reads)
 
     output:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("assembly.fasta"), optional:true, emit: assembly_fasta
-    tuple val(sra), val(srr), path("assembly.gfa"),                                                             optional:true, emit: assembly_graph
-    tuple val(sra), val(srr), path("spades.log"),                                                               optional:true, emit: assembly_log
-    tuple val(sra), val(srr), path("assembly.bam"), path("assembly.bam.csi"),                                   optional:true, emit: assembly_bam
-    tuple val(sra), val(srr), path("fastp.html"),                                                               optional:true, emit: fastp_html
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("FAIL.note"),      optional:true, emit: note
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("assembly.fasta"), optional: true, emit: assembly_fasta
+    tuple val(sra), val(srr), path("assembly.gfa"),                                                             optional: true, emit: assembly_graph
+    tuple val(sra), val(srr), path("spades.log"),                                                               optional: true, emit: assembly_log
+    tuple val(sra), val(srr), path("assembly.bam"), path("assembly.bam.csi"),                                   optional: true, emit: assembly_bam
+    tuple val(sra), val(srr), path("fastp.html"),                                                               optional: true, emit: fastp_html
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("FAIL.note"),      optional: true, emit: note
 
     script:
     """
-    R1=\$(ls *_1.fastq.gz *_R1*.fastq.gz 2>/dev/null | head -n1 || true)
-    R2=\$(ls *_2.fastq.gz *_R2*.fastq.gz 2>/dev/null | head -n1 || true)
-    if [[ -z "\$R1" || -z "\$R2" ]]; then
-      if [[ ${task.attempt} -lt ${params.max_retries} ]]; then exit 1; fi
-      echo "Assembly failed: paired-end reads not found" > FAIL.note; exit 0
-    fi
-
-    # Run fastp
-    if ! fastp --in1 "\${R1}" --in2 "\${R2}" --out1 "${srr}_fastp_R1.fastq.gz" --out2 "${srr}_fastp_R2.fastq.gz" \\
-        --thread ${task.cpus} --length_required 50 --detect_adapter_for_pe --html fastp.html; then
-
-      if [[ ${task.attempt} -lt ${params.max_retries} ]]; then exit 1; fi
-      echo "Assembly failed at fastp" > FAIL.note; exit 0
-    fi
-
-    # Run SPAdes
-    if ! spades.py -1 "${srr}_fastp_R1.fastq.gz" -2 "${srr}_fastp_R2.fastq.gz" -o '.' \\
-      -k 21,33,55,77,99,119,127 --meta --threads ${task.cpus} --memory ${task.memory.toGiga()}; then
-
-      if [[ ${task.attempt} -lt ${params.max_retries} ]]; then exit 1; fi
-      echo "Assembly failed at SPAdes" > FAIL.note; exit 0
-    fi
-
-    # Rename outputs
-    if [ -f scaffolds.fasta ]; then
-      mv -v scaffolds.fasta assembly.fasta ;
-    else
-      mv -v contigs.fasta assembly.fasta ;
-    fi
-    mv -v assembly_graph_with_scaffolds.gfa assembly.gfa
-
-    # Run bowtie2
-    if ! ( bowtie2-build -f -q --threads ${task.cpus} assembly.fasta assembly_index \\
-          && bowtie2 -q --reorder --threads ${task.cpus} --time --met-stderr --met 10 \\
-            -x assembly_index -1 "${srr}_fastp_R1.fastq.gz" -2 "${srr}_fastp_R2.fastq.gz" \\
-            | samtools sort --output-fmt BAM -@ ${task.cpus} -o assembly.bam \\
-          && samtools index -c -o assembly.bam.csi -@ ${task.cpus} assembly.bam ); then
-
-      if [[ ${task.attempt} -lt ${params.max_retries} ]]; then exit 1; fi
-      echo "Assembly failed at bowtie2 mapping/indexing" > FAIL.note; exit 0
-    fi
+    # --reads should be the last argument and unquoted to capture all read files
+    run_metaspades.sh \\
+      --srr "${srr}" \\
+      --cpus ${task.cpus} \\
+      --memory-gb ${task.memory.toGiga()} \\
+      --attempt ${task.attempt} \\
+      --max-retries ${params.max_retries} \\
+      --reads ${reads}
     """
 }
 
