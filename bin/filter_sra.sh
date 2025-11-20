@@ -35,8 +35,8 @@ out_skip="${acc}.skipped.csv"
 # Whitelist filters
 ACCESSION="$acc"
 PLATFORMS='^(ILLUMINA|BGISEQ|DNBSEQ|PACBIO_SMRT|OXFORD_NANOPORE)$'
-SOURCES='^(GENOMIC|METAGENOMIC|OTHER)$'
-STRATEGIES='^(WGS|METAGENOMIC|GENOME|OTHER)$'
+SOURCES='^(GENOMIC|GENOMIC SINGLE CELL|METAGENOMIC|OTHER)$'
+STRATEGIES='^(WGS|WGA|WGX|WCS|POOLCLONE|CLONE|FINISHING|SYNTHETIC[_-]LONG[_-]READ|TARGETED[_-]CAPTURE|METAGENOMIC|GENOME|GENOMIC|GENOMIC SINGLE CELL|OTHER)$'
 
 # Always create headers
 printf "accession,run_accession,instrument_platform,instrument_model,library_source,library_strategy,assembler\n" > "$out_kept"
@@ -70,11 +70,11 @@ if [[ "$header" == Run,Center,ReleaseDate,FileType,FileName,FileSize,Download_pa
     # Derive instrument_platform from Platform text
     lm=tolower(platform_raw); gsub(/[[:space:]]+/, " ", lm); lm=trim(lm)
     plat=""
-    if     (lm ~ /illumina/)                                   plat="ILLUMINA"
-    else if(lm ~ /dnbseq/)                                     plat="DNBSEQ"
-    else if(lm ~ /mgiseq|bgiseq|(^|[^a-z])bgi($|[^a-z])|(^|[^a-z])mgi($|[^a-z])/) plat="BGISEQ"
-    else if(lm ~ /oxford|nanopore|minion|gridion|promethion|\bont\b/)             plat="OXFORD_NANOPORE"
-    else if(lm ~ /pacbio|sequel|revio|\brs\b/)                 plat="PACBIO_SMRT"
+    if     (lm ~ /illumina/)                                    plat="ILLUMINA"
+    else if(lm ~ /dnbseq/)                                      plat="DNBSEQ"
+    else if(lm ~ /mgiseq|bgiseq|(^|[^a-z])bgi($|[^a-z])|(^|[^a-z])mgi($|[^a-z])/)     plat="BGISEQ"
+    else if(lm ~ /oxford|nanopore|minion|gridion|promethion|(^|[^a-z])ont($|[^a-z])/) plat="OXFORD_NANOPORE"
+    else if(lm ~ /pacbio|sequel|revio|(^|[^a-z])rs($|[^a-z])/ ) plat="PACBIO_SMRT"
 
     # Extract instrument_model if possible; otherwise set to N/A
     model="N/A"

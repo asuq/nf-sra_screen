@@ -1,6 +1,6 @@
 FROM condaforge/mambaforge:24.9.2-0
 
-ARG CONDA_ENV_NAME='taxa'
+ARG CONDA_ENV_NAME='singlem'
 ENV CONDA_DIR=/opt/conda \
     MAMBA_NO_BANNER=1 \
     DEBIAN_FRONTEND=noninteractive \
@@ -10,13 +10,7 @@ WORKDIR /work
 
 RUN mamba create -y -n "${CONDA_ENV_NAME}" \
     -c bioconda -c conda-forge \
-    "python>=3.12" \
-    "biopython" \
-    "numpy" \
-    "openpyxl" \
-    "pandas" \
-    "pyyaml" \
-    "ujson" \
+    "singlem==0.20.3" \
     && mamba clean --all --yes
 
 CMD ["/bin/bash"]
