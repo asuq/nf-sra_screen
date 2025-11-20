@@ -9,7 +9,7 @@ def helpMessage() {
   ===============================
   nf-sra_screen
   Nextflow pipeline for screening SRA genomes
-  Version: 0.1.0
+  Version: 0.2.0
   Author : Akito Shima (ASUQ)
   Email: asuq.4096@gmail.com
   ===============================
