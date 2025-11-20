@@ -130,36 +130,18 @@ process DOWNLOAD_SRR {
     tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), val(sandpiper)
 
     output:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), val(sandpiper), path("*.f*q*"), path("assembler.txt"), optional:true, emit: reads
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("FAIL.note"),                                     optional:true, emit: note
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), val(sandpiper), path("*.f*q*"), path("assembler.txt"), optional: true, emit: reads
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("FAIL.note"),                                     optional: true, emit: note
 
     script:
     """
-    # Download sequence data
-    if ! iseq -Q -g -t ${task.cpus} -p 8 -i "${srr}"; then
-      if [[ ${task.attempt} -lt ${params.max_retries} ]]; then
-        exit 1
-      fi
-      echo "Download raw data failed" > FAIL.note
-      rm -f *.f*q* "${srr}"  # remove sra and fastq files that didn't download properly
-      exit 0
-    fi
-
-    # Pacbio assembler check
-    final_asm="${assembler}"
-    if [[ "${platform}" == "PACBIO_SMRT" && ( -z "${assembler}" || "${assembler}" == "unknown" ) ]]; then
-      echo "Checking PacBio reads to determine assembler"
-      if zcat -f *.f*q* 2>/dev/null \
-        | awk 'NR%4==1{ h=tolower(\$0); if (h ~ /\\/ccs(\s|\$)/) { found=1; exit } } END{ exit(!found) }'
-      then
-        final_asm="long_hifi"
-      else
-        final_asm="long_pacbio"
-      fi
-      echo "\${final_asm}" > assembler.txt
-    else
-      touch assembler.txt
-    fi
+    run_download_srr.sh \\
+      --srr "${srr}" \\
+      --platform "${platform}" \\
+      --assembler "${assembler}" \\
+      --cpus ${task.cpus} \\
+      --attempt ${task.attempt} \\
+      --max-retries ${params.max_retries}
     """
 }
 
