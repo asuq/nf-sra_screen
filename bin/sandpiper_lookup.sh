@@ -4,7 +4,7 @@
 #  - <sra_accession>: SRR/ERR/etc. accession ID
 #  - <sandpiper_db_ch>: directory containing sandpiper_sra.txt and sandpiper1.0.0.condensed.tsv
 
-set -eu  # -e: exit on error, -u: treat unset vars as errors
+set -euo pipefail
 
 if [ "$#" -ne 2 ]; then
     printf 'Usage: %s <sra_accession> <sandpiper_db_ch>\n' "$0" >&2
