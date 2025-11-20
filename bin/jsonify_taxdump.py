@@ -10,7 +10,7 @@ Purpose:
 Behaviour:
   - Default CLI (positional TAXDUMP dir): If taxidlineage.dmp(.gz) is absent,
     first generate it from nodes.dmp(.gz) with exclude-self & skip-deleted,
-    then write taxdump.json (or taxdump.json.gz if lineage is gz).
+    then write taxdump.json
     If lineage exists, directly write taxdump.json (compression matches lineage).
 
 Attribution:
@@ -677,7 +677,7 @@ class Taxdump:
 def build_lineage_and_json(taxdump_dir: Path) -> int:
     """
     If taxidlineage.dmp(.gz) is missing, generate it with exclude-self & skip-deleted
-    from nodes.dmp(.gz), then write taxdump.json (or taxdump.json.gz if lineage .gz).
+    from nodes.dmp(.gz), then write taxdump.json.
     If lineage exists, directly write JSON.
     """
     logging.info(f"Checking if taxidlineage.dmp exists")
@@ -714,9 +714,7 @@ def build_lineage_and_json(taxdump_dir: Path) -> int:
             logging.error(f"Failed to build lineage: {e}")
             return 2
 
-    json_out = taxdump_dir / (
-        "taxdump.json.gz" if ".gz" in lineage_path.suffixes else "taxdump.json"
-    )
+    json_out = taxdump_dir / "taxdump.json"
     if json_out.exists():
         logging.warning(f"{json_out} already exists; skipping")
         return 0
