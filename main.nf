@@ -341,18 +341,17 @@ process DIAMOND {
     path uniprot_db
 
     output:
-    tuple val(sra), val(srr), path("assembly_vs_uniprot.tsv"),                                             optional:true, emit: blast
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("FAIL.note"), optional:true, emit: note
+    tuple val(sra), val(srr), path("assembly_vs_uniprot.tsv"),                                             optional: true, emit: blast
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("FAIL.note"), optional: true, emit: note
 
     script:
     """
-    if ! diamond blastx --sensitive --query "${assembly_fasta}" \\
-        --out "assembly_vs_uniprot.tsv" --db "${uniprot_db}" \\
-        --outfmt 6 qseqid staxids bitscore qseqid sseqid pident length mismatch gapopen qstart qend sstart send evalue bitscore \\
-        --verbose --threads ${task.cpus} --evalue 1e-25 --max-target-seqs 5; then
-      if [[ ${task.attempt} -lt ${params.max_retries} ]]; then exit 1; fi
-      echo "Diamond failed" > FAIL.note; exit 0
-    fi
+    run_diamond.sh \\
+      --assembly "${assembly_fasta}" \\
+      --db "${uniprot_db}" \\
+      --cpus ${task.cpus} \\
+      --attempt ${task.attempt} \\
+      --max-retries ${params.max_retries}
     """
 }
 
