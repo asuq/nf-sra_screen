@@ -424,7 +424,7 @@ process LOG_FAILED_PROCESS {
 
   script:
   """
-  echo 'rank,taxa,n_identifiers,output_ids_csv,output_fasta' > empty_summary.csv
+  echo 'rank,ncbi_taxa,n_contigs,output_ids_csv,output_fasta' > empty_summary.csv
   """
 }
 
