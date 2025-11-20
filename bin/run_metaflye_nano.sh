@@ -54,11 +54,6 @@ fail() {
   exit 0
 }
 
-if [[ -z "${reads}" ]]; then
-  echo "run_metaflye_nano.sh: missing --reads" >&2
-  exit 1
-fi
-
 # Run metaFlye (ONT)
 if ! flye --nano-raw "${read_files[@]}" \
           --threads "${cpus}" --scaffold --out-dir '.' --meta; then
