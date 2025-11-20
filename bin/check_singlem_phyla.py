@@ -7,7 +7,7 @@ Exit status:
 1 : internal error (I/O problems, malformed input, unexpected exceptions)
 2 : no target phylum is present (i.e., all rows have present == 'no' or no rows)
 Usage:
-    python check_phyla.py \
+    python check_singlem_phyla.py \
         --input sample_taxonomy.tsv \
         --phyla-list phyla_to_check.txt \
         --output phyla_presence.tsv \
@@ -201,6 +201,12 @@ def main(argv: Sequence[str] | None = None) -> None:
         raise
 
     setup_logging(args.verbose)
+
+    if sys.version_info < (3, 12):
+        logging.fatal(
+            f"Python 3.12 or newer is required. Current version: {sys.version.split()[0]}"
+        )
+        sys.exit(1)
 
     try:
         if not args.input.exists():

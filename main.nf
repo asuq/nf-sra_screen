@@ -164,76 +164,22 @@ process SINGLEM {
     path singlem_db_ch
 
     output:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("reads_ok/*.f*q*"), optional:true, emit: reads
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("FAIL.note"),       optional:true, emit: note
-    tuple val(sra), val(srr), path("singlem_taxonomic_profile*"),                                                optional:true, emit: singlem_summary
-    tuple val(sra), val(srr), path("singlem_output.tsv"),                                                        optional:true, emit: singlem_phyla_check
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("reads_ok/*.f*q*"), optional: true, emit: reads
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("FAIL.note"),       optional: true, emit: note
+    tuple val(sra), val(srr), path("singlem_taxonomic_profile*"),                                                optional: true, emit: singlem_summary
+    tuple val(sra), val(srr), path("singlem_output.tsv"),                                                        optional: true, emit: singlem_phyla_check
 
     script:
     """
-    function fail() {
-      local msg="\$1"
-      echo "\$msg" >&2
-      if [[ ${task.attempt} -lt ${params.max_retries} ]]; then
-        exit 1
-      fi
-      echo "\$msg" > FAIL.note
-      exit 0
-    }
-
-    # Check if sandpiper already passed
-    if [[ "${sandpiper}" == "PASS" ]]; then
-      echo "Reads already passed Sandpiper check; skipping SingleM"
-      mkdir -p reads_ok
-      cp -v *.f*q* reads_ok/
-      exit 0
-    fi
-
-    # Extract validated phyla
-    awk -F',' '
-      NR==1 {
-        for (i = 1; i <= NF; i++) if (\$i == "gtdb_phylum") { c = i; break }
-        next
-      }
-      c && \$c != "" { seen[\$c] = 1 }
-
-      END {
-        print "phyla"
-        for (v in seen) print v
-      }
-      ' "${valid_taxa}" > phyla_to_check.txt \\
-    || fail "SingleM: failed to parse validated_taxa"
-
-    # Run singlem pipe
-    R1=\$(ls *_1.fastq.gz *_R1*.fastq.gz 2>/dev/null | head -n1 || true)
-    R2=\$(ls *_2.fastq.gz *_R2*.fastq.gz 2>/dev/null | head -n1 || true)
-    if [[ -n "\$R1" && -n "\$R2" ]]; then
-      singlem pipe -1 \$R1 -2 \$R2 \\
-        --taxonomic-profile singlem_taxonomic_profile.tsv \\
-        --taxonomic-profile-krona singlem_taxonomic_profile_krona \\
-        --metapackage "${singlem_db_ch}" --threads ${task.cpus} \\
-        || fail "SingleM pipe failed"
-    else
-      singlem pipe -1 ${reads} \\
-        --taxonomic-profile singlem_taxonomic_profile.tsv \\
-        --taxonomic-profile-krona singlem_taxonomic_profile_krona \\
-        --metapackage "${singlem_db_ch}" --threads ${task.cpus} \\
-        || fail "SingleM pipe failed"
-    fi
-
-    if [[ ! -s singlem_taxonomic_profile.tsv ]]; then
-      fail "SingleM produced empty taxonomic profile"
-    fi
-
-    # Summarise singlem output
-    singlem summarise \\
-      --input-taxonomic-profile singlem_taxonomic_profile.tsv \\
-      --output-species-by-site-relative-abundance-prefix singlem_taxonomic_profile_summary \\
-      || fail "SingleM summarise failed"
-
-    # Check for presence of target phyla
-    check_singlem_phyla.sh singlem_taxonomic_profile.tsv phyla_to_check.txt singlem_output.tsv \\
-      ${task.attempt} ${params.max_retries}
+    # --reads should be the last argument and unquoted to capture all read files
+    run_singlem.sh \\
+      --sandpiper-decision "${sandpiper}" \\
+      --valid-taxa "${valid_taxa}" \\
+      --singlem-db "${singlem_db_ch}" \\
+      --cpus ${task.cpus} \\
+      --attempt ${task.attempt} \\
+      --max-retries ${params.max_retries} \\
+      --reads ${reads}
     """
 }
 
