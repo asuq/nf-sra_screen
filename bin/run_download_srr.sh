@@ -47,7 +47,7 @@ if ! iseq -Q -g -t "${cpus}" -p 8 -i "${srr}"; then
     # Ask Nextflow to retry
     exit 1
   fi
-  echo "Download raw data failed" > FAIL.note
+  echo "Fastq: download raw data failed" > FAIL.note
   # Clean up partial SRA / FASTQ
   rm -f ./*.f*q* "${srr}" 2>/dev/null || true
   exit 0
