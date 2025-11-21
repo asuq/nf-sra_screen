@@ -333,7 +333,7 @@ check_pending_jobs() {
 # ----------------------------------------------------------------------
 move_output_to_storage() {
     # For each (sra, srr) not yet in STATE_FILE and not already pending:
-    #   - ensure output directory exists
+    #   - ensure output directory exists (or handle note-only rows)
     #   - delete all work/ dirs for that sample (using the per-cycle index)
     #   - submit an sbatch rsync job
     #   - record (sra, srr, job_id) in PENDING_FILE
@@ -344,7 +344,7 @@ move_output_to_storage() {
     fi
 
     awk 'NR>1{print}' "$SUMMARY_FILE" | \
-    while IFS=$'\t' read -r sra srr platform model strategy assembler counts note_rest; do
+    while IFS=$'\t' read -r sra srr platform model strategy assembler counts note; do
         # Skip empty or malformed lines
         if [ -z "${sra:-}" ] || [ -z "${srr:-}" ]; then
             continue
@@ -366,6 +366,19 @@ move_output_to_storage() {
 
         sample_src="$RUN_DIR/output/$sra/$srr"
         if [ ! -d "$sample_src" ]; then
+            # If there is a note in summary.tsv but no per-SRR output directory,
+            # the pipeline has already decided this SRR is "done with no output".
+            # Typical case: filter_sra.sh skipped the SRR and wrote
+            #   note = "did not match the criteria: <reason>"
+            if [ -n "${note:-}" ]; then
+                log "Output directory missing for $sra/$srr: $sample_src, but summary note='$note'."
+                log "Sample will be marked as DONE with no output to transfer."
+                printf '%s\t%s\n' "$sra" "$srr" >> "$STATE_FILE"
+                continue
+            fi
+
+            # If note is empty and directory is missing, the pipeline hasn't
+            # finished this SRR yet; keep the old behaviour and retry later.
             log "Output directory missing for $sra/$srr: $sample_src"
             log "Sample will not be marked as done; will retry next cycle."
             continue
