@@ -309,6 +309,13 @@ check_pending_jobs() {
                 case "$job_exit" in
                     0:*)
                         log "Transfer job $job_id for $sra/$srr completed successfully (ExitCode=$job_exit)."
+
+                        log_file="${RUN_DIR}/slurm-${job_id}.log"
+                        if [ -f "$log_file" ]; then
+                            rm -f -- "$log_file" || \
+                              log "Warning: failed to remove log file $log_file"
+                        fi
+
                         # Record the sample as fully processed so we never handle it again.
                         printf '%s\t%s\n' "$sra" "$srr" >> "$STATE_FILE"
                         ;;
