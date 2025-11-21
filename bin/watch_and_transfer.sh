@@ -340,16 +340,20 @@ check_pending_jobs() {
 # ----------------------------------------------------------------------
 move_output_to_storage() {
     # For each (sra, srr) not yet in STATE_FILE and not already pending:
-    #   - if note is non-empty and no output dir exists: treat as filtered/failed, delete work and mark processed
-    #   - else, ensure output directory exists, delete work dirs and submit an sbatch rsync job
+    #   - if note starts with "did not match the criteria": treat as filtered sample;
+    #     delete work and mark processed (no transfer)
+    #   - else if note is non-empty and no output dir exists: treat as filtered/failed,
+    #     delete work and mark processed
+    #   - else, ensure output directory exists, delete work dirs and submit an sbatch
+    #     rsync job
 
     if [ ! -r "$SUMMARY_FILE" ]; then
         log "summary.tsv not readable: $SUMMARY_FILE -- skipping this cycle."
         return
     fi
 
-    awk 'NR>1{print}' "$SUMMARY_FILE" | \
-    while IFS=$'\t' read -r sra srr _platform _model _strategy _assembler _counts note; do
+    awk -F'\t' 'NR>1 { OFS="\t"; print $1,$2,$8 }' "$SUMMARY_FILE" | \
+    while IFS=$'\t' read -r sra srr note; do
         # Skip empty or malformed lines
         if [ -z "${sra:-}" ] || [ -z "${srr:-}" ]; then
             continue
@@ -372,24 +376,39 @@ move_output_to_storage() {
 
         sample_src="$RUN_DIR/output/$sra/$srr"
 
-        # Samples with a note but no output directory are considered
-        #   logically finished but have no outputs to transfer.
-        # e.g. "did not match the criteria: source" from the first filter
-        #   or any LOG_FAILED_PROCESS message.
+        # 1. Special case: "did not match the criteria: ..."
+        # These are from the initial metadata filter. They are logically
+        # finished, but there is no downstream analysis to transfer. We
+        # always treat them as filtered, regardless of whether an
+        # output directory exists or not.
+        case "$note_trimmed" in
+            "did not match the criteria"*)
+                log "Sample $sra/$srr did not pass the selection criteria:"
+                log "  note      : $note_trimmed"
+                log "  sample_src: $sample_src"
+                log "Treating as filtered sample; deleting work/ dirs and marking as processed (no transfer job submitted)."
+
+                delete_sample_work_dirs "$sra" "$srr"
+                printf '%s\t%s\n' "$sra" "$srr" >> "$STATE_FILE"
+                continue
+                ;;
+        esac
+
+        # 2. Any other note + NO output directory
+        # e.g. LOG_FAILED_PROCESS with no outputs. Log it, delete work,
+        # and mark processed. No transfer job submitted.
         if [ -n "$note_trimmed" ] && [ ! -d "$sample_src" ]; then
             log "Sample $sra/$srr has summary note but no output directory:"
             log "  note      : $note_trimmed"
             log "  sample_src: $sample_src"
             log "Treating as filtered/failed with no outputs; deleting work/ dirs and marking as processed."
 
-            # Clean up work/ dirs for this sample if present
             delete_sample_work_dirs "$sra" "$srr"
-
-            # Mark as processed so we do not revisit this sample
             printf '%s\t%s\n' "$sra" "$srr" >> "$STATE_FILE"
             continue
         fi
 
+        # 3. Normal completed sample (with or without note)
         log "Handling finished sample: sra=$sra  srr=$srr"
 
         # If we still have no output directory and no note, this is a weird partial state.
