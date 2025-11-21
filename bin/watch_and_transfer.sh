@@ -16,7 +16,7 @@
 #
 #   RUN_DIR        Nextflow run directory (has .nextflow.log, work/, output/summary.tsv)
 #   DEST_DIR       Destination base directory for final outputs
-#   INTERVAL_MINS Positive integer; number of minutes between scans
+#   INTERVAL_MINS  Positive integer; number of minutes between scans
 #
 # The script is intended to run inside a long-lived tmux session.
 
@@ -143,8 +143,8 @@ fi
 # Helpers
 # ----------------------------------------------------------------------
 build_workdir_index() {
-	# Parse .nextflow.log once per cycle and build an index mapping (sra, srr) -> work_dir.
-	# Output: RUN_DIR/.workdirs_index.tsv (tab-separated: sra, srr, work_dir).
+    # Parse .nextflow.log once per cycle and build an index mapping (sra, srr) -> work_dir.
+    # Output: RUN_DIR/.workdirs_index.tsv (tab-separated: sra, srr, work_dir).
     if [ ! -r "$NEXTFLOW_LOG" ]; then
         : > "$WORK_INDEX_FILE"
         log ".nextflow.log not readable; workdir index will be empty this cycle."
@@ -178,7 +178,7 @@ build_workdir_index() {
 }
 
 is_in_pending() {
-	# Return 0 if (sra, srr) exists in PENDING_FILE, using strict tab-field match.
+    # Return 0 if (sra, srr) exists in PENDING_FILE, using strict tab-field match.
     local sra="$1" srr="$2"
     [ -s "$PENDING_FILE" ] || return 1
     awk -F'\t' -v sra="$sra" -v srr="$srr" '
@@ -188,7 +188,7 @@ is_in_pending() {
 }
 
 delete_sample_work_dirs() {
-	#  Use the per-cycle workdir index to find work dirs for (sra, srr) and delete only those under $WORK_DIR/.
+    # Use the per-cycle workdir index to find work dirs for (sra, srr) and delete only those under $WORK_DIR/.
     local sra="$1" srr="$2"
 
     if [ ! -r "$WORK_INDEX_FILE" ] || [ ! -s "$WORK_INDEX_FILE" ]; then
@@ -211,7 +211,7 @@ delete_sample_work_dirs() {
                 fi
                 ;;
             *)
-								# Safety fence: never delete anything outside the run's work/
+                # Safety fence: never delete anything outside the run's work/
                 log "Skipping suspicious work path for $sra/$srr (outside $WORK_DIR): $work_path"
                 ;;
         esac
@@ -219,8 +219,8 @@ delete_sample_work_dirs() {
 }
 
 check_pending_jobs() {
-	# Reconcile all pending (sra, srr, job_id) entries with batched sacct queries.
-	# Successful jobs append (sra, srr) to STATE_FILE and are removed from pending.
+    # Reconcile all pending (sra, srr, job_id) entries with batched sacct queries.
+    # Successful jobs append (sra, srr) to STATE_FILE and are removed from pending.
     if [ ! -r "$PENDING_FILE" ] || [ ! -s "$PENDING_FILE" ]; then
         return
     fi
@@ -231,7 +231,7 @@ check_pending_jobs() {
         [ -z "${sra:-}" ] && continue
         [ -z "${srr:-}" ] && continue
         [ -z "${job_id:-}" ] && continue
-				job_ids+=("$job_id")
+        job_ids+=("$job_id")
     done < "$PENDING_FILE"
 
     # Batched sacct query in chunks (default 50 IDs per call; override with SACCT_CHUNK)
@@ -302,14 +302,14 @@ check_pending_jobs() {
 
         case "$job_state" in
             PENDING|CONFIGURING|RUNNING|COMPLETING|SUSPENDED)
-								# Still in progress; keep pending
+                # Still in progress; keep pending
                 printf '%s\t%s\t%s\n' "$sra" "$srr" "$job_id" >> "$tmp_pending"
                 ;;
             COMPLETED)
                 case "$job_exit" in
                     0:*)
                         log "Transfer job $job_id for $sra/$srr completed successfully (ExitCode=$job_exit)."
-												# Record the sample as fully processed so we never handle it again.
+                        # Record the sample as fully processed so we never handle it again.
                         printf '%s\t%s\n' "$sra" "$srr" >> "$STATE_FILE"
                         ;;
                     *)
@@ -318,7 +318,7 @@ check_pending_jobs() {
                 esac
                 ;;
             *)
-								# Any other terminal state (FAILED, CANCELLED, TIMEOUT, etc.)
+                # Any other terminal state (FAILED, CANCELLED, TIMEOUT, etc.)
                 log "Transfer job $job_id for $sra/$srr reached terminal State=$job_state ExitCode=$job_exit; will be resubmitted in a later cycle."
                 ;;
         esac
@@ -333,10 +333,8 @@ check_pending_jobs() {
 # ----------------------------------------------------------------------
 move_output_to_storage() {
     # For each (sra, srr) not yet in STATE_FILE and not already pending:
-    #   - ensure output directory exists (or handle note-only rows)
-    #   - delete all work/ dirs for that sample (using the per-cycle index)
-    #   - submit an sbatch rsync job
-    #   - record (sra, srr, job_id) in PENDING_FILE
+    #   - if note is non-empty and no output dir exists: treat as filtered/failed, delete work and mark processed
+    #   - else, ensure output directory exists, delete work dirs and submit an sbatch rsync job
 
     if [ ! -r "$SUMMARY_FILE" ]; then
         log "summary.tsv not readable: $SUMMARY_FILE -- skipping this cycle."
@@ -344,7 +342,7 @@ move_output_to_storage() {
     fi
 
     awk 'NR>1{print}' "$SUMMARY_FILE" | \
-    while IFS=$'\t' read -r sra srr platform model strategy assembler counts note; do
+    while IFS=$'\t' read -r sra srr _platform _model _strategy _assembler _counts note; do
         # Skip empty or malformed lines
         if [ -z "${sra:-}" ] || [ -z "${srr:-}" ]; then
             continue
@@ -362,26 +360,43 @@ move_output_to_storage() {
             continue
         fi
 
-        log "Handling finished sample: sra=$sra  srr=$srr"
+        # Normalise note (trim leading/trailing whitespace)
+        note_trimmed="$(printf '%s' "${note:-}" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
 
         sample_src="$RUN_DIR/output/$sra/$srr"
-        if [ ! -d "$sample_src" ]; then
-            # If there is a note in summary.tsv but no per-SRR output directory,
-            # the pipeline has already decided this SRR is "done with no output".
-            # Typical case: filter_sra.sh skipped the SRR and wrote
-            #   note = "did not match the criteria: <reason>"
-            if [ -n "${note:-}" ]; then
-                log "Output directory missing for $sra/$srr: $sample_src, but summary note='$note'."
-                log "Sample will be marked as DONE with no output to transfer."
-                printf '%s\t%s\n' "$sra" "$srr" >> "$STATE_FILE"
-                continue
-            fi
 
-            # If note is empty and directory is missing, the pipeline hasn't
-            # finished this SRR yet; keep the old behaviour and retry later.
+        # Samples with a note but no output directory are considered
+        #   logically finished but have no outputs to transfer.
+        # e.g. "did not match the criteria: source" from the first filter
+        #   or any LOG_FAILED_PROCESS message.
+        if [ -n "$note_trimmed" ] && [ ! -d "$sample_src" ]; then
+            log "Sample $sra/$srr has summary note but no output directory:"
+            log "  note      : $note_trimmed"
+            log "  sample_src: $sample_src"
+            log "Treating as filtered/failed with no outputs; deleting work/ dirs and marking as processed."
+
+            # Clean up work/ dirs for this sample if present
+            delete_sample_work_dirs "$sra" "$srr"
+
+            # Mark as processed so we do not revisit this sample
+            printf '%s\t%s\n' "$sra" "$srr" >> "$STATE_FILE"
+            continue
+        fi
+
+        log "Handling finished sample: sra=$sra  srr=$srr"
+
+        # If we still have no output directory and no note, this is a weird partial state.
+        if [ ! -d "$sample_src" ]; then
             log "Output directory missing for $sra/$srr: $sample_src"
             log "Sample will not be marked as done; will retry next cycle."
             continue
+        fi
+
+        # If there is a note *and* an output directory, we keep the outputs
+        # but mention the note for traceability.
+        if [ -n "$note_trimmed" ]; then
+            log "Sample $sra/$srr has note in summary but also an output directory:"
+            log "  note=$note_trimmed"
         fi
 
         # Delete all work directories associated with this sample.
