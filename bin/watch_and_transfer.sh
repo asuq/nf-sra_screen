@@ -104,10 +104,12 @@ if [ ! -d "$DEST_DIR" ]; then
     exit 1
 fi
 
+# Do NOT exit if work/ does not exist yet; Nextflow may not have started.
 if [ ! -d "$WORK_DIR" ]; then
-    log "work/ directory does not exist under RUN_DIR: $WORK_DIR"
-    exit 1
+    log "work/ directory does not exist under RUN_DIR yet: $WORK_DIR"
+    log "Watcher will stay running; work/ will be cleaned once Nextflow creates it."
 fi
+
 
 for cmd in sbatch sacct flock rsync; do
     if ! command -v "$cmd" >/dev/null 2>&1; then
