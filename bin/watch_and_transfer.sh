@@ -76,7 +76,7 @@ NEXTFLOW_LOG="$RUN_DIR/.nextflow.log"
 WORK_DIR="$RUN_DIR/work"
 STATE_FILE="$RUN_DIR/.processed_summary.tsv"
 PENDING_FILE="$RUN_DIR/.pending_copy_jobs.tsv"
-LOCK_FILE="$RUN_DIR/.watch_and_move.lock"
+LOCK_FILE="$RUN_DIR/.watch_and_transfer.lock"
 WORK_INDEX_FILE="$RUN_DIR/.workdirs_index.tsv"
 
 # Validate INTERVAL_MINS as positive integer
@@ -430,9 +430,9 @@ check_pending_jobs() {
                         log "Transfer job $job_id for $sra/$srr completed successfully (ExitCode=$job_exit)."
 
                         # Clean up the Slurm log for a successful transfer
-												log_file="${RUN_DIR}/slurm-${job_id}.log"
+                        log_file="${RUN_DIR}/slurm-${job_id}.out"
                         if [ -f "$log_file" ]; then
-                            rm -f -- "$log_file" || \
+                            rm -vf -- "$log_file" || \
                               log "Warning: failed to remove log file $log_file"
                         fi
 
