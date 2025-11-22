@@ -12,7 +12,7 @@
 #   a separate storage location.
 #
 # Usage:
-#   watch_and_move.sh RUN_DIR DEST_DIR INTERVAL_MINS
+#   watch_and_transfer.sh RUN_DIR DEST_DIR INTERVAL_MINS
 #
 #   RUN_DIR        Nextflow run directory (has .nextflow.log, work/, output/summary.tsv)
 #   DEST_DIR       Destination base directory for final outputs
@@ -49,7 +49,8 @@ Internal state:
   RUN_DIR/.workdirs_index.tsv    : per-cycle index mapping (sra, srr) -> work_dir
 
 Environment:
-  SACCT_CHUNK   Number of JobIDs per sacct query (default: 50)
+  SACCT_CHUNK       Number of JobIDs per sacct query (default: 50)
+  NF_LOG_TAIL_LINES Number of lines from .nextflow.log tail to inspect (default: 50)
 EOF
 }
 
@@ -110,7 +111,6 @@ if [ ! -d "$WORK_DIR" ]; then
     log "Watcher will stay running; work/ will be cleaned once Nextflow creates it."
 fi
 
-
 for cmd in sbatch sacct flock rsync; do
     if ! command -v "$cmd" >/dev/null 2>&1; then
         log "$cmd not found in PATH; this script requires $cmd."
@@ -141,17 +141,134 @@ if [ ! -e "$PENDING_FILE" ]; then
     log "Initialised pending jobs file: $PENDING_FILE"
 fi
 
+# Track freshness of .nextflow.log for this watcher
+NF_LOG_FRESH_STATE="missing"
+NF_LOG_MISSING_WARNED=0
+
+# Remember when this watcher started so we can ignore logs older than this
+WATCHER_START_TS="$(date +%s)"
+log "Watcher start epoch: ${WATCHER_START_TS}"
+
 # ----------------------------------------------------------------------
 # Helpers
 # ----------------------------------------------------------------------
+get_file_mtime() {
+    # Echo the file's mtime (epoch seconds) in a Linux/macOS portable way.
+    # Returns non-zero and prints nothing on error.
+    local path=$1
+
+    # GNU stat (Linux)
+    if stat --version >/dev/null 2>&1; then
+        stat -c '%Y' "$path" 2>/dev/null || return 1
+    else
+        # BSD stat (macOS)
+        stat -f '%m' "$path" 2>/dev/null || return 1
+    fi
+}
+
+check_nextflow_log_freshness() {
+    # Determine whether .nextflow.log is relevant to *this* watcher
+    # and whether it looks "fresh".
+    #
+    # Heuristic:
+    #   - missing/unreadable              => state = missing
+    #   - mtime < WATCHER_START_TS        => state = old (log from a previous run)
+    #   - last non-empty line contains
+    #       'Execution complete -- Goodbye'
+    #                                      => state = stale (current run finished)
+    #   - otherwise                        => state = fresh (run in progress / mid-run)
+    #
+    # Sets NF_LOG_FRESH_STATE to: missing | empty | old | stale | fresh
+    #
+    # Return code:
+    #   0 -> fresh
+    #   1 -> stale or old
+    #   2 -> missing or empty
+
+    local log_path="$NEXTFLOW_LOG"
+
+    if [ ! -r "$log_path" ]; then
+        if [ "${NF_LOG_MISSING_WARNED:-0}" -eq 0 ]; then
+            log ".nextflow.log not readable yet at $log_path; watcher will wait until Nextflow writes it."
+            NF_LOG_MISSING_WARNED=1
+        fi
+        NF_LOG_FRESH_STATE="missing"
+        return 2
+    fi
+
+    NF_LOG_MISSING_WARNED=0
+
+    # Check whether this log predates the watcher start; if so, ignore it.
+    local mtime
+    if ! mtime="$(get_file_mtime "$log_path")"; then
+        log "Warning: unable to determine mtime for .nextflow.log at $log_path; treating as missing for safety."
+        NF_LOG_FRESH_STATE="missing"
+        return 2
+    fi
+
+    if [ "$mtime" -lt "$WATCHER_START_TS" ]; then
+        if [ "${NF_LOG_FRESH_STATE:-unset}" != "old" ]; then
+            log ".nextflow.log appears older than this watcher (mtime=$mtime < start=$WATCHER_START_TS); ignoring as old log from a previous run."
+        fi
+        NF_LOG_FRESH_STATE="old"
+        return 1
+    fi
+
+		# Take a small tail, strip blank lines, get last non‑empty line.
+    local last_line
+    last_line="$(
+        tail -n "${NF_LOG_TAIL_LINES:-50}" "$log_path" 2>/dev/null \
+        | sed '/^[[:space:]]*$/d' \
+        | tail -n 1 \
+        || true
+    )"
+
+    if [ -z "$last_line" ]; then
+        if [ "${NF_LOG_FRESH_STATE:-unset}" != "empty" ]; then
+            log ".nextflow.log is present but appears empty."
+        fi
+        NF_LOG_FRESH_STATE="empty"
+        return 2
+    fi
+
+    if printf '%s\n' "$last_line" | grep -q 'Execution complete -- Goodbye'; then
+        # Last non-empty line is the Goodbye marker -> this run has completed.
+        if [ "${NF_LOG_FRESH_STATE:-unset}" != "stale" ]; then
+            log ".nextflow.log tail indicates that the current Nextflow run has completed:"
+            log "  $last_line"
+        fi
+        NF_LOG_FRESH_STATE="stale"
+        return 1
+    fi
+
+    # Anything else: treat as fresh (either run in progress or log mid-run).
+    if [ "${NF_LOG_FRESH_STATE:-unset}" != "fresh" ]; then
+        log ".nextflow.log appears fresh (last line does not indicate completion):"
+        log "  $last_line"
+    fi
+    NF_LOG_FRESH_STATE="fresh"
+    return 0
+}
+
 build_workdir_index() {
     # Parse .nextflow.log once per cycle and build an index mapping (sra, srr) -> work_dir.
     # Output: RUN_DIR/.workdirs_index.tsv (tab-separated: sra, srr, work_dir).
-    if [ ! -r "$NEXTFLOW_LOG" ]; then
-        : > "$WORK_INDEX_FILE"
-        log ".nextflow.log not readable; workdir index will be empty this cycle."
-        return
-    fi
+    check_nextflow_log_freshness || true
+    case "$NF_LOG_FRESH_STATE" in
+        missing|empty|old)
+            : > "$WORK_INDEX_FILE"
+            log ".nextflow.log is $NF_LOG_FRESH_STATE; workdir index will be empty this cycle."
+            return
+            ;;
+        stale|fresh)
+            # Log belongs to this run and has content; we still parse it.
+            :
+            ;;
+        *)
+            # Should not happen, but keep it safe.
+            log "Unknown NF_LOG_FRESH_STATE='$NF_LOG_FRESH_STATE'; proceeding to parse .nextflow.log."
+            ;;
+    esac
 
     # Create temp file in the same directory for atomic mv
     local tmp_index
@@ -312,7 +429,8 @@ check_pending_jobs() {
                     0:*)
                         log "Transfer job $job_id for $sra/$srr completed successfully (ExitCode=$job_exit)."
 
-                        log_file="${RUN_DIR}/slurm-${job_id}.log"
+                        # Clean up the Slurm log for a successful transfer
+												log_file="${RUN_DIR}/slurm-${job_id}.log"
                         if [ -f "$log_file" ]; then
                             rm -f -- "$log_file" || \
                               log "Warning: failed to remove log file $log_file"
@@ -380,8 +498,8 @@ move_output_to_storage() {
 
         # 1. Special case: "did not match the criteria: ..."
         # These are from the initial metadata filter. They are logically
-        # finished, but there is no downstream analysis to transfer. We
-        # always treat them as filtered, regardless of whether an
+        # finished, but there is no downstream analysis to transfer.
+        # We always treat them as filtered, regardless of whether an
         # output directory exists or not.
         case "$note_trimmed" in
             "did not match the criteria"*)
