@@ -70,7 +70,7 @@ if [[ "$sandpiper_dec" == "PASS" ]]; then
   echo "Reads already passed Sandpiper check; skipping SingleM"
   mkdir -p reads_ok
   for f in "${read_files[@]}"; do
-    ln -sf "$f" "reads_ok/$(basename "$f")"
+    ln -sf "../$f" "reads_ok/$(basename "$f")"
   done
   exit 0
 fi
