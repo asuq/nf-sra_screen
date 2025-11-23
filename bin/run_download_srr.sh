@@ -42,13 +42,29 @@ if [[ -z "${srr}" || -z "${platform}" ]]; then
 fi
 
 # Download sequence data
-if ! iseq -Q -g -t "${cpus}" -p 8 -i "${srr}"; then
+tmpdir="${TMPDIR:-.}"
+if ! fasterq-dump \
+  -e "${cpus}" \
+  -t "${tmpdir}" \
+  --outdir . \
+  "${srr}"; then
   if [[ "${attempt}" -lt "${max_retries}" ]]; then
     # Ask Nextflow to retry
     exit 1
   fi
   echo "Fastq: download raw data failed" > FAIL.note
-  # Clean up partial SRA / FASTQ
+  # Clean up partial FASTQ
+  rm -f ./*.f*q* "${srr}" 2>/dev/null || true
+  exit 0
+fi
+
+# Compress FASTQ files with pigz (parallel gzip)
+if ! pigz -p "${cpus}" ./*.fastq; then
+  if [[ "${attempt}" -lt "${max_retries}" ]]; then
+    # Let Nextflow retry on transient FS / quota issues
+    exit 1
+  fi
+  echo "Fastq: pigz compression failed" > FAIL.note
   rm -f ./*.f*q* "${srr}" 2>/dev/null || true
   exit 0
 fi
