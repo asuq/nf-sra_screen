@@ -1,20 +1,20 @@
 #!/usr/bin/env bash
 #
 # Monitor a Nextflow run directory and, for each newly finished sample:
-#   - delete all work/ directories related to that sample (based on .nextflow.log)
-#   - transfer output/$sra/$srr to DEST_DIR using rsync -a; rm -rf via sbatch on datacp partition
+#   - submit an sbatch job to rsync output/$sra/$srr to DEST_DIR/$sra/$srr
+#   - in that job, remove the source directory (output/$sra/$srr) after a successful transfer
 #   - verify via sacct that the transfer completed successfully
 #   - record the sample as processed in RUN_DIR/.processed_summary.tsv
 #
 # Purpose:
-#   Free up space in the Nextflow run directory by deleting work/ data
-#   for samples that have completed, and move their final outputs to
-#   a separate storage location.
+#   Free up space in the Nextflow run directory by moving final outputs
+#   to a separate storage location and removing the per-sample output
+#   directory only after a verified successful transfer.
 #
 # Usage:
 #   watch_and_transfer.sh RUN_DIR DEST_DIR INTERVAL_MINS
 #
-#   RUN_DIR        Nextflow run directory (has .nextflow.log, work/, output/summary.tsv)
+#   RUN_DIR        Nextflow run directory (has output/summary.tsv)
 #   DEST_DIR       Destination base directory for final outputs
 #   INTERVAL_MINS  Positive integer; number of minutes between scans
 #
@@ -39,18 +39,16 @@ usage() {
     cat <<EOF
 Usage: $(basename "$0") RUN_DIR DEST_DIR INTERVAL_MINS
 
-  RUN_DIR        Nextflow run directory (has .nextflow.log, work/, output/summary.tsv)
+  RUN_DIR        Nextflow run directory (has output/summary.tsv)
   DEST_DIR       Destination base directory
   INTERVAL_MINS  Positive integer number of minutes between checks
 
 Internal state:
   RUN_DIR/.processed_summary.tsv : processed (sra, srr)
   RUN_DIR/.pending_copy_jobs.tsv : pending (sra, srr, job_id)
-  RUN_DIR/.workdirs_index.tsv    : per-cycle index mapping (sra, srr) -> work_dir
 
 Environment:
   SACCT_CHUNK       Number of JobIDs per sacct query (default: 50)
-  NF_LOG_TAIL_LINES Number of lines from .nextflow.log tail to inspect (default: 50)
 EOF
 }
 
@@ -72,12 +70,9 @@ RUN_DIR=${RUN_DIR%/}
 DEST_DIR=${DEST_DIR%/}
 
 SUMMARY_FILE="$RUN_DIR/output/summary.tsv"
-NEXTFLOW_LOG="$RUN_DIR/.nextflow.log"
-WORK_DIR="$RUN_DIR/work"
 STATE_FILE="$RUN_DIR/.processed_summary.tsv"
 PENDING_FILE="$RUN_DIR/.pending_copy_jobs.tsv"
 LOCK_FILE="$RUN_DIR/.watch_and_transfer.lock"
-WORK_INDEX_FILE="$RUN_DIR/.workdirs_index.tsv"
 
 # Validate INTERVAL_MINS as positive integer
 case "$INTERVAL_MINS" in
@@ -103,12 +98,6 @@ fi
 if [ ! -d "$DEST_DIR" ]; then
     log "DEST_DIR does not exist: $DEST_DIR"
     exit 1
-fi
-
-# Do NOT exit if work/ does not exist yet; Nextflow may not have started.
-if [ ! -d "$WORK_DIR" ]; then
-    log "work/ directory does not exist under RUN_DIR yet: $WORK_DIR"
-    log "Watcher will stay running; work/ will be cleaned once Nextflow creates it."
 fi
 
 for cmd in sbatch sacct flock rsync; do
@@ -141,160 +130,9 @@ if [ ! -e "$PENDING_FILE" ]; then
     log "Initialised pending jobs file: $PENDING_FILE"
 fi
 
-# Track freshness of .nextflow.log for this watcher
-NF_LOG_FRESH_STATE="missing"
-NF_LOG_MISSING_WARNED=0
-
-# Remember when this watcher started so we can ignore logs older than this
-WATCHER_START_TS="$(date +%s)"
-log "Watcher start epoch: ${WATCHER_START_TS}"
-
 # ----------------------------------------------------------------------
 # Helpers
 # ----------------------------------------------------------------------
-get_file_mtime() {
-    # Echo the file's mtime (epoch seconds) in a Linux/macOS portable way.
-    # Returns non-zero and prints nothing on error.
-    local path=$1
-
-    # GNU stat (Linux)
-    if stat --version >/dev/null 2>&1; then
-        stat -c '%Y' "$path" 2>/dev/null || return 1
-    else
-        # BSD stat (macOS)
-        stat -f '%m' "$path" 2>/dev/null || return 1
-    fi
-}
-
-check_nextflow_log_freshness() {
-    # Determine whether .nextflow.log is relevant to *this* watcher
-    # and whether it looks "fresh".
-    #
-    # Heuristic:
-    #   - missing/unreadable              => state = missing
-    #   - mtime < WATCHER_START_TS        => state = old (log from a previous run)
-    #   - last non-empty line contains
-    #       'Execution complete -- Goodbye'
-    #                                      => state = stale (current run finished)
-    #   - otherwise                        => state = fresh (run in progress / mid-run)
-    #
-    # Sets NF_LOG_FRESH_STATE to: missing | empty | old | stale | fresh
-    #
-    # Return code:
-    #   0 -> fresh
-    #   1 -> stale or old
-    #   2 -> missing or empty
-
-    local log_path="$NEXTFLOW_LOG"
-
-    if [ ! -r "$log_path" ]; then
-        if [ "${NF_LOG_MISSING_WARNED:-0}" -eq 0 ]; then
-            log ".nextflow.log not readable yet at $log_path; watcher will wait until Nextflow writes it."
-            NF_LOG_MISSING_WARNED=1
-        fi
-        NF_LOG_FRESH_STATE="missing"
-        return 2
-    fi
-
-    NF_LOG_MISSING_WARNED=0
-
-    # Check whether this log predates the watcher start; if so, ignore it.
-    local mtime
-    if ! mtime="$(get_file_mtime "$log_path")"; then
-        log "Warning: unable to determine mtime for .nextflow.log at $log_path; treating as missing for safety."
-        NF_LOG_FRESH_STATE="missing"
-        return 2
-    fi
-
-    if [ "$mtime" -lt "$WATCHER_START_TS" ]; then
-        if [ "${NF_LOG_FRESH_STATE:-unset}" != "old" ]; then
-            log ".nextflow.log appears older than this watcher (mtime=$mtime < start=$WATCHER_START_TS); ignoring as old log from a previous run."
-        fi
-        NF_LOG_FRESH_STATE="old"
-        return 1
-    fi
-
-		# Take a small tail, strip blank lines, get last non‑empty line.
-    local last_line
-    last_line="$(
-        tail -n "${NF_LOG_TAIL_LINES:-50}" "$log_path" 2>/dev/null \
-        | sed '/^[[:space:]]*$/d' \
-        | tail -n 1 \
-        || true
-    )"
-
-    if [ -z "$last_line" ]; then
-        if [ "${NF_LOG_FRESH_STATE:-unset}" != "empty" ]; then
-            log ".nextflow.log is present but appears empty."
-        fi
-        NF_LOG_FRESH_STATE="empty"
-        return 2
-    fi
-
-    if printf '%s\n' "$last_line" | grep -q 'Execution complete -- Goodbye'; then
-        # Last non-empty line is the Goodbye marker -> this run has completed.
-        if [ "${NF_LOG_FRESH_STATE:-unset}" != "stale" ]; then
-            log ".nextflow.log tail indicates that the current Nextflow run has completed:"
-            log "  $last_line"
-        fi
-        NF_LOG_FRESH_STATE="stale"
-        return 1
-    fi
-
-    # Anything else: treat as fresh (either run in progress or log mid-run).
-    if [ "${NF_LOG_FRESH_STATE:-unset}" != "fresh" ]; then
-        log ".nextflow.log appears fresh (last line does not indicate completion):"
-        log "  $last_line"
-    fi
-    NF_LOG_FRESH_STATE="fresh"
-    return 0
-}
-
-build_workdir_index() {
-    # Parse .nextflow.log once per cycle and build an index mapping (sra, srr) -> work_dir.
-    # Output: RUN_DIR/.workdirs_index.tsv (tab-separated: sra, srr, work_dir).
-    check_nextflow_log_freshness || true
-    case "$NF_LOG_FRESH_STATE" in
-        missing|empty|old)
-            : > "$WORK_INDEX_FILE"
-            log ".nextflow.log is $NF_LOG_FRESH_STATE; workdir index will be empty this cycle."
-            return
-            ;;
-        stale|fresh)
-            # Log belongs to this run and has content; we still parse it.
-            :
-            ;;
-        *)
-            # Should not happen, but keep it safe.
-            log "Unknown NF_LOG_FRESH_STATE='$NF_LOG_FRESH_STATE'; proceeding to parse .nextflow.log."
-            ;;
-    esac
-
-    # Create temp file in the same directory for atomic mv
-    local tmp_index
-    tmp_index="$(mktemp "${WORK_INDEX_FILE}.tmp.XXXXXX")"
-
-    # Extract lines with "(SRA:SRR)" and a 'workDir:' token; print sra \t srr \t work_path
-    LC_ALL=C awk '
-        {
-            if (match($0, /\(([[:alnum:]_.:-]+):([[:alnum:]_.:-]+)\)/, m)) {
-                sra = m[1]; srr = m[2];
-                for (i = 1; i <= NF; i++) {
-                    if ($i == "workDir:") {
-                        if (i + 1 <= NF) {
-                            val = $(i + 1)
-                            sub(/[,\]]+$/, "", val)
-                            print sra "\t" srr "\t" val
-                        }
-                    }
-                }
-            }
-        }
-    ' "$NEXTFLOW_LOG" | sort -u > "$tmp_index"
-
-    mv "$tmp_index" "$WORK_INDEX_FILE"
-    log "Rebuilt workdir index: $WORK_INDEX_FILE"
-}
 
 is_in_pending() {
     # Return 0 if (sra, srr) exists in PENDING_FILE, using strict tab-field match.
@@ -304,37 +142,6 @@ is_in_pending() {
         ($1 == sra && $2 == srr) { found=1; exit }
         END { exit (found ? 0 : 1) }
     ' "$PENDING_FILE"
-}
-
-delete_sample_work_dirs() {
-    # Use the per-cycle workdir index to find work dirs for (sra, srr) and delete only those under $WORK_DIR/.
-    local sra="$1" srr="$2"
-
-    if [ ! -r "$WORK_INDEX_FILE" ] || [ ! -s "$WORK_INDEX_FILE" ]; then
-        log "Workdir index missing/empty; skipping work/ deletion for $sra/$srr."
-        return
-    fi
-
-    log "Collecting work directories for sample sra=$sra srr=$srr from index"
-
-    awk -F'\t' -v sra="$sra" -v srr="$srr" '
-        $1 == sra && $2 == srr { print $3 }
-    ' "$WORK_INDEX_FILE" | sort -u | \
-    while IFS= read -r work_path; do
-        [ -z "$work_path" ] && continue
-        case "$work_path" in
-            "$WORK_DIR"/*)
-                if [ -d "$work_path" ]; then
-                    log "Deleting work dir for $sra/$srr: $work_path"
-                    rm -rf -- "$work_path"
-                fi
-                ;;
-            *)
-                # Safety fence: never delete anything outside the run's work/
-                log "Skipping suspicious work path for $sra/$srr (outside $WORK_DIR): $work_path"
-                ;;
-        esac
-    done
 }
 
 check_pending_jobs() {
@@ -355,7 +162,20 @@ check_pending_jobs() {
 
     # Batched sacct query in chunks (default 50 IDs per call; override with SACCT_CHUNK)
     local sacct_output=""
-    local chunk_size="${SACCT_CHUNK:-50}"
+    local chunk_size_raw="${SACCT_CHUNK:-50}"
+		case "$chunk_size_raw" in
+				''|*[!0-9]*)
+						log "SACCT_CHUNK must be a positive integer; got '$chunk_size_raw'. Falling back to 50."
+						chunk_size_raw=50
+						;;
+		esac
+		if [ "$chunk_size_raw" -le 0 ]; then
+				log "SACCT_CHUNK must be > 0; got '$chunk_size_raw'. Falling back to 50."
+				chunk_size_raw=50
+		fi
+		local chunk_size="$chunk_size_raw"
+
+
     local total="${#job_ids[@]}"
     local i=0
     while [ "$i" -lt "$total" ]; do
@@ -388,7 +208,7 @@ check_pending_jobs() {
                 if (!(base in best) || rank>best[base]) {
                     best[base]=rank; state[base]=st; exitc[base]=ex
                 }
-            }
+            }key
             END {
                 for (b in best) print b "|" state[b] "|" exitc[b]
             }
@@ -420,7 +240,7 @@ check_pending_jobs() {
         job_exit="$(printf '%s\n' "$line" | awk -F'|' '{print $3}')"
 
         case "$job_state" in
-            PENDING|CONFIGURING|RUNNING|COMPLETING|SUSPENDED)
+            PENDING|CONFIGURING|REQUEUED|RESIZING|RUNNING|COMPLETING|SUSPENDED)
                 # Still in progress; keep pending
                 printf '%s\t%s\t%s\n' "$sra" "$srr" "$job_id" >> "$tmp_pending"
                 ;;
@@ -460,12 +280,10 @@ check_pending_jobs() {
 # ----------------------------------------------------------------------
 move_output_to_storage() {
     # For each (sra, srr) not yet in STATE_FILE and not already pending:
-    #   - if note starts with "did not match the criteria": treat as filtered sample;
-    #     delete work and mark processed (no transfer)
-    #   - else if note is non-empty and no output dir exists: treat as filtered/failed,
-    #     delete work and mark processed
-    #   - else, ensure output directory exists, delete work dirs and submit an sbatch
-    #     rsync job
+    #   - if note starts with "did not match the criteria": mark processed (no transfer)
+    #   - else if note is non-empty and no output dir exists: mark processed (no transfer)
+    #   - else, ensure output directory exists, then submit an sbatch rsync job
+    #     that transfers the directory and removes the source on success.
 
     if [ ! -r "$SUMMARY_FILE" ]; then
         log "summary.tsv not readable: $SUMMARY_FILE -- skipping this cycle."
@@ -479,7 +297,7 @@ move_output_to_storage() {
             continue
         fi
 
-        key=${sra}$'\t'${srr}
+        key="${sra}"$'\t'"${srr}"
 
         # Already processed?
         if grep -Fqx "$key" "$STATE_FILE"; then
@@ -499,31 +317,26 @@ move_output_to_storage() {
         # 1. Special case: "did not match the criteria: ..."
         # These are from the initial metadata filter. They are logically
         # finished, but there is no downstream analysis to transfer.
-        # We always treat them as filtered, regardless of whether an
-        # output directory exists or not.
         case "$note_trimmed" in
             "did not match the criteria"*)
                 log "Sample $sra/$srr did not pass the selection criteria:"
                 log "  note      : $note_trimmed"
                 log "  sample_src: $sample_src"
-                log "Treating as filtered sample; deleting work/ dirs and marking as processed (no transfer job submitted)."
+                log "Treating as filtered sample; marking as processed (no transfer job submitted)."
 
-                delete_sample_work_dirs "$sra" "$srr"
                 printf '%s\t%s\n' "$sra" "$srr" >> "$STATE_FILE"
                 continue
                 ;;
         esac
 
         # 2. Any other note + NO output directory
-        # e.g. LOG_FAILED_PROCESS with no outputs. Log it, delete work,
-        # and mark processed. No transfer job submitted.
+        # e.g. LOG_FAILED_PROCESS with no outputs. Log it and mark processed.
         if [ -n "$note_trimmed" ] && [ ! -d "$sample_src" ]; then
             log "Sample $sra/$srr has summary note but no output directory:"
             log "  note      : $note_trimmed"
             log "  sample_src: $sample_src"
-            log "Treating as filtered/failed with no outputs; deleting work/ dirs and marking as processed."
+            log "Treating as filtered/failed with no outputs; marking as processed."
 
-            delete_sample_work_dirs "$sra" "$srr"
             printf '%s\t%s\n' "$sra" "$srr" >> "$STATE_FILE"
             continue
         fi
@@ -533,9 +346,17 @@ move_output_to_storage() {
 
         # If we still have no output directory and no note, this is a weird partial state.
         if [ ! -d "$sample_src" ]; then
+					if [ -d "$sample_dest" ]; then
+						log "Output dir missing but destination exists for $sra/$srr:"
+						log "  sample_src : $sample_src"
+						log "  sample_dest: $sample_dest"
+						log "Assuming prior successful transfer; marking as processed."
+						printf '%s\t%s\n' "$sra" "$srr" >> "$STATE_FILE"
+					else
             log "Output directory missing for $sra/$srr: $sample_src"
             log "Sample will not be marked as done; will retry next cycle."
-            continue
+					fi
+          continue
         fi
 
         # If there is a note *and* an output directory, we keep the outputs
@@ -544,9 +365,6 @@ move_output_to_storage() {
             log "Sample $sra/$srr has note in summary but also an output directory:"
             log "  note=$note_trimmed"
         fi
-
-        # Delete all work directories associated with this sample.
-        delete_sample_work_dirs "$sra" "$srr"
 
         sample_dest_parent="$DEST_DIR/$sra"
         sample_dest="$sample_dest_parent/$srr"
@@ -587,10 +405,8 @@ log "  Dest dir: $DEST_DIR"
 log "  Interval: $INTERVAL_MINS minute(s) (= $SLEEP_SECONDS seconds)"
 log "  State   : $STATE_FILE"
 log "  Pending : $PENDING_FILE"
-log "  WorkIdx : $WORK_INDEX_FILE"
 
 while :; do
-    build_workdir_index
     check_pending_jobs
     move_output_to_storage
     log "Cycle complete; sleeping for $INTERVAL_MINS minute(s)."
