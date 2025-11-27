@@ -456,174 +456,220 @@ process APPEND_SUMMARY {
 
 //-- Workflow ------------------------------------------------------------------
 workflow {
-  if (params.help) {
-    helpMessage()
-    exit 0
-  }
-
-  if (!params.sra || !params.uniprot_db || !params.taxa \
-      || !params.taxdump || !params.gtdb_ncbi_map \
-      || !params.sandpiper_db || !params.singlem_db) {
-    missingParametersError()
-  }
-
-  // Channel setup
-  outdir = file(params.outdir).toAbsolutePath().toString()
-  sra_ch = channel.fromPath(params.sra, checkIfExists: true)
-                  .splitCsv(header: true, strip: true)
-                  .map { row -> row.sra.trim() }
-                  .filter { it }
-                  .distinct()
-  taxa_ch           = channel.value( file(params.taxa) )
-  taxdump_ch        = channel.value( file(params.taxdump) )
-  gtdb_ncbi_map_ch  = channel.value( file(params.gtdb_ncbi_map) )
-  singlem_db_ch     = channel.value( file(params.singlem_db) )
-  sandpiper_db_ch   = channel.value( file(params.sandpiper_db) )
-  uniprot_db_ch     = channel.value( file(params.uniprot_db) )
-
-  // Validate taxa
-  validated_taxa = VALIDATE_TAXA(taxa_ch, taxdump_ch, gtdb_ncbi_map_ch).valid_taxa
-
-  // Step 1: extract metadata & filter SRR
-  sra_metadata = DOWNLOAD_SRA_METADATA(sra_ch, validated_taxa)
-  filtered_srr = sra_metadata.filtered_sra
-
-  // Build nested channels per CSV, then flatten
-  srr_ch = filtered_srr.map { sra, csvfile -> file(csvfile)}
-            .splitCsv(header: true, strip: true)
-            .map { row ->
-                def sra = (row.accession ?: '').trim()
-                def srr = (row.run_accession ?: '').trim()
-                def platform = (row.instrument_platform ?: '').trim()
-                def model = (row.instrument_model ?: '').trim()
-                def strategy = (row.library_strategy ?: '').trim()
-                def assembler = (row.assembler ?: '').trim()
-                [sra, srr, platform, model, strategy, assembler]
-            }
-            .filter { it[1] }  // Ensure run_accession (SRR) is not empty
-            .distinct()
-
-  // Step 2: check if srr has sandpiper results
-  sandpiper = SANDPIPER(srr_ch, validated_taxa, sandpiper_db_ch)
-  // decision: NEGATIVE / RUN_SINGLEM / PASS
-  sandpiper_decision_ch = sandpiper.decision.map { sra, srr, platform, model, strategy, assembler, dec_path ->
-      def decision = file(dec_path).text.trim()
-      tuple(sra, srr, platform, model, strategy, assembler, decision)
-  }
-
-  srr_prescreened = sandpiper_decision_ch
-    .filter { sra, srr, platform, model, strategy, assembler, decision ->
-        decision == 'PASS' || decision == 'RUN_SINGLEM'
+  main:
+    if (params.help) {
+      helpMessage()
+      exit 0
     }
 
-  // Step 3: download SRR reads
-  download_srr = DOWNLOAD_SRR(srr_prescreened)
-  srr_reads = download_srr.reads.map { sra, srr, platform, model, strategy, asm, sandpiper_dec, reads, asm_txt ->
-    def fixedAsm = file(asm_txt)?.text?.trim() ?: asm
-    tuple(sra, srr, platform, model, strategy, fixedAsm, sandpiper_dec, reads)
-  }
-
-  // Step 4: run SingleM to screen reads
-  singlem = SINGLEM(srr_reads, validated_taxa, singlem_db_ch)
-  singlem_reads = singlem.reads
-
-  // Step 5: assemble reads
-  short_ch       = singlem_reads.filter { sra, srr, platform, model, strategy, assembler, reads -> assembler.equalsIgnoreCase('short') }
-  long_nano_ch   = singlem_reads.filter { sra, srr, platform, model, strategy, assembler, reads -> assembler.equalsIgnoreCase('long_nano') }
-  long_pacbio_ch = singlem_reads.filter { sra, srr, platform, model, strategy, assembler, reads -> assembler.equalsIgnoreCase('long_pacbio') }
-  long_hifi_ch   = singlem_reads.filter { sra, srr, platform, model, strategy, assembler, reads -> assembler.equalsIgnoreCase('long_hifi') }
-
-  spades_asm     = METASPADES(short_ch)
-  flyenano_asm   = METAFLYE_NANO(long_nano_ch)
-  flyepacbio_asm = METAFLYE_PACBIO(long_pacbio_ch)
-  hifimeta_asm   = MYLOASM(long_hifi_ch)
-
-  // Step 6: run DIAMOND
-  asm_fasta_ch = channel.empty()
-                        .mix(spades_asm.assembly_fasta)
-                        .mix(flyenano_asm.assembly_fasta)
-                        .mix(flyepacbio_asm.assembly_fasta)
-                        .mix(hifimeta_asm.assembly_fasta)
-
-
-  diamond = DIAMOND(asm_fasta_ch, uniprot_db_ch)
-
-  // Step 7. run BlobTools
-  // Merge all BAM+Bai streams
-  bam_ch = channel.empty()
-                  .mix(spades_asm.assembly_bam)
-                  .mix(flyenano_asm.assembly_bam)
-                  .mix(flyepacbio_asm.assembly_bam)
-                  .mix(hifimeta_asm.assembly_bam)
-
-  // Key every stream by (sra,srr,assembler)
-  fasta_by  = asm_fasta_ch.map   { sra, srr, platform, model, strategy, assembler, fasta -> tuple([sra,srr], [platform,model,strategy,assembler,fasta]) }
-  blast_by  = diamond.blast.map  { sra, srr, blast  -> tuple([sra,srr], blast) }
-  bam_by    = bam_ch.map         { sra, srr, bam, csi -> tuple([sra,srr], [bam,csi]) }
-
-  // Join (fasta * diamond) then * bam
-  fasta_blast = fasta_by.join(blast_by)
-  fasta_blast_bam = fasta_blast.join(bam_by)
-
-  // Unkey + call BlobTools
-  blobtools_in = fasta_blast_bam.map { key, fasta, blast, pair ->
-    def (sra, srr) = key
-    def (platform, model, strategy, assembler, assembly) = fasta
-    def (bam, csi) = pair
-    tuple(sra, srr, platform, model, strategy, assembler, assembly, blast, bam, csi)
-  }
-
-  blobtools = BLOBTOOLS(blobtools_in, taxdump_ch)
-
-  // Step 8: extract taxa
-  taxa_extraction = EXTRACT_TAXA(blobtools.blobtable, validated_taxa, taxdump_ch)
-
-  // Step 9: append to global summary
-  skipped_srr = sra_metadata.skipped_sra
-    .map { sra, csvfile -> file(csvfile) }
-    .splitCsv(header: true, strip: true)
-    .map { row ->
-      def sra       = (row.accession ?: '').trim()
-      def srr       = (row.run_accession ?: '').trim()
-      def platform  = (row.instrument_platform ?: '').trim()
-      def model     = (row.instrument_model ?: '').trim()
-      def strategy  = (row.library_strategy ?: '').trim()
-      def note      = "did not match the criteria: ${(row.skip_reason ?: '').trim()}"
-      // assembler is empty for skipped rows
-      tuple(sra, srr, platform, model, strategy, '', note)
+    if (!params.sra || !params.uniprot_db || !params.taxa \
+        || !params.taxdump || !params.gtdb_ncbi_map \
+        || !params.sandpiper_db || !params.singlem_db) {
+      missingParametersError()
     }
-    .filter { it[1] } // keep only rows with srr
 
-  // Collect all errors
-  errors = channel.empty()
-                  .mix(sra_metadata.note)
-                  .mix(sandpiper.note)
-                  .mix(download_srr.note)
-                  .mix(singlem.note)
-                  .mix(spades_asm.note)
-                  .mix(flyenano_asm.note)
-                  .mix(flyepacbio_asm.note)
-                  .mix(hifimeta_asm.note)
-                  .mix(diamond.note)
-                  .mix(blobtools.note)
-                  .mix(taxa_extraction.note)
-                  .map { sra, srr, platform, model, strategy, assembler, note_path ->
-                    def note = file(note_path).text.trim()
-                    tuple(sra, srr, platform, model, strategy, assembler, note)
-                  }
-                  .mix(skipped_srr)
+    // Channel setup
+    outdir = file(params.outdir).toAbsolutePath().toString()
+    sra_ch = channel.fromPath(params.sra, checkIfExists: true)
+                    .splitCsv(header: true, strip: true)
+                    .map { row -> row.sra.trim() }
+                    .filter { it }
+                    .distinct()
+    taxa_ch           = channel.value( file(params.taxa) )
+    taxdump_ch        = channel.value( file(params.taxdump) )
+    gtdb_ncbi_map_ch  = channel.value( file(params.gtdb_ncbi_map) )
+    singlem_db_ch     = channel.value( file(params.singlem_db) )
+    sandpiper_db_ch   = channel.value( file(params.sandpiper_db) )
+    uniprot_db_ch     = channel.value( file(params.uniprot_db) )
+
+    // Validate taxa
+    validated_taxa = VALIDATE_TAXA(taxa_ch, taxdump_ch, gtdb_ncbi_map_ch).valid_taxa
+
+    // Step 1: extract metadata & filter SRR
+    sra_metadata = DOWNLOAD_SRA_METADATA(sra_ch, validated_taxa)
+    filtered_srr = sra_metadata.filtered_sra
+
+    // Build nested channels per CSV, then flatten
+    srr_ch = filtered_srr.map { sra, csvfile -> file(csvfile)}
+              .splitCsv(header: true, strip: true)
+              .map { row ->
+                  def sra = (row.accession ?: '').trim()
+                  def srr = (row.run_accession ?: '').trim()
+                  def platform = (row.instrument_platform ?: '').trim()
+                  def model = (row.instrument_model ?: '').trim()
+                  def strategy = (row.library_strategy ?: '').trim()
+                  def assembler = (row.assembler ?: '').trim()
+                  [sra, srr, platform, model, strategy, assembler]
+              }
+              .filter { it[1] }  // Ensure run_accession (SRR) is not empty
+              .distinct()
+
+    // Step 2: check if srr has sandpiper results
+    sandpiper = SANDPIPER(srr_ch, validated_taxa, sandpiper_db_ch)
+    // decision: NEGATIVE / RUN_SINGLEM / PASS
+    sandpiper_decision_ch = sandpiper.decision.map { sra, srr, platform, model, strategy, assembler, dec_path ->
+        def decision = file(dec_path).text.trim()
+        tuple(sra, srr, platform, model, strategy, assembler, decision)
+    }
+
+    srr_prescreened = sandpiper_decision_ch
+      .filter { sra, srr, platform, model, strategy, assembler, decision ->
+          decision == 'PASS' || decision == 'RUN_SINGLEM'
+      }
+
+    // Step 3: download SRR reads
+    download_srr = DOWNLOAD_SRR(srr_prescreened)
+    srr_reads = download_srr.reads.map { sra, srr, platform, model, strategy, asm, sandpiper_dec, reads, asm_txt ->
+      def fixedAsm = file(asm_txt)?.text?.trim() ?: asm
+      tuple(sra, srr, platform, model, strategy, fixedAsm, sandpiper_dec, reads)
+    }
+
+    // Step 4: run SingleM to screen reads
+    singlem = SINGLEM(srr_reads, validated_taxa, singlem_db_ch)
+    singlem_reads = singlem.reads
+
+    // Step 5: assemble reads
+    short_ch       = singlem_reads.filter { sra, srr, platform, model, strategy, assembler, reads -> assembler.equalsIgnoreCase('short') }
+    long_nano_ch   = singlem_reads.filter { sra, srr, platform, model, strategy, assembler, reads -> assembler.equalsIgnoreCase('long_nano') }
+    long_pacbio_ch = singlem_reads.filter { sra, srr, platform, model, strategy, assembler, reads -> assembler.equalsIgnoreCase('long_pacbio') }
+    long_hifi_ch   = singlem_reads.filter { sra, srr, platform, model, strategy, assembler, reads -> assembler.equalsIgnoreCase('long_hifi') }
+
+    spades_asm     = METASPADES(short_ch)
+    flyenano_asm   = METAFLYE_NANO(long_nano_ch)
+    flyepacbio_asm = METAFLYE_PACBIO(long_pacbio_ch)
+    hifimeta_asm   = MYLOASM(long_hifi_ch)
+
+    // Step 6: run DIAMOND
+    asm_fasta_ch = channel.empty()
+                          .mix(spades_asm.assembly_fasta)
+                          .mix(flyenano_asm.assembly_fasta)
+                          .mix(flyepacbio_asm.assembly_fasta)
+                          .mix(hifimeta_asm.assembly_fasta)
 
 
-  failed_sra = LOG_FAILED_PROCESS(errors)
-  succeeded_sra = taxa_extraction.summary.map { sra, srr, platform, model, strategy, assembler, summary_csv ->
-                                                tuple(sra, srr, platform, model, strategy, assembler, summary_csv, '')
-                                              }
+    diamond = DIAMOND(asm_fasta_ch, uniprot_db_ch)
 
-  // Combine succeeded and failed
-  summary = channel.empty()
-                   .mix(succeeded_sra)
-                   .mix(failed_sra)
+    // Step 7. run BlobTools
+    // Merge all BAM+Bai streams
+    bam_ch = channel.empty()
+                    .mix(spades_asm.assembly_bam)
+                    .mix(flyenano_asm.assembly_bam)
+                    .mix(flyepacbio_asm.assembly_bam)
+                    .mix(hifimeta_asm.assembly_bam)
 
-  // Write summary.tsv into output dir (not work dir)
-  APPEND_SUMMARY(summary, outdir)
+    // Key every stream by (sra,srr,assembler)
+    fasta_by  = asm_fasta_ch.map   { sra, srr, platform, model, strategy, assembler, fasta -> tuple([sra,srr], [platform,model,strategy,assembler,fasta]) }
+    blast_by  = diamond.blast.map  { sra, srr, blast  -> tuple([sra,srr], blast) }
+    bam_by    = bam_ch.map         { sra, srr, bam, csi -> tuple([sra,srr], [bam,csi]) }
+
+    // Join (fasta * diamond) then * bam
+    fasta_blast = fasta_by.join(blast_by)
+    fasta_blast_bam = fasta_blast.join(bam_by)
+
+    // Unkey + call BlobTools
+    blobtools_in = fasta_blast_bam.map { key, fasta, blast, pair ->
+      def (sra, srr) = key
+      def (platform, model, strategy, assembler, assembly) = fasta
+      def (bam, csi) = pair
+      tuple(sra, srr, platform, model, strategy, assembler, assembly, blast, bam, csi)
+    }
+
+    blobtools = BLOBTOOLS(blobtools_in, taxdump_ch)
+
+    // Step 8: extract taxa
+    taxa_extraction = EXTRACT_TAXA(blobtools.blobtable, validated_taxa, taxdump_ch)
+
+    // Step 9: append to global summary
+    skipped_srr = sra_metadata.skipped_sra
+      .map { sra, csvfile -> file(csvfile) }
+      .splitCsv(header: true, strip: true)
+      .map { row ->
+        def sra       = (row.accession ?: '').trim()
+        def srr       = (row.run_accession ?: '').trim()
+        def platform  = (row.instrument_platform ?: '').trim()
+        def model     = (row.instrument_model ?: '').trim()
+        def strategy  = (row.library_strategy ?: '').trim()
+        def note      = "did not match the criteria: ${(row.skip_reason ?: '').trim()}"
+        // assembler is empty for skipped rows
+        tuple(sra, srr, platform, model, strategy, '', note)
+      }
+      .filter { it[1] } // keep only rows with srr
+
+    // Collect all errors
+    errors = channel.empty()
+                    .mix(sra_metadata.note)
+                    .mix(sandpiper.note)
+                    .mix(download_srr.note)
+                    .mix(singlem.note)
+                    .mix(spades_asm.note)
+                    .mix(flyenano_asm.note)
+                    .mix(flyepacbio_asm.note)
+                    .mix(hifimeta_asm.note)
+                    .mix(diamond.note)
+                    .mix(blobtools.note)
+                    .mix(taxa_extraction.note)
+                    .map { sra, srr, platform, model, strategy, assembler, note_path ->
+                      def note = file(note_path).text.trim()
+                      tuple(sra, srr, platform, model, strategy, assembler, note)
+                    }
+                    .mix(skipped_srr)
+
+
+    failed_sra = LOG_FAILED_PROCESS(errors)
+    succeeded_sra = taxa_extraction.summary.map { sra, srr, platform, model, strategy, assembler, summary_csv ->
+                                                  tuple(sra, srr, platform, model, strategy, assembler, summary_csv, '')
+                                                }
+
+    // Combine succeeded and failed
+    summary = channel.empty()
+                    .mix(succeeded_sra)
+                    .mix(failed_sra)
+
+    // Write summary.tsv into output dir (not work dir)
+    APPEND_SUMMARY(summary, outdir)
+
+  onComplete:
+    def outdirPath  = file(params.outdir ?: './output').toAbsolutePath()
+    def summaryFile = outdirPath.resolve('summary.tsv')
+    def traceFile   = file("${workflow.launchDir}/execution-report/trace.tsv").toAbsolutePath()
+    def scriptFile  = file("${workflow.projectDir}/bin/annotate_summary_from_trace.py").toAbsolutePath()
+
+    log.info "onComplete: summary.tsv -> ${summaryFile}"
+    log.info "onComplete: trace.tsv   -> ${traceFile}"
+    log.info "onComplete: annotator   -> ${scriptFile}"
+
+    // Sanity checks
+    if( !summaryFile.exists() ) {
+      log.warn "onComplete: ${summaryFile} not found; skipping scheduler annotation"
+      return
+    }
+    if( !traceFile.exists() ) {
+        log.warn "onComplete: ${traceFile} not found; skipping scheduler annotation"
+        return
+    }
+
+    // python3 annotate_summary_from_trace.py summary.tsv trace.tsv
+    def cmd = [
+      'python3',
+      scriptFile.toString(),
+      summaryFile.toString(),
+      traceFile.toString()
+    ]
+
+    log.info "onComplete: running ${cmd.join(' ')}"
+
+    // Run the script in the launch directory (where execution-report lives)
+    def proc = new ProcessBuilder(cmd)
+      .directory( workflow.launchDir.toFile() )
+      .redirectError( java.lang.ProcessBuilder.Redirect.INHERIT )
+      .redirectOutput( java.lang.ProcessBuilder.Redirect.INHERIT )
+      .start()
+
+    int rc = proc.waitFor()
+    if( rc != 0 ) {
+      log.warn "onComplete: annotator script exited with code ${rc}"
+    }
+    else {
+      log.info "onComplete: summary.tsv successfully annotated with scheduler error information"
+    }
 }
