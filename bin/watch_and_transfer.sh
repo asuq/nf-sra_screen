@@ -208,7 +208,7 @@ check_pending_jobs() {
                 if (!(base in best) || rank>best[base]) {
                     best[base]=rank; state[base]=st; exitc[base]=ex
                 }
-            }key
+            }
             END {
                 for (b in best) print b "|" state[b] "|" exitc[b]
             }
@@ -283,7 +283,8 @@ move_output_to_storage() {
     #   - if note starts with "did not match the criteria": mark processed (no transfer)
     #   - else if note is non-empty and no output dir exists: mark processed (no transfer)
     #   - else, ensure output directory exists, then submit an sbatch rsync job
-    #     that transfers the directory and removes the source on success.
+    #     that transfers the directory and removes the source on success, and
+		#     deletes the parent SRA directory if it becomes empty
 
     if [ ! -r "$SUMMARY_FILE" ]; then
         log "summary.tsv not readable: $SUMMARY_FILE -- skipping this cycle."
@@ -312,7 +313,10 @@ move_output_to_storage() {
         # Normalise note (trim leading/trailing whitespace)
         note_trimmed="$(printf '%s' "${note:-}" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
 
-        sample_src="$RUN_DIR/output/$sra/$srr"
+				sample_src_parent="$RUN_DIR/output/$sra"
+        sample_src="$sample_src_parent/$srr"
+        sample_dest_parent="$DEST_DIR/$sra"
+        sample_dest="$sample_dest_parent/$srr"
 
         # 1. Special case: "did not match the criteria: ..."
         # These are from the initial metadata filter. They are logically
@@ -345,6 +349,7 @@ move_output_to_storage() {
         log "Handling finished sample: sra=$sra  srr=$srr"
 
         # If we still have no output directory and no note, this is a weird partial state.
+				# If the destination already exists, assume a prior successful transfer.
         if [ ! -d "$sample_src" ]; then
 					if [ -d "$sample_dest" ]; then
 						log "Output dir missing but destination exists for $sra/$srr:"
@@ -366,11 +371,12 @@ move_output_to_storage() {
             log "  note=$note_trimmed"
         fi
 
-        sample_dest_parent="$DEST_DIR/$sra"
-        sample_dest="$sample_dest_parent/$srr"
-
-        # Transfer: rsync -a (copy) then rm -rf (remove source) if rsync succeeds.
-        transfer_cmd="mkdir -p \"$sample_dest\" && rsync -a \"$sample_src\"/ \"$sample_dest\"/ && rm -rf -- \"$sample_src\""
+        # Transfer: rsync -a (copy) then rm -rf (remove source SRR dir) if rsync succeeds.
+				# Finally, try to remove the parent SRA dir if it is empty; ignore failures there.
+        transfer_cmd="mkdir -p \"$sample_dest\" \
+											&& rsync -a \"$sample_src\"/ \"$sample_dest\"/ \
+											&& rm -rf -- \"$sample_src\" \
+											&& { rmdir \"$sample_src_parent\" 2>/dev/null || true; }"
 
         log "Submitting transfer job for $sra/$srr:"
         log "  from: $sample_src"
