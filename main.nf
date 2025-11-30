@@ -661,8 +661,9 @@ workflow {
     sandpiper_db_ch   = channel.value( file(params.sandpiper_db) )
     uniprot_db_ch     = channel.value( file(params.uniprot_db) )
 
-    // Validate taxa
+    // Step 0: validate taxa
     validated_taxa = VALIDATE_TAXA(taxa_ch, taxdump_ch, gtdb_ncbi_map_ch).valid_taxa
+
 
     // Step 1: extract metadata & filter SRR
     sra_metadata = DOWNLOAD_SRA_METADATA(sra_ch, validated_taxa)
@@ -683,6 +684,7 @@ workflow {
               .filter { it[1] }  // Ensure run_accession (SRR) is not empty
               .distinct()
 
+
     // Step 2: check if srr has sandpiper results
     sandpiper = SANDPIPER(srr_ch, validated_taxa, sandpiper_db_ch)
     // decision: NEGATIVE / RUN_SINGLEM / PASS
@@ -696,6 +698,7 @@ workflow {
           decision == 'PASS' || decision == 'RUN_SINGLEM'
       }
 
+
     // Step 3: download SRR reads
     download_srr = DOWNLOAD_SRR(srr_prescreened)
     srr_reads = download_srr.reads.map { sra, srr, platform, model, strategy, asm, sandpiper_dec, reads, asm_txt ->
@@ -703,9 +706,11 @@ workflow {
       tuple(sra, srr, platform, model, strategy, fixedAsm, sandpiper_dec, reads)
     }
 
+
     // Step 4: run SingleM to screen reads
     singlem = SINGLEM(srr_reads, validated_taxa, singlem_db_ch)
     singlem_reads = singlem.reads
+
 
     // Step 5: assemble reads
     short_ch       = singlem_reads.filter { sra, srr, platform, model, strategy, assembler, reads -> assembler.equalsIgnoreCase('short') }
@@ -718,6 +723,7 @@ workflow {
     flyepacbio_asm = METAFLYE_PACBIO(long_pacbio_ch)
     hifimeta_asm   = MYLOASM(long_hifi_ch)
 
+
     // Step 6: run DIAMOND
     asm_fasta_ch = channel.empty()
                           .mix(spades_asm.assembly_fasta)
@@ -728,18 +734,24 @@ workflow {
 
     diamond = DIAMOND(asm_fasta_ch, uniprot_db_ch)
 
+
     // Step 7. run BlobTools
     // Merge all BAM+Bai streams
-    bam_ch = channel.empty()
+    bam_src = channel.empty()
                     .mix(spades_asm.assembly_bam)
                     .mix(flyenano_asm.assembly_bam)
                     .mix(flyepacbio_asm.assembly_bam)
                     .mix(hifimeta_asm.assembly_bam)
 
+    // Split BAM stream: one copy for BlobTools, one for binning
+    bam_for_blobtools = channel.empty()
+    bam_for_binning   = channel.empty()
+    bam_src.into {bam_for_blobtools; bam_for_binning}
+
     // Key every stream by (sra,srr,assembler)
-    fasta_by  = asm_fasta_ch.map   { sra, srr, platform, model, strategy, assembler, fasta -> tuple([sra,srr], [platform,model,strategy,assembler,fasta]) }
-    blast_by  = diamond.blast.map  { sra, srr, blast  -> tuple([sra,srr], blast) }
-    bam_by    = bam_ch.map         { sra, srr, bam, csi -> tuple([sra,srr], [bam,csi]) }
+    fasta_by  = asm_fasta_ch.map      { sra, srr, platform, model, strategy, assembler, fasta -> tuple([sra,srr], [platform,model,strategy,assembler,fasta]) }
+    blast_by  = diamond.blast.map     { sra, srr, blast  -> tuple([sra,srr], blast) }
+    bam_by    = bam_for_blobtools.map { sra, srr, bam, csi -> tuple([sra,srr], [bam,csi]) }
 
     // Join (fasta * diamond) then * bam
     fasta_blast = fasta_by.join(blast_by)
@@ -755,10 +767,65 @@ workflow {
 
     blobtools = BLOBTOOLS(blobtools_in, taxdump_ch)
 
-    // Step 8: extract taxa
-    taxa_extraction = EXTRACT_TAXA(blobtools.blobtable, validated_taxa, taxdump_ch)
+    // Split blobtable: one copy for EXTRACT_TAXA, one for binning (incl. DASTool)
+    def blobtable_for_extract
+    def blobtable_for_binning
+    def blobtable_for_dastool
+    blobtools.blobtable.into { blobtable_for_extract; blobtable_for_binning; blobtable_for_dastool }
 
-    // Step 9: append to global summary
+
+    // Step 8: extract taxa
+    taxa_extraction = EXTRACT_TAXA(blobtable_for_extract, validated_taxa, taxdump_ch)
+
+
+    // Step 9: binning
+    // Build binning input: only samples with blobtable (successful BlobTools) and a BAM
+    bam_for_binning_by = bam_for_binning.map { sra, srr, bam, csi -> tuple([sra,srr], bam) }
+
+    binning_base_by = blobtable_for_binning.map { sra, srr, platform, model, strategy, assembler, assembly_fasta, blobtable ->
+                              tuple([sra,srr], [platform, model, strategy, assembler, assembly_fasta])
+                            }
+
+    binning_join = binning_base_by.join(bam_for_binning_by)
+    binning_input = binning_join.map { key, meta, bam ->
+      def (sra, srr) = key
+      def (platform, model, strategy, assembler, assembly_fasta) = meta
+      tuple(sra, srr, platform, model, strategy, assembler, assembly_fasta, bam)
+    }
+
+    // Run the individual binners
+    metabat_binning = METABAT(binning_input)
+    concoct_binning = CONCOCT(binning_input)
+    semibin_binning = SEMIBIN(binning_input, uniprot_db_ch)
+    rosella_binning = ROSELLA(binning_input)
+
+    // Prepare DASTool input: only samples where all four binners succeeded
+    dastool_base_by = blobtable_for_dastool.map { sra, srr, platform, model, strategy, assembler, assembly_fasta, blobtable ->
+                              tuple([sra,srr], [platform, model, strategy, assembler, assembly_fasta])
+                          }
+
+    metabat_by = metabat_binning.bins.map { sra, srr, metabat_dir -> tuple([sra,srr], metabat_dir) }
+    concoct_by = concoct_binning.bins.map { sra, srr, concoct_dir -> tuple([sra,srr], concoct_dir) }
+    semibin_by = semibin_binning.bins.map { sra, srr, semibin_dir, contig_bins -> tuple([sra,srr], [semibin_dir, contig_bins]) }
+    rosella_by = rosella_binning.bins.map { sra, srr, rosella_dir -> tuple([sra,srr], rosella_dir) }
+
+    base_metabat      = dastool_base_by.join(metabat_by)
+    base_metabat_conc = base_metabat.join(concoct_by)
+    base_mcs_semibin  = base_metabat_conc.join(semibin_by)
+    base_mcsr         = base_mcs_semibin.join(rosella_by)
+
+    dastool_in = base_mcsr.map { key, meta, metabat_dir, concoct_dir, semibin_data, rosella_dir ->
+      def (sra, srr) = key
+      def (platform, model, strategy, assembler, assembly_fasta) = meta
+      def (semibin_dir, contig_bins) = semibin_data
+      tuple(sra, srr, platform, model, strategy, assembler,
+            assembly_fasta, metabat_dir, concoct_dir, semibin_dir, contig_bins, rosella_dir)
+    }
+
+    dastool_binning = DASTOOL(dastool_in)
+
+
+    // Step 10: append to global summary
     skipped_srr = sra_metadata.skipped_sra
       .map { sra, csvfile -> file(csvfile) }
       .splitCsv(header: true, strip: true)
@@ -799,13 +866,86 @@ workflow {
                                                   tuple(sra, srr, platform, model, strategy, assembler, summary_csv, '')
                                                 }
 
+    // Collect all binning FAIL.notes (MetaBAT, CONCOCT, SemiBin2, Rosella, DASTool)
+    binning_errors_raw = channel.empty()
+                        .mix(metabat_binning.note)
+                        .mix(concoct_binning.note)
+                        .mix(semibin_binning.note)
+                        .mix(rosella_binning.note)
+                        .mix(dastool_binning.note)
+
+    // Group binning FAIL.notes by sample
+    binning_errors_grouped = binning_errors_raw
+      .map { sra, srr, platform, model, strategy, assembler, note_path ->
+        def key = [sra, srr, platform, model, strategy, assembler]
+        tuple(key, note_path)
+      }
+      .groupTuple()
+      .map { key, note_paths ->
+        def (sra, srr, platform, model, strategy, assembler) = key
+        // pass list of note files to the process
+        tuple(sra, srr, platform, model, strategy, assembler, note_paths)
+      }
+
+    // Aggregate binning errors per sample into a single note string
+    binning_notes = BINNING_ERROR_SUMMARY(binning_errors_grouped).binning_notes
+
+    // Key succeeded_sra and binning_notes by sample
+    succ_keyed = succeeded_sra.map { sra, srr, platform, model, strategy, assembler, summary_csv, note ->
+      def key   = [sra, srr, platform, model, strategy, assembler]
+      def value = [summary_csv, note]  // note is '' here
+      tuple(key, value)
+    }
+
+    binning_keyed = binning_notes.map { sra, srr, platform, model, strategy, assembler, bin_note_file ->
+      def key  = [sra, srr, platform, model, strategy, assembler]
+      def note = file(bin_note_file).text.trim()
+      tuple(key, note)
+    }
+
+    // Combine successes and binning notes; group by key
+    succ_and_bin = channel.empty()
+                        .mix(succ_keyed)
+                        .mix(binning_keyed)
+                        .groupTuple()
+
+    // Build final succeeded_sra with binning annotations in the note field
+    succeeded_with_binning = succ_and_bin
+      .map { key, values ->
+        def (sra, srr, platform, model, strategy, assembler) = key
+
+        // Find the summary entry (List [summary_csv, base_note])
+        def summaryEntry = values.find { it instanceof List && it.size() == 2 }
+        if (!summaryEntry) {
+          return null   // no summary => not a "successful" sample; ignore here
+        }
+
+        def summary_csv = summaryEntry[0]
+        def base_note   = summaryEntry[1] ?: ''
+
+        // All other values are binning notes (Strings)
+        def bin_notes = values.findAll { !(it instanceof List) }
+                              .collect { it as String }
+                              .findAll { it }
+
+        def bin_note   = bin_notes ? bin_notes.join('; ') : ''
+        def final_note = base_note
+        if (bin_note) {
+          final_note = final_note ? "${final_note}; ${bin_note}" : bin_note
+        }
+
+        tuple(sra, srr, platform, model, strategy, assembler, summary_csv, final_note)
+      }
+      .filter { it != null }
+
     // Combine succeeded and failed
     summary = channel.empty()
-                    .mix(succeeded_sra)
+                    .mix(succeeded_with_binning)
                     .mix(failed_sra)
 
     // Write summary.tsv into output dir (not work dir)
     APPEND_SUMMARY(summary, outdir)
+
 
   onComplete:
     def outdirPath  = file(params.outdir ?: './output').toAbsolutePath()
