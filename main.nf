@@ -700,6 +700,14 @@ workflow PRE_SCREENING {
 }
 
 
+workflow ASSEMBLY {
+  take:
+    singlem_reads
+    validated_taxa
+    uniprot_db_ch
+    taxdump_ch
+
+  main:
     // Step 5: assemble reads
     short_ch       = singlem_reads.filter { sra, srr, platform, model, strategy, assembler, reads -> assembler.equalsIgnoreCase('short') }
     long_nano_ch   = singlem_reads.filter { sra, srr, platform, model, strategy, assembler, reads -> assembler.equalsIgnoreCase('long_nano') }
@@ -711,38 +719,30 @@ workflow PRE_SCREENING {
     flyepacbio_asm = METAFLYE_PACBIO(long_pacbio_ch)
     hifimeta_asm   = MYLOASM(long_hifi_ch)
 
-
-    // Step 6: run DIAMOND
+    // Step 6: DIAMOND
     asm_fasta_ch = channel.empty()
-                          .mix(spades_asm.assembly_fasta)
-                          .mix(flyenano_asm.assembly_fasta)
-                          .mix(flyepacbio_asm.assembly_fasta)
-                          .mix(hifimeta_asm.assembly_fasta)
-
+                        .mix(spades_asm.assembly_fasta)
+                        .mix(flyenano_asm.assembly_fasta)
+                        .mix(flyepacbio_asm.assembly_fasta)
+                        .mix(hifimeta_asm.assembly_fasta)
 
     diamond = DIAMOND(asm_fasta_ch, uniprot_db_ch)
 
-
-    // Step 7. run BlobTools
-    // Merge all BAM+Bai streams
+    // BAMs for BlobTools and binning
     bam_src = channel.empty()
-                    .mix(spades_asm.assembly_bam)
-                    .mix(flyenano_asm.assembly_bam)
-                    .mix(flyepacbio_asm.assembly_bam)
-                    .mix(hifimeta_asm.assembly_bam)
+                  .mix(spades_asm.assembly_bam)
+                  .mix(flyenano_asm.assembly_bam)
+                  .mix(flyepacbio_asm.assembly_bam)
+                  .mix(hifimeta_asm.assembly_bam)
 
-    // Split BAM stream: one copy for BlobTools, one for binning
-    bam_for_blobtools = channel.empty()
-    bam_for_binning   = channel.empty()
-    bam_src.into {bam_for_blobtools; bam_for_binning}
-
+    // Step 7: BlobTools
     // Key every stream by (sra,srr,assembler)
-    fasta_by  = asm_fasta_ch.map      { sra, srr, platform, model, strategy, assembler, fasta -> tuple([sra,srr], [platform,model,strategy,assembler,fasta]) }
-    blast_by  = diamond.blast.map     { sra, srr, blast  -> tuple([sra,srr], blast) }
-    bam_by    = bam_for_blobtools.map { sra, srr, bam, csi -> tuple([sra,srr], [bam,csi]) }
+    fasta_by = asm_fasta_ch.map  { sra, srr, platform, model, strategy, assembler, fasta -> tuple([sra,srr], [platform,model,strategy,assembler,fasta]) }
+    blast_by = diamond.blast.map { sra, srr, blast -> tuple([sra,srr], blast) }
+    bam_by   = bam_src.map       { sra, srr, bam, csi -> tuple([sra,srr], [bam,csi]) }
 
     // Join (fasta * diamond) then * bam
-    fasta_blast = fasta_by.join(blast_by)
+    fasta_blast     = fasta_by.join(blast_by)
     fasta_blast_bam = fasta_blast.join(bam_by)
 
     // Unkey + call BlobTools
@@ -755,16 +755,27 @@ workflow PRE_SCREENING {
 
     blobtools = BLOBTOOLS(blobtools_in, taxdump_ch)
 
-    // Split blobtable: one copy for EXTRACT_TAXA, one for binning (incl. DASTool)
-    def blobtable_for_extract
-    def blobtable_for_binning
-    def blobtable_for_dastool
-    blobtools.blobtable.into { blobtable_for_extract; blobtable_for_binning; blobtable_for_dastool }
+    // Step 8: EXTRACT_TAXA
+    taxa_extraction = EXTRACT_TAXA(blobtools.blobtable, validated_taxa, taxdump_ch)
 
+    assembly_notes_ch = channel.empty()
+                          .mix(spades_asm.note)
+                          .mix(flyenano_asm.note)
+                          .mix(flyepacbio_asm.note)
+                          .mix(hifimeta_asm.note)
 
-    // Step 8: extract taxa
-    taxa_extraction = EXTRACT_TAXA(blobtable_for_extract, validated_taxa, taxdump_ch)
+  emit:
+    // For binning
+    assembly_bam_all = bam_src
+    blobtable        = blobtools.blobtable
 
+    // For summary
+    taxa_summary     = taxa_extraction.summary
+    taxa_note        = taxa_extraction.note
+    assembly_notes   = assembly_notes_ch
+    diamond_note     = diamond.note
+    blobtools_note   = blobtools.note
+}
 
     // Step 9: binning
     // Build binning input: only samples with blobtable (successful BlobTools) and a BAM
@@ -965,6 +976,9 @@ workflow {
 
     // Step 1: PRE_SCREENING: DOWNLOAD_SRA_METADATA -> SANDPIPER -> DOWNLOAD_SRR -> SINGLEM
     pre = PRE_SCREENING(sra_ch, validated_taxa, sandpiper_db_ch, singlem_db_ch)
+
+    // Step 2: ASSEMBLY: assemblers -> DIAMOND -> BLOBTOOLS -> EXTRACT_TAXA
+    asm = ASSEMBLY(pre.singlem_reads, validated_taxa, uniprot_db_ch, taxdump_ch)
 
 
 
