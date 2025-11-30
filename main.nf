@@ -585,6 +585,28 @@ process LOG_FAILED_PROCESS {
 }
 
 
+process BINNING_ERROR_SUMMARY {
+    tag "${sra}:${srr}"
+
+    input:
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path(note_files)
+
+    output:
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("binning_note.txt"), emit: binning_notes
+
+    script:
+    // note_files is a List<File> staged into the work dir
+    def list = note_files.collect { it.name }.join(' ')
+    """
+    # Concatenate and flatten all binning FAIL.note messages into a single line
+    cat ${list} 2>/dev/null \\
+      | tr '\\n' ' ' \\
+      | sed 's/  */ /g' \\
+      > binning_note.txt
+    """
+}
+
+
 process APPEND_SUMMARY {
     tag "${sra}:${srr}"
 
