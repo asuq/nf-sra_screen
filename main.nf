@@ -875,55 +875,79 @@ workflow BINNING {
 }
 
 
+workflow SUMMARY {
+  take:
+    // from PRE_SCREENING
+    sra_metadata_skipped
+    sra_metadata_note
+    sandpiper_note
+    download_srr_note
+    singlem_note
 
-    // Step 10: append to global summary
-    skipped_srr = sra_metadata.skipped_sra
+    // from ASSEMBLY
+    assembly_notes
+    diamond_note
+    blobtools_note
+    taxa_note
+    taxa_summary
+
+    // from BINNING
+    metabat_note
+    concoct_note
+    semibin_note
+    rosella_note
+    dastool_note
+
+    // constant
+    outdir
+
+  main:
+    // Turn skipped_sra CSVs into rows with a textual note
+    skipped_srr = sra_metadata_skipped
       .map { sra, csvfile -> file(csvfile) }
       .splitCsv(header: true, strip: true)
       .map { row ->
-        def sra       = (row.accession ?: '').trim()
-        def srr       = (row.run_accession ?: '').trim()
+        def sra       = (row.accession           ?: '').trim()
+        def srr       = (row.run_accession       ?: '').trim()
         def platform  = (row.instrument_platform ?: '').trim()
-        def model     = (row.instrument_model ?: '').trim()
-        def strategy  = (row.library_strategy ?: '').trim()
+        def model     = (row.instrument_model    ?: '').trim()
+        def strategy  = (row.library_strategy    ?: '').trim()
         def note      = "did not match the criteria: ${(row.skip_reason ?: '').trim()}"
         // assembler is empty for skipped rows
         tuple(sra, srr, platform, model, strategy, '', note)
       }
       .filter { it[1] } // keep only rows with srr
 
-    // Collect all errors
+    // Collect all non-binning errors
     errors = channel.empty()
-                    .mix(sra_metadata.note)
-                    .mix(sandpiper.note)
-                    .mix(download_srr.note)
-                    .mix(singlem.note)
-                    .mix(spades_asm.note)
-                    .mix(flyenano_asm.note)
-                    .mix(flyepacbio_asm.note)
-                    .mix(hifimeta_asm.note)
-                    .mix(diamond.note)
-                    .mix(blobtools.note)
-                    .mix(taxa_extraction.note)
+                    .mix(sra_metadata_note)
+                    .mix(sandpiper_note)
+                    .mix(download_srr_note)
+                    .mix(singlem_note)
+                    .mix(assembly_notes)
+                    .mix(diamond_note)
+                    .mix(blobtools_note)
+                    .mix(taxa_note)
                     .map { sra, srr, platform, model, strategy, assembler, note_path ->
                       def note = file(note_path).text.trim()
                       tuple(sra, srr, platform, model, strategy, assembler, note)
                     }
                     .mix(skipped_srr)
 
-
     failed_sra = LOG_FAILED_PROCESS(errors)
-    succeeded_sra = taxa_extraction.summary.map { sra, srr, platform, model, strategy, assembler, summary_csv ->
-                                                  tuple(sra, srr, platform, model, strategy, assembler, summary_csv, '')
-                                                }
+
+    // Successful samples: have a summary.csv (note starts empty)
+    succeeded_sra = taxa_summary.map { sra, srr, platform, model, strategy, assembler, summary_csv ->
+      tuple(sra, srr, platform, model, strategy, assembler, summary_csv, '')
+    }
 
     // Collect all binning FAIL.notes (MetaBAT, CONCOCT, SemiBin2, Rosella, DASTool)
     binning_errors_raw = channel.empty()
-                        .mix(metabat_binning.note)
-                        .mix(concoct_binning.note)
-                        .mix(semibin_binning.note)
-                        .mix(rosella_binning.note)
-                        .mix(dastool_binning.note)
+                          .mix(metabat_note)
+                          .mix(concoct_note)
+                          .mix(semibin_note)
+                          .mix(rosella_note)
+                          .mix(dastool_note)
 
     // Group binning FAIL.notes by sample
     binning_errors_grouped = binning_errors_raw
@@ -934,27 +958,23 @@ workflow BINNING {
       .groupTuple()
       .map { key, note_paths ->
         def (sra, srr, platform, model, strategy, assembler) = key
-        // pass list of note files to the process
         tuple(sra, srr, platform, model, strategy, assembler, note_paths)
       }
 
     // Aggregate binning errors per sample into a single note string
     binning_notes = BINNING_ERROR_SUMMARY(binning_errors_grouped).binning_notes
 
-    // Key succeeded_sra and binning_notes by sample
+    // Combine succeeded_sra and binning_notes by key
     succ_keyed = succeeded_sra.map { sra, srr, platform, model, strategy, assembler, summary_csv, note ->
       def key   = [sra, srr, platform, model, strategy, assembler]
-      def value = [summary_csv, note]  // note is '' here
+      def value = [summary_csv, note]  // base note is ''
       tuple(key, value)
     }
-
     binning_keyed = binning_notes.map { sra, srr, platform, model, strategy, assembler, bin_note_file ->
       def key  = [sra, srr, platform, model, strategy, assembler]
       def note = file(bin_note_file).text.trim()
       tuple(key, note)
     }
-
-    // Combine successes and binning notes; group by key
     succ_and_bin = channel.empty()
                         .mix(succ_keyed)
                         .mix(binning_keyed)
@@ -994,8 +1014,13 @@ workflow BINNING {
                     .mix(succeeded_with_binning)
                     .mix(failed_sra)
 
-    // Write summary.tsv into output dir (not work dir)
-    APPEND_SUMMARY(summary, outdir)
+    summary_result = APPEND_SUMMARY(summary, outdir)
+
+  emit:
+    global_summary = summary_result.global_summary
+}
+
+
 workflow {
   main:
     if (params.help) {
@@ -1035,6 +1060,32 @@ workflow {
     // Step 3: BINNING: METABAT, CONCOCT, SEMIBIN, ROSELLA -> DASTOOL
     binning = BINNING(asm.blobtable, asm.assembly_bam_all, uniprot_db_ch)
 
+    // Step 4: Build summary.tsv (including binning annotations)
+    SUMMARY(
+      // PRE_SCREENING: summary-related outputs
+      pre.sra_metadata_skipped,
+      pre.sra_metadata_note,
+      pre.sandpiper_note,
+      pre.download_srr_note,
+      pre.singlem_note,
+
+      // ASSEMBLY: summary-related outputs
+      asm.assembly_notes,
+      asm.diamond_note,
+      asm.blobtools_note,
+      asm.taxa_note,
+      asm.taxa_summary,
+
+      // BINNING: notes from each binner
+      binning.metabat_binning.note,
+      binning.concoct_binning.note,
+      binning.semibin_binning.note,
+      binning.rosella_binning.note,
+      binning.dastool_binning.note,
+
+      // constant
+      outdir
+    )
 
 
   onComplete:
