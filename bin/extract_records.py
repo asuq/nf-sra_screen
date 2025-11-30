@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-
 """
 Usage:
     extract_records --blobtable <BLOBTABLE.csv> --fasta <ASSEMBLY.fasta> \
@@ -226,12 +225,15 @@ def load_taxa_file(taxa_csv: Path) -> list[tuple[str, str]]:
     return dedup
 
 
-def select_identifiers(df: pd.DataFrame, rank: str, taxa: str) -> set[str]:
+def select_identifiers(df: pd.DataFrame, rank: str, taxa: str) -> tuple[str, ...]:
     col = INPUT_RANK_TO_COLUMN[rank]  # normalize 'realm'/'domain' → 'superkingdom'
     nulls = {"", "na", "none", "no-hit", "-", "nan"}
     series = df[col].astype(str).str.strip().str.lower()
     mask = (~series.isin(nulls)) & (series.eq(taxa.strip().lower()))
-    return set(df.loc[mask, "identifiers"].astype(str))
+
+    ids_series = df.loc[mask, "identifiers"].astype(str)
+    ids_series = ids_series.drop_duplicates()
+    return tuple(ids_series.tolist())
 
 
 def dispatch_fasta(fasta: Path, dispatch: dict[str, list[Path]]) -> None:
@@ -314,7 +316,7 @@ def main() -> int:
         with ids_path.open("w", newline="", encoding="utf-8") as fh:
             w = csv.writer(fh)
             w.writerow(["identifiers"])
-            for ident in sorted(ids):
+            for ident in ids:
                 w.writerow([ident])
         logging.info(f"{rank}={taxa}: {len(ids)} id(s) -> {ids_path.name}")
 
