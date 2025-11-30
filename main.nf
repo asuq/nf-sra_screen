@@ -530,6 +530,45 @@ process ROSELLA {
 }
 
 
+process DASTOOL {
+    tag "${sra}:${srr}"
+    publishDir "${params.outdir}/${sra}/${srr}/binning",
+      mode: 'copy',
+      overwrite: true,
+      saveAs: { filename ->
+        if (filename == "FAIL.note") return "dastool.FAIL.note"
+        return filename
+      }
+
+    input:
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler),
+          path(assembly_fasta),
+          path(metabat_dir),
+          path(concoct_dir),
+          path(semibin_dir),
+          path(semibin_contig_bins),
+          path(rosella_dir)
+
+    output:
+    tuple val(sra), val(srr), path("DASTool"),                                                             optional: true, emit: bins
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("FAIL.note"), optional: true, emit: note
+
+    script:
+    """
+    run_dastool.sh \\
+      --assembly "${assembly_fasta}" \\
+      --metabat-dir "${metabat_dir}" \\
+      --concoct-dir "${concoct_dir}" \\
+      --semibin-dir "${semibin_dir}" \\
+      --semibin-map "${semibin_contig_bins}" \\
+      --rosella-dir "${rosella_dir}" \\
+      --cpus ${task.cpus} \\
+      --attempt ${task.attempt} \\
+      --max-retries ${params.max_retries}
+    """
+}
+
+
 process LOG_FAILED_PROCESS {
   tag "${sra}"
 
