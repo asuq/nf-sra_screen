@@ -501,6 +501,35 @@ process SEMIBIN {
 }
 
 
+process ROSELLA {
+    tag "${sra}:${srr}"
+    publishDir "${params.outdir}/${sra}/${srr}/binning",
+      mode: 'copy',
+      overwrite: true,
+      saveAs: { filename ->
+        if (filename == "FAIL.note") return "rosella.FAIL.note"
+        return filename
+      }
+
+    input:
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path(assembly_fasta), path(assembly_bam)
+
+    output:
+    tuple val(sra), val(srr), path("rosella"),                                                             optional: true, emit: bins
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("FAIL.note"), optional: true, emit: note
+
+    script:
+    """
+    run_rosella.sh \\
+      --assembly "${assembly_fasta}" \\
+      --bam "${assembly_bam}" \\
+      --cpus ${task.cpus} \\
+      --attempt ${task.attempt} \\
+      --max-retries ${params.max_retries}
+    """
+}
+
+
 process LOG_FAILED_PROCESS {
   tag "${sra}"
 
