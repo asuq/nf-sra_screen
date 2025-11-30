@@ -97,7 +97,7 @@ process SANDPIPER {
     input:
     tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler)
     path valid_taxa
-    path sandpiper_db_ch
+    path sandpiper_db
 
     output:
     tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("sandpiper_decision.txt"),    emit: decision
@@ -110,7 +110,7 @@ process SANDPIPER {
     run_sandpiper.sh \\
       --srr "${srr}" \\
       --valid-taxa "${valid_taxa}" \\
-      --db "${sandpiper_db_ch}" \\
+      --db "${sandpiper_db}" \\
       --attempt ${task.attempt} \\
       --max-retries ${params.max_retries}
     """
@@ -161,7 +161,7 @@ process SINGLEM {
     input:
     tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), val(sandpiper), path(reads)
     path valid_taxa
-    path singlem_db_ch
+    path singlem_db
 
     output:
     tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("reads_ok/*.f*q*"), optional: true, emit: reads
@@ -175,7 +175,7 @@ process SINGLEM {
     run_singlem.sh \\
       --sandpiper-decision "${sandpiper}" \\
       --valid-taxa "${valid_taxa}" \\
-      --singlem-db "${singlem_db_ch}" \\
+      --singlem-db "${singlem_db}" \\
       --cpus ${task.cpus} \\
       --attempt ${task.attempt} \\
       --max-retries ${params.max_retries} \\
@@ -543,25 +543,30 @@ process DASTOOL {
     input:
     tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler),
           path(assembly_fasta),
-          path(metabat_dir),
-          path(concoct_dir),
-          path(semibin_dir),
-          path(semibin_contig_bins),
-          path(rosella_dir)
+          val(metabat_dir),
+          val(concoct_dir),
+          val(semibin_dir),
+          val(semibin_contig_bins),
+          val(rosella_dir)
 
     output:
-    tuple val(sra), val(srr), path("DASTool"),                                                             optional: true, emit: bins
+    tuple val(sra), val(srr), path("dastool"),                                                             optional: true, emit: bins
     tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("FAIL.note"), optional: true, emit: note
 
     script:
+    def metaDir     = metabat_dir          ?: ''
+    def concoctDir  = concoct_dir          ?: ''
+    def semibinDir  = semibin_dir          ?: ''
+    def semibinMap  = semibin_contig_bins  ?: ''
+    def rosellaDir  = rosella_dir          ?: ''
     """
     run_dastool.sh \\
       --assembly "${assembly_fasta}" \\
-      --metabat-dir "${metabat_dir}" \\
-      --concoct-dir "${concoct_dir}" \\
-      --semibin-dir "${semibin_dir}" \\
-      --semibin-map "${semibin_contig_bins}" \\
-      --rosella-dir "${rosella_dir}" \\
+      --metabat-dir "${metaDir}" \\
+      --concoct-dir "${concoctDir}" \\
+      --semibin-dir "${semibinDir}" \\
+      --semibin-map "${semibinMap}" \\
+      --rosella-dir "${rosellaDir}" \\
       --cpus ${task.cpus} \\
       --attempt ${task.attempt} \\
       --max-retries ${params.max_retries}
@@ -634,84 +639,79 @@ process APPEND_SUMMARY {
 
 
 //-- Workflow ------------------------------------------------------------------
-workflow {
+workflow PRE_SCREENING {
+  take:
+    sra_ch
+    validated_taxa
+    sandpiper_db_ch
+    singlem_db_ch
+
   main:
-    if (params.help) {
-      helpMessage()
-      exit 0
-    }
-
-    if (!params.sra || !params.uniprot_db || !params.taxa \
-        || !params.taxdump || !params.gtdb_ncbi_map \
-        || !params.sandpiper_db || !params.singlem_db) {
-      missingParametersError()
-    }
-
-    // Channel setup
-    outdir = file(params.outdir).toAbsolutePath().toString()
-    sra_ch = channel.fromPath(params.sra, checkIfExists: true)
-                    .splitCsv(header: true, strip: true)
-                    .map { row -> row.sra.trim() }
-                    .filter { it }
-                    .distinct()
-    taxa_ch           = channel.value( file(params.taxa) )
-    taxdump_ch        = channel.value( file(params.taxdump) )
-    gtdb_ncbi_map_ch  = channel.value( file(params.gtdb_ncbi_map) )
-    singlem_db_ch     = channel.value( file(params.singlem_db) )
-    sandpiper_db_ch   = channel.value( file(params.sandpiper_db) )
-    uniprot_db_ch     = channel.value( file(params.uniprot_db) )
-
-    // Step 0: validate taxa
-    validated_taxa = VALIDATE_TAXA(taxa_ch, taxdump_ch, gtdb_ncbi_map_ch).valid_taxa
-
-
     // Step 1: extract metadata & filter SRR
     sra_metadata = DOWNLOAD_SRA_METADATA(sra_ch, validated_taxa)
     filtered_srr = sra_metadata.filtered_sra
 
     // Build nested channels per CSV, then flatten
-    srr_ch = filtered_srr.map { sra, csvfile -> file(csvfile)}
+    srr_ch = filtered_srr.map { sra, csvfile -> file(csvfile) }
               .splitCsv(header: true, strip: true)
               .map { row ->
-                  def sra = (row.accession ?: '').trim()
-                  def srr = (row.run_accession ?: '').trim()
-                  def platform = (row.instrument_platform ?: '').trim()
-                  def model = (row.instrument_model ?: '').trim()
-                  def strategy = (row.library_strategy ?: '').trim()
+                  def sra       = (row.accession ?: '').trim()
+                  def srr       = (row.run_accession ?: '').trim()
+                  def platform  = (row.instrument_platform ?: '').trim()
+                  def model     = (row.instrument_model ?: '').trim()
+                  def strategy  = (row.library_strategy ?: '').trim()
                   def assembler = (row.assembler ?: '').trim()
                   [sra, srr, platform, model, strategy, assembler]
               }
-              .filter { it[1] }  // Ensure run_accession (SRR) is not empty
+              .filter { it[1] }  // ensure SRR not empty
               .distinct()
 
-
-    // Step 2: check if srr has sandpiper results
+    // Step 2: SANDPIPER prescreening
     sandpiper = SANDPIPER(srr_ch, validated_taxa, sandpiper_db_ch)
     // decision: NEGATIVE / RUN_SINGLEM / PASS
     sandpiper_decision_ch = sandpiper.decision.map { sra, srr, platform, model, strategy, assembler, dec_path ->
-        def decision = file(dec_path).text.trim()
-        tuple(sra, srr, platform, model, strategy, assembler, decision)
+      def decision = file(dec_path).text.trim()
+      tuple(sra, srr, platform, model, strategy, assembler, decision)
     }
 
     srr_prescreened = sandpiper_decision_ch
       .filter { sra, srr, platform, model, strategy, assembler, decision ->
-          decision == 'PASS' || decision == 'RUN_SINGLEM'
+        decision == 'PASS' || decision == 'RUN_SINGLEM'
       }
-
 
     // Step 3: download SRR reads
     download_srr = DOWNLOAD_SRR(srr_prescreened)
+
     srr_reads = download_srr.reads.map { sra, srr, platform, model, strategy, asm, sandpiper_dec, reads, asm_txt ->
       def fixedAsm = file(asm_txt)?.text?.trim() ?: asm
       tuple(sra, srr, platform, model, strategy, fixedAsm, sandpiper_dec, reads)
     }
 
-
-    // Step 4: run SingleM to screen reads
+    // Step 4: SINGLEM prescreening
     singlem = SINGLEM(srr_reads, validated_taxa, singlem_db_ch)
     singlem_reads = singlem.reads
 
+  emit:
+    // For assembly
+    singlem_reads         = singlem_reads
 
+    // For summary
+    sra_metadata_skipped  = sra_metadata.skipped_sra
+    sra_metadata_note     = sra_metadata.note
+    sandpiper_note        = sandpiper.note
+    download_srr_note     = download_srr.note
+    singlem_note          = singlem.note
+}
+
+
+workflow ASSEMBLY {
+  take:
+    singlem_reads
+    validated_taxa
+    uniprot_db_ch
+    taxdump_ch
+
+  main:
     // Step 5: assemble reads
     short_ch       = singlem_reads.filter { sra, srr, platform, model, strategy, assembler, reads -> assembler.equalsIgnoreCase('short') }
     long_nano_ch   = singlem_reads.filter { sra, srr, platform, model, strategy, assembler, reads -> assembler.equalsIgnoreCase('long_nano') }
@@ -723,38 +723,30 @@ workflow {
     flyepacbio_asm = METAFLYE_PACBIO(long_pacbio_ch)
     hifimeta_asm   = MYLOASM(long_hifi_ch)
 
-
-    // Step 6: run DIAMOND
+    // Step 6: DIAMOND
     asm_fasta_ch = channel.empty()
-                          .mix(spades_asm.assembly_fasta)
-                          .mix(flyenano_asm.assembly_fasta)
-                          .mix(flyepacbio_asm.assembly_fasta)
-                          .mix(hifimeta_asm.assembly_fasta)
-
+                        .mix(spades_asm.assembly_fasta)
+                        .mix(flyenano_asm.assembly_fasta)
+                        .mix(flyepacbio_asm.assembly_fasta)
+                        .mix(hifimeta_asm.assembly_fasta)
 
     diamond = DIAMOND(asm_fasta_ch, uniprot_db_ch)
 
-
-    // Step 7. run BlobTools
-    // Merge all BAM+Bai streams
+    // BAMs for BlobTools and binning
     bam_src = channel.empty()
-                    .mix(spades_asm.assembly_bam)
-                    .mix(flyenano_asm.assembly_bam)
-                    .mix(flyepacbio_asm.assembly_bam)
-                    .mix(hifimeta_asm.assembly_bam)
+                  .mix(spades_asm.assembly_bam)
+                  .mix(flyenano_asm.assembly_bam)
+                  .mix(flyepacbio_asm.assembly_bam)
+                  .mix(hifimeta_asm.assembly_bam)
 
-    // Split BAM stream: one copy for BlobTools, one for binning
-    bam_for_blobtools = channel.empty()
-    bam_for_binning   = channel.empty()
-    bam_src.into {bam_for_blobtools; bam_for_binning}
-
-    // Key every stream by (sra,srr,assembler)
-    fasta_by  = asm_fasta_ch.map      { sra, srr, platform, model, strategy, assembler, fasta -> tuple([sra,srr], [platform,model,strategy,assembler,fasta]) }
-    blast_by  = diamond.blast.map     { sra, srr, blast  -> tuple([sra,srr], blast) }
-    bam_by    = bam_for_blobtools.map { sra, srr, bam, csi -> tuple([sra,srr], [bam,csi]) }
+    // Step 7: BlobTools
+    // Key every stream by (sra,srr)
+    fasta_by = asm_fasta_ch.map  { sra, srr, platform, model, strategy, assembler, fasta -> tuple([sra,srr], [platform,model,strategy,assembler,fasta]) }
+    blast_by = diamond.blast.map { sra, srr, blast -> tuple([sra,srr], blast) }
+    bam_by   = bam_src.map       { sra, srr, bam, csi -> tuple([sra,srr], [bam,csi]) }
 
     // Join (fasta * diamond) then * bam
-    fasta_blast = fasta_by.join(blast_by)
+    fasta_blast     = fasta_by.join(blast_by)
     fasta_blast_bam = fasta_blast.join(bam_by)
 
     // Unkey + call BlobTools
@@ -767,112 +759,189 @@ workflow {
 
     blobtools = BLOBTOOLS(blobtools_in, taxdump_ch)
 
-    // Split blobtable: one copy for EXTRACT_TAXA, one for binning (incl. DASTool)
-    def blobtable_for_extract
-    def blobtable_for_binning
-    def blobtable_for_dastool
-    blobtools.blobtable.into { blobtable_for_extract; blobtable_for_binning; blobtable_for_dastool }
+    // Step 8: EXTRACT_TAXA
+    taxa_extraction = EXTRACT_TAXA(blobtools.blobtable, validated_taxa, taxdump_ch)
+
+    assembly_notes_ch = channel.empty()
+                          .mix(spades_asm.note)
+                          .mix(flyenano_asm.note)
+                          .mix(flyepacbio_asm.note)
+                          .mix(hifimeta_asm.note)
+
+  emit:
+    // For binning
+    assembly_bam_all = bam_src
+    blobtable        = blobtools.blobtable
+
+    // For summary
+    taxa_summary     = taxa_extraction.summary
+    taxa_note        = taxa_extraction.note
+    assembly_notes   = assembly_notes_ch
+    diamond_note     = diamond.note
+    blobtools_note   = blobtools.note
+}
 
 
-    // Step 8: extract taxa
-    taxa_extraction = EXTRACT_TAXA(blobtable_for_extract, validated_taxa, taxdump_ch)
+workflow BINNING {
+  take:
+    blobtable_ch
+    assembly_bam_ch
+    uniprot_db_ch
 
+  main:
+    // Build binning_input from blobtable + BAM
+    // blobtable_ch: (sra, srr, platform, model, strategy, assembler, assembly_fasta, blobtable)
+    // assembly_bam_ch: (sra, srr, bam, csi)
+    bam_by = assembly_bam_ch.map { sra, srr, bam, csi -> tuple([sra, srr], bam) }
+    binning_base_by = blobtable_ch.map { sra, srr, platform, model, strategy, assembler, assembly_fasta, blobtable ->
+      tuple([sra, srr], [platform, model, strategy, assembler, assembly_fasta])
+    }
+    binning_join = binning_base_by.join(bam_by)
 
-    // Step 9: binning
-    // Build binning input: only samples with blobtable (successful BlobTools) and a BAM
-    bam_for_binning_by = bam_for_binning.map { sra, srr, bam, csi -> tuple([sra,srr], bam) }
-
-    binning_base_by = blobtable_for_binning.map { sra, srr, platform, model, strategy, assembler, assembly_fasta, blobtable ->
-                              tuple([sra,srr], [platform, model, strategy, assembler, assembly_fasta])
-                            }
-
-    binning_join = binning_base_by.join(bam_for_binning_by)
+    // binning_input: (sra, srr, platform, model, strategy, assembler, assembly_fasta, bam)
     binning_input = binning_join.map { key, meta, bam ->
       def (sra, srr) = key
       def (platform, model, strategy, assembler, assembly_fasta) = meta
       tuple(sra, srr, platform, model, strategy, assembler, assembly_fasta, bam)
     }
 
-    // Run the individual binners
+    // Run individual binners
     metabat_binning = METABAT(binning_input)
     concoct_binning = CONCOCT(binning_input)
     semibin_binning = SEMIBIN(binning_input, uniprot_db_ch)
     rosella_binning = ROSELLA(binning_input)
 
-    // Prepare DASTool input: only samples where all four binners succeeded
-    dastool_base_by = blobtable_for_dastool.map { sra, srr, platform, model, strategy, assembler, assembly_fasta, blobtable ->
-                              tuple([sra,srr], [platform, model, strategy, assembler, assembly_fasta])
-                          }
-
-    metabat_by = metabat_binning.bins.map { sra, srr, metabat_dir -> tuple([sra,srr], metabat_dir) }
-    concoct_by = concoct_binning.bins.map { sra, srr, concoct_dir -> tuple([sra,srr], concoct_dir) }
-    semibin_by = semibin_binning.bins.map { sra, srr, semibin_dir, contig_bins -> tuple([sra,srr], [semibin_dir, contig_bins]) }
-    rosella_by = rosella_binning.bins.map { sra, srr, rosella_dir -> tuple([sra,srr], rosella_dir) }
-
-    base_metabat      = dastool_base_by.join(metabat_by)
-    base_metabat_conc = base_metabat.join(concoct_by)
-    base_mcs_semibin  = base_metabat_conc.join(semibin_by)
-    base_mcsr         = base_mcs_semibin.join(rosella_by)
-
-    dastool_in = base_mcsr.map { key, meta, metabat_dir, concoct_dir, semibin_data, rosella_dir ->
-      def (sra, srr) = key
-      def (platform, model, strategy, assembler, assembly_fasta) = meta
-      def (semibin_dir, contig_bins) = semibin_data
-      tuple(sra, srr, platform, model, strategy, assembler,
-            assembly_fasta, metabat_dir, concoct_dir, semibin_dir, contig_bins, rosella_dir)
+    // Prepare DASTool input: run if at least ONE binner produced bins
+    dastool_base_by = binning_input.map { sra, srr, platform, model, strategy, assembler, assembly_fasta, bam ->
+      tuple([sra,srr], [platform, model, strategy, assembler, assembly_fasta])
     }
+
+    // Tag each entry with a label
+    meta_by      = dastool_base_by.map { key, meta -> tuple(key, ['meta', meta]) }
+    metabat_by_key = metabat_binning.bins.map { sra, srr, metabat_dir -> tuple([sra,srr], ['metabat', metabat_dir]) }
+    concoct_by_key = concoct_binning.bins.map { sra, srr, concoct_dir -> tuple([sra,srr], ['concoct', concoct_dir]) }
+    semibin_by_key = semibin_binning.bins.map { sra, srr, semibin_dir, contig_bins -> tuple([sra,srr], ['semibin', [semibin_dir, contig_bins]]) }
+    rosella_by_key = rosella_binning.bins.map { sra, srr, rosella_dir -> tuple([sra,srr], ['rosella', rosella_dir]) }
+
+    // Group all tool-entries by sample
+    grouped = channel.empty()
+                .mix(meta_by)
+                .mix(metabat_by_key)
+                .mix(concoct_by_key)
+                .mix(semibin_by_key)
+                .mix(rosella_by_key)
+                .groupTuple()
+
+    // Build DASTool input
+    dastool_in = grouped.map { key, entries ->
+        def (sra, srr) = key
+        def meta_entry = entries.find { it[0] == 'meta' }
+        if (!meta_entry) return null  // should not happen
+
+        def meta = meta_entry[1]
+        def (platform, model, strategy, assembler, assembly_fasta) = meta
+        def metabat_dir  = entries.find { it[0] == 'metabat' }?.getAt(1)
+        def concoct_dir  = entries.find { it[0] == 'concoct' }?.getAt(1)
+        def semibin_data = entries.find { it[0] == 'semibin' }?.getAt(1)
+        def rosella_dir  = entries.find { it[0] == 'rosella' }?.getAt(1)
+        def (semibin_dir, contig_bins) = semibin_data ?: [null, null]
+
+        tuple(
+          sra, srr, platform, model, strategy, assembler,
+          assembly_fasta,
+          metabat_dir,
+          concoct_dir,
+          semibin_dir,
+          contig_bins,
+          rosella_dir
+        )
+      }
+      .filter { it != null }
 
     dastool_binning = DASTOOL(dastool_in)
 
+  emit:
+    metabat_note = metabat_binning.note
+    concoct_note = concoct_binning.note
+    semibin_note = semibin_binning.note
+    rosella_note = rosella_binning.note
+    dastool_note = dastool_binning.note
+}
 
-    // Step 10: append to global summary
-    skipped_srr = sra_metadata.skipped_sra
+
+workflow SUMMARY {
+  take:
+    // from PRE_SCREENING
+    sra_metadata_skipped
+    sra_metadata_note
+    sandpiper_note
+    download_srr_note
+    singlem_note
+
+    // from ASSEMBLY
+    assembly_notes
+    diamond_note
+    blobtools_note
+    taxa_note
+    taxa_summary
+
+    // from BINNING
+    metabat_note
+    concoct_note
+    semibin_note
+    rosella_note
+    dastool_note
+
+    // constant
+    outdir
+
+  main:
+    // Turn skipped_sra CSVs into rows with a textual note
+    skipped_srr = sra_metadata_skipped
       .map { sra, csvfile -> file(csvfile) }
       .splitCsv(header: true, strip: true)
       .map { row ->
-        def sra       = (row.accession ?: '').trim()
-        def srr       = (row.run_accession ?: '').trim()
+        def sra       = (row.accession           ?: '').trim()
+        def srr       = (row.run_accession       ?: '').trim()
         def platform  = (row.instrument_platform ?: '').trim()
-        def model     = (row.instrument_model ?: '').trim()
-        def strategy  = (row.library_strategy ?: '').trim()
+        def model     = (row.instrument_model    ?: '').trim()
+        def strategy  = (row.library_strategy    ?: '').trim()
         def note      = "did not match the criteria: ${(row.skip_reason ?: '').trim()}"
         // assembler is empty for skipped rows
         tuple(sra, srr, platform, model, strategy, '', note)
       }
       .filter { it[1] } // keep only rows with srr
 
-    // Collect all errors
+    // Collect all non-binning errors
     errors = channel.empty()
-                    .mix(sra_metadata.note)
-                    .mix(sandpiper.note)
-                    .mix(download_srr.note)
-                    .mix(singlem.note)
-                    .mix(spades_asm.note)
-                    .mix(flyenano_asm.note)
-                    .mix(flyepacbio_asm.note)
-                    .mix(hifimeta_asm.note)
-                    .mix(diamond.note)
-                    .mix(blobtools.note)
-                    .mix(taxa_extraction.note)
+                    .mix(sra_metadata_note)
+                    .mix(sandpiper_note)
+                    .mix(download_srr_note)
+                    .mix(singlem_note)
+                    .mix(assembly_notes)
+                    .mix(diamond_note)
+                    .mix(blobtools_note)
+                    .mix(taxa_note)
                     .map { sra, srr, platform, model, strategy, assembler, note_path ->
                       def note = file(note_path).text.trim()
                       tuple(sra, srr, platform, model, strategy, assembler, note)
                     }
                     .mix(skipped_srr)
 
-
     failed_sra = LOG_FAILED_PROCESS(errors)
-    succeeded_sra = taxa_extraction.summary.map { sra, srr, platform, model, strategy, assembler, summary_csv ->
-                                                  tuple(sra, srr, platform, model, strategy, assembler, summary_csv, '')
-                                                }
+
+    // Successful samples: have a summary.csv (note starts empty)
+    succeeded_sra = taxa_summary.map { sra, srr, platform, model, strategy, assembler, summary_csv ->
+      tuple(sra, srr, platform, model, strategy, assembler, summary_csv, '')
+    }
 
     // Collect all binning FAIL.notes (MetaBAT, CONCOCT, SemiBin2, Rosella, DASTool)
     binning_errors_raw = channel.empty()
-                        .mix(metabat_binning.note)
-                        .mix(concoct_binning.note)
-                        .mix(semibin_binning.note)
-                        .mix(rosella_binning.note)
-                        .mix(dastool_binning.note)
+                          .mix(metabat_note)
+                          .mix(concoct_note)
+                          .mix(semibin_note)
+                          .mix(rosella_note)
+                          .mix(dastool_note)
 
     // Group binning FAIL.notes by sample
     binning_errors_grouped = binning_errors_raw
@@ -883,27 +952,23 @@ workflow {
       .groupTuple()
       .map { key, note_paths ->
         def (sra, srr, platform, model, strategy, assembler) = key
-        // pass list of note files to the process
         tuple(sra, srr, platform, model, strategy, assembler, note_paths)
       }
 
     // Aggregate binning errors per sample into a single note string
     binning_notes = BINNING_ERROR_SUMMARY(binning_errors_grouped).binning_notes
 
-    // Key succeeded_sra and binning_notes by sample
+    // Combine succeeded_sra and binning_notes by key
     succ_keyed = succeeded_sra.map { sra, srr, platform, model, strategy, assembler, summary_csv, note ->
       def key   = [sra, srr, platform, model, strategy, assembler]
-      def value = [summary_csv, note]  // note is '' here
+      def value = [summary_csv, note]  // base note is ''
       tuple(key, value)
     }
-
     binning_keyed = binning_notes.map { sra, srr, platform, model, strategy, assembler, bin_note_file ->
       def key  = [sra, srr, platform, model, strategy, assembler]
       def note = file(bin_note_file).text.trim()
       tuple(key, note)
     }
-
-    // Combine successes and binning notes; group by key
     succ_and_bin = channel.empty()
                         .mix(succ_keyed)
                         .mix(binning_keyed)
@@ -943,8 +1008,78 @@ workflow {
                     .mix(succeeded_with_binning)
                     .mix(failed_sra)
 
-    // Write summary.tsv into output dir (not work dir)
-    APPEND_SUMMARY(summary, outdir)
+    summary_result = APPEND_SUMMARY(summary, outdir)
+
+  emit:
+    global_summary = summary_result.global_summary
+}
+
+
+workflow {
+  main:
+    if (params.help) {
+      helpMessage()
+      exit 0
+    }
+
+    if (!params.sra || !params.uniprot_db || !params.taxa ||
+        !params.taxdump || !params.gtdb_ncbi_map ||
+        !params.sandpiper_db || !params.singlem_db) {
+      missingParametersError()
+    }
+
+    // Channel setup
+    outdir = file(params.outdir).toAbsolutePath().toString()
+    sra_ch = channel.fromPath(params.sra, checkIfExists: true)
+                    .splitCsv(header: true, strip: true)
+                    .map { row -> row.sra.trim() }
+                    .filter { it }
+                    .distinct()
+    taxa_ch           = channel.value( file(params.taxa) )
+    taxdump_ch        = channel.value( file(params.taxdump) )
+    gtdb_ncbi_map_ch  = channel.value( file(params.gtdb_ncbi_map) )
+    singlem_db_ch     = channel.value( file(params.singlem_db) )
+    sandpiper_db_ch   = channel.value( file(params.sandpiper_db) )
+    uniprot_db_ch     = channel.value( file(params.uniprot_db) )
+
+    // Step 0: validate taxa
+    validated_taxa = VALIDATE_TAXA(taxa_ch, taxdump_ch, gtdb_ncbi_map_ch).valid_taxa
+
+    // Step 1: PRE_SCREENING: DOWNLOAD_SRA_METADATA -> SANDPIPER -> DOWNLOAD_SRR -> SINGLEM
+    pre = PRE_SCREENING(sra_ch, validated_taxa, sandpiper_db_ch, singlem_db_ch)
+
+    // Step 2: ASSEMBLY: assemblers -> DIAMOND -> BLOBTOOLS -> EXTRACT_TAXA
+    asm = ASSEMBLY(pre.singlem_reads, validated_taxa, uniprot_db_ch, taxdump_ch)
+
+    // Step 3: BINNING: METABAT, CONCOCT, SEMIBIN, ROSELLA -> DASTOOL
+    binning = BINNING(asm.blobtable, asm.assembly_bam_all, uniprot_db_ch)
+
+    // Step 4: Build summary.tsv (including binning annotations)
+    SUMMARY(
+      // PRE_SCREENING: summary-related outputs
+      pre.sra_metadata_skipped,
+      pre.sra_metadata_note,
+      pre.sandpiper_note,
+      pre.download_srr_note,
+      pre.singlem_note,
+
+      // ASSEMBLY: summary-related outputs
+      asm.assembly_notes,
+      asm.diamond_note,
+      asm.blobtools_note,
+      asm.taxa_note,
+      asm.taxa_summary,
+
+      // BINNING: notes from each binner
+      binning.metabat_note,
+      binning.concoct_note,
+      binning.semibin_note,
+      binning.rosella_note,
+      binning.dastool_note,
+
+      // constant
+      outdir
+    )
 
 
   onComplete:
@@ -963,8 +1098,8 @@ workflow {
       return
     }
     if( !traceFile.exists() ) {
-        log.warn "onComplete: ${traceFile} not found; skipping scheduler annotation"
-        return
+      log.warn "onComplete: ${traceFile} not found; skipping scheduler annotation"
+      return
     }
 
     // python3 annotate_summary_from_trace.py summary.tsv trace.tsv
