@@ -832,9 +832,7 @@ workflow BINNING {
                 .mix(rosella_by_key)
                 .groupTuple()
 
-    // Build DASTool input:
-    // - keep only samples that have at least one tool (metabat/concoct/semibin/rosella)
-    // - allow others to be null
+    // Build DASTool input
     dastool_in = grouped.map { key, entries ->
         def (sra, srr) = key
         def meta_entry = entries.find { it[0] == 'meta' }
@@ -846,11 +844,6 @@ workflow BINNING {
         def concoct_dir  = entries.find { it[0] == 'concoct' }?.getAt(1)
         def semibin_data = entries.find { it[0] == 'semibin' }?.getAt(1)
         def rosella_dir  = entries.find { it[0] == 'rosella' }?.getAt(1)
-
-        // If none of the tools produced bins, skip this sample
-        if (!metabat_dir && !concoct_dir && !semibin_data && !rosella_dir)
-          return null
-
         def (semibin_dir, contig_bins) = semibin_data ?: [null, null]
 
         tuple(

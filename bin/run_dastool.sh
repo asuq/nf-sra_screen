@@ -114,7 +114,10 @@ bins_list=()
 [[ -s "$semibin_tsv"  ]] && bins_list+=("$semibin_tsv")
 
 if (( ${#bins_list[@]} == 0 )); then
-  fail "DASTool: no bins found for any tool"
+  msg="DASTool: no bins found for any tool"
+  echo "$msg" >&2
+  echo "$msg" > FAIL.note
+  exit 0
 fi
 
 # Build comma‑separated list for DAS_Tool
