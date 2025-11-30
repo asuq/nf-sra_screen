@@ -550,21 +550,23 @@ process DASTOOL {
           val(rosella_dir)
 
     output:
-    tuple val(sra), val(srr), path("DASTool"),                                                             optional: true, emit: bins
+    tuple val(sra), val(srr), path("dastool"),                                                             optional: true, emit: bins
     tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("FAIL.note"), optional: true, emit: note
 
     script:
-    // Build CLI args only for tools that are present
-    def toolArgs = []
-    if( metabat_dir )         toolArgs << "--metabat-dir ${metabat_dir}"
-    if( concoct_dir )         toolArgs << "--concoct-dir ${concoct_dir}"
-    if( semibin_dir )         toolArgs << "--semibin-dir ${semibin_dir}"
-    if( semibin_contig_bins ) toolArgs << "--semibin-map ${semibin_contig_bins}"
-    if( rosella_dir )         toolArgs << "--rosella-dir ${rosella_dir}"
+    def metaDir     = metabat_dir          ?: ''
+    def concoctDir  = concoct_dir          ?: ''
+    def semibinDir  = semibin_dir          ?: ''
+    def semibinMap  = semibin_contig_bins  ?: ''
+    def rosellaDir  = rosella_dir          ?: ''
     """
     run_dastool.sh \\
       --assembly "${assembly_fasta}" \\
-      ${toolArgs.join(' \\\\\n      ')} \\
+      --metabat-dir "${metaDir}" \\
+      --concoct-dir "${concoctDir}" \\
+      --semibin-dir "${semibinDir}" \\
+      --semibin-map "${semibinMap}" \\
+      --rosella-dir "${rosellaDir}" \\
       --cpus ${task.cpus} \\
       --attempt ${task.attempt} \\
       --max-retries ${params.max_retries}
