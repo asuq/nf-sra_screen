@@ -543,25 +543,28 @@ process DASTOOL {
     input:
     tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler),
           path(assembly_fasta),
-          path(metabat_dir),
-          path(concoct_dir),
-          path(semibin_dir),
-          path(semibin_contig_bins),
-          path(rosella_dir)
+          val(metabat_dir),
+          val(concoct_dir),
+          val(semibin_dir),
+          val(semibin_contig_bins),
+          val(rosella_dir)
 
     output:
     tuple val(sra), val(srr), path("DASTool"),                                                             optional: true, emit: bins
     tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("FAIL.note"), optional: true, emit: note
 
     script:
+    // Build CLI args only for tools that are present
+    def toolArgs = []
+    if( metabat_dir )         toolArgs << "--metabat-dir ${metabat_dir}"
+    if( concoct_dir )         toolArgs << "--concoct-dir ${concoct_dir}"
+    if( semibin_dir )         toolArgs << "--semibin-dir ${semibin_dir}"
+    if( semibin_contig_bins ) toolArgs << "--semibin-map ${semibin_contig_bins}"
+    if( rosella_dir )         toolArgs << "--rosella-dir ${rosella_dir}"
     """
     run_dastool.sh \\
       --assembly "${assembly_fasta}" \\
-      --metabat-dir "${metabat_dir}" \\
-      --concoct-dir "${concoct_dir}" \\
-      --semibin-dir "${semibin_dir}" \\
-      --semibin-map "${semibin_contig_bins}" \\
-      --rosella-dir "${rosella_dir}" \\
+      ${toolArgs.join(' \\\\\n      ')} \\
       --cpus ${task.cpus} \\
       --attempt ${task.attempt} \\
       --max-retries ${params.max_retries}
@@ -777,51 +780,100 @@ workflow ASSEMBLY {
     blobtools_note   = blobtools.note
 }
 
-    // Step 9: binning
-    // Build binning input: only samples with blobtable (successful BlobTools) and a BAM
-    bam_for_binning_by = bam_for_binning.map { sra, srr, bam, csi -> tuple([sra,srr], bam) }
 
-    binning_base_by = blobtable_for_binning.map { sra, srr, platform, model, strategy, assembler, assembly_fasta, blobtable ->
-                              tuple([sra,srr], [platform, model, strategy, assembler, assembly_fasta])
-                            }
+workflow BINNING {
+  take:
+    blobtable_ch
+    assembly_bam_ch
+    uniprot_db_ch
 
-    binning_join = binning_base_by.join(bam_for_binning_by)
+  main:
+    // Build binning_input from blobtable + BAM
+    // blobtable_ch: (sra, srr, platform, model, strategy, assembler, assembly_fasta, blobtable)
+    // assembly_bam_ch: (sra, srr, bam, csi)
+    bam_by = assembly_bam_ch.map { sra, srr, bam, csi -> tuple([sra, srr], bam) }
+    binning_base_by = blobtable_ch.map { sra, srr, platform, model, strategy, assembler, assembly_fasta, blobtable ->
+      tuple([sra, srr], [platform, model, strategy, assembler, assembly_fasta])
+    }
+    binning_join = binning_base_by.join(bam_by)
+
+    // binning_input: (sra, srr, platform, model, strategy, assembler, assembly_fasta, bam)
     binning_input = binning_join.map { key, meta, bam ->
       def (sra, srr) = key
       def (platform, model, strategy, assembler, assembly_fasta) = meta
       tuple(sra, srr, platform, model, strategy, assembler, assembly_fasta, bam)
     }
 
-    // Run the individual binners
+    // Run individual binners
     metabat_binning = METABAT(binning_input)
     concoct_binning = CONCOCT(binning_input)
     semibin_binning = SEMIBIN(binning_input, uniprot_db_ch)
     rosella_binning = ROSELLA(binning_input)
 
-    // Prepare DASTool input: only samples where all four binners succeeded
-    dastool_base_by = blobtable_for_dastool.map { sra, srr, platform, model, strategy, assembler, assembly_fasta, blobtable ->
-                              tuple([sra,srr], [platform, model, strategy, assembler, assembly_fasta])
-                          }
-
-    metabat_by = metabat_binning.bins.map { sra, srr, metabat_dir -> tuple([sra,srr], metabat_dir) }
-    concoct_by = concoct_binning.bins.map { sra, srr, concoct_dir -> tuple([sra,srr], concoct_dir) }
-    semibin_by = semibin_binning.bins.map { sra, srr, semibin_dir, contig_bins -> tuple([sra,srr], [semibin_dir, contig_bins]) }
-    rosella_by = rosella_binning.bins.map { sra, srr, rosella_dir -> tuple([sra,srr], rosella_dir) }
-
-    base_metabat      = dastool_base_by.join(metabat_by)
-    base_metabat_conc = base_metabat.join(concoct_by)
-    base_mcs_semibin  = base_metabat_conc.join(semibin_by)
-    base_mcsr         = base_mcs_semibin.join(rosella_by)
-
-    dastool_in = base_mcsr.map { key, meta, metabat_dir, concoct_dir, semibin_data, rosella_dir ->
-      def (sra, srr) = key
-      def (platform, model, strategy, assembler, assembly_fasta) = meta
-      def (semibin_dir, contig_bins) = semibin_data
-      tuple(sra, srr, platform, model, strategy, assembler,
-            assembly_fasta, metabat_dir, concoct_dir, semibin_dir, contig_bins, rosella_dir)
+    // Prepare DASTool input: run if at least ONE binner produced bins
+    dastool_base_by = binning_input.map { sra, srr, platform, model, strategy, assembler, assembly_fasta, bam ->
+      tuple([sra,srr], [platform, model, strategy, assembler, assembly_fasta])
     }
 
+    // Tag each entry with a label
+    meta_by      = dastool_base_by.map { key, meta -> tuple(key, ['meta', meta]) }
+    metabat_by_key = metabat_binning.bins.map { sra, srr, metabat_dir -> tuple([sra,srr], ['metabat', metabat_dir]) }
+    concoct_by_key = concoct_binning.bins.map { sra, srr, concoct_dir -> tuple([sra,srr], ['concoct', concoct_dir]) }
+    semibin_by_key = semibin_binning.bins.map { sra, srr, semibin_dir, contig_bins -> tuple([sra,srr], ['semibin', [semibin_dir, contig_bins]]) }
+    rosella_by_key = rosella_binning.bins.map { sra, srr, rosella_dir -> tuple([sra,srr], ['rosella', rosella_dir]) }
+
+    // Group all tool-entries by sample
+    grouped = channel.empty()
+                .mix(meta_by)
+                .mix(metabat_by_key)
+                .mix(concoct_by_key)
+                .mix(semibin_by_key)
+                .mix(rosella_by_key)
+                .groupTuple()
+
+    // Build DASTool input:
+    // - keep only samples that have at least one tool (metabat/concoct/semibin/rosella)
+    // - allow others to be null
+    dastool_in = grouped.map { key, entries ->
+        def (sra, srr) = key
+        def meta_entry = entries.find { it[0] == 'meta' }
+        if (!meta_entry) return null  // should not happen
+
+        def meta = meta_entry[1]
+        def (platform, model, strategy, assembler, assembly_fasta) = meta
+        def metabat_dir  = entries.find { it[0] == 'metabat' }?.getAt(1)
+        def concoct_dir  = entries.find { it[0] == 'concoct' }?.getAt(1)
+        def semibin_data = entries.find { it[0] == 'semibin' }?.getAt(1)
+        def rosella_dir  = entries.find { it[0] == 'rosella' }?.getAt(1)
+
+        // If none of the tools produced bins, skip this sample
+        if (!metabat_dir && !concoct_dir && !semibin_data && !rosella_dir)
+          return null
+
+        def (semibin_dir, contig_bins) = semibin_data ?: [null, null]
+
+        tuple(
+          sra, srr, platform, model, strategy, assembler,
+          assembly_fasta,
+          metabat_dir,
+          concoct_dir,
+          semibin_dir,
+          contig_bins,
+          rosella_dir
+        )
+      }
+      .filter { it != null }
+
     dastool_binning = DASTOOL(dastool_in)
+
+  emit:
+    metabat_binning
+    concoct_binning
+    semibin_binning
+    rosella_binning
+    dastool_binning
+}
+
 
 
     // Step 10: append to global summary
@@ -979,6 +1031,9 @@ workflow {
 
     // Step 2: ASSEMBLY: assemblers -> DIAMOND -> BLOBTOOLS -> EXTRACT_TAXA
     asm = ASSEMBLY(pre.singlem_reads, validated_taxa, uniprot_db_ch, taxdump_ch)
+
+    // Step 3: BINNING: METABAT, CONCOCT, SEMIBIN, ROSELLA -> DASTOOL
+    binning = BINNING(asm.blobtable, asm.assembly_bam_all, uniprot_db_ch)
 
 
 
