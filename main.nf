@@ -97,7 +97,7 @@ process SANDPIPER {
     input:
     tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler)
     path valid_taxa
-    path sandpiper_db_ch
+    path sandpiper_db
 
     output:
     tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("sandpiper_decision.txt"),    emit: decision
@@ -110,7 +110,7 @@ process SANDPIPER {
     run_sandpiper.sh \\
       --srr "${srr}" \\
       --valid-taxa "${valid_taxa}" \\
-      --db "${sandpiper_db_ch}" \\
+      --db "${sandpiper_db}" \\
       --attempt ${task.attempt} \\
       --max-retries ${params.max_retries}
     """
@@ -161,7 +161,7 @@ process SINGLEM {
     input:
     tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), val(sandpiper), path(reads)
     path valid_taxa
-    path singlem_db_ch
+    path singlem_db
 
     output:
     tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("reads_ok/*.f*q*"), optional: true, emit: reads
@@ -175,7 +175,7 @@ process SINGLEM {
     run_singlem.sh \\
       --sandpiper-decision "${sandpiper}" \\
       --valid-taxa "${valid_taxa}" \\
-      --singlem-db "${singlem_db_ch}" \\
+      --singlem-db "${singlem_db}" \\
       --cpus ${task.cpus} \\
       --attempt ${task.attempt} \\
       --max-retries ${params.max_retries} \\
@@ -694,7 +694,6 @@ workflow PRE_SCREENING {
     singlem_reads         = singlem_reads
 
     // For summary
-    sra_metadata_filtered = filtered_srr
     sra_metadata_skipped  = sra_metadata.skipped_sra
     sra_metadata_note     = sra_metadata.note
     sandpiper_note        = sandpiper.note
@@ -739,7 +738,7 @@ workflow ASSEMBLY {
                   .mix(hifimeta_asm.assembly_bam)
 
     // Step 7: BlobTools
-    // Key every stream by (sra,srr,assembler)
+    // Key every stream by (sra,srr)
     fasta_by = asm_fasta_ch.map  { sra, srr, platform, model, strategy, assembler, fasta -> tuple([sra,srr], [platform,model,strategy,assembler,fasta]) }
     blast_by = diamond.blast.map { sra, srr, blast -> tuple([sra,srr], blast) }
     bam_by   = bam_src.map       { sra, srr, bam, csi -> tuple([sra,srr], [bam,csi]) }
@@ -867,11 +866,11 @@ workflow BINNING {
     dastool_binning = DASTOOL(dastool_in)
 
   emit:
-    metabat_binning
-    concoct_binning
-    semibin_binning
-    rosella_binning
-    dastool_binning
+    metabat_note = metabat_binning.note
+    concoct_note = concoct_binning.note
+    semibin_note = semibin_binning.note
+    rosella_note = rosella_binning.note
+    dastool_note = dastool_binning.note
 }
 
 
@@ -1077,11 +1076,11 @@ workflow {
       asm.taxa_summary,
 
       // BINNING: notes from each binner
-      binning.metabat_binning.note,
-      binning.concoct_binning.note,
-      binning.semibin_binning.note,
-      binning.rosella_binning.note,
-      binning.dastool_binning.note,
+      binning.metabat_note,
+      binning.concoct_note,
+      binning.semibin_note,
+      binning.rosella_note,
+      binning.dastool_note,
 
       // constant
       outdir
