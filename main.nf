@@ -634,82 +634,70 @@ process APPEND_SUMMARY {
 
 
 //-- Workflow ------------------------------------------------------------------
-workflow {
+workflow PRE_SCREENING {
+  take:
+    sra_ch
+    validated_taxa
+    sandpiper_db_ch
+    singlem_db_ch
+
   main:
-    if (params.help) {
-      helpMessage()
-      exit 0
-    }
-
-    if (!params.sra || !params.uniprot_db || !params.taxa \
-        || !params.taxdump || !params.gtdb_ncbi_map \
-        || !params.sandpiper_db || !params.singlem_db) {
-      missingParametersError()
-    }
-
-    // Channel setup
-    outdir = file(params.outdir).toAbsolutePath().toString()
-    sra_ch = channel.fromPath(params.sra, checkIfExists: true)
-                    .splitCsv(header: true, strip: true)
-                    .map { row -> row.sra.trim() }
-                    .filter { it }
-                    .distinct()
-    taxa_ch           = channel.value( file(params.taxa) )
-    taxdump_ch        = channel.value( file(params.taxdump) )
-    gtdb_ncbi_map_ch  = channel.value( file(params.gtdb_ncbi_map) )
-    singlem_db_ch     = channel.value( file(params.singlem_db) )
-    sandpiper_db_ch   = channel.value( file(params.sandpiper_db) )
-    uniprot_db_ch     = channel.value( file(params.uniprot_db) )
-
-    // Step 0: validate taxa
-    validated_taxa = VALIDATE_TAXA(taxa_ch, taxdump_ch, gtdb_ncbi_map_ch).valid_taxa
-
-
     // Step 1: extract metadata & filter SRR
     sra_metadata = DOWNLOAD_SRA_METADATA(sra_ch, validated_taxa)
     filtered_srr = sra_metadata.filtered_sra
 
     // Build nested channels per CSV, then flatten
-    srr_ch = filtered_srr.map { sra, csvfile -> file(csvfile)}
+    srr_ch = filtered_srr.map { sra, csvfile -> file(csvfile) }
               .splitCsv(header: true, strip: true)
               .map { row ->
-                  def sra = (row.accession ?: '').trim()
-                  def srr = (row.run_accession ?: '').trim()
-                  def platform = (row.instrument_platform ?: '').trim()
-                  def model = (row.instrument_model ?: '').trim()
-                  def strategy = (row.library_strategy ?: '').trim()
+                  def sra       = (row.accession ?: '').trim()
+                  def srr       = (row.run_accession ?: '').trim()
+                  def platform  = (row.instrument_platform ?: '').trim()
+                  def model     = (row.instrument_model ?: '').trim()
+                  def strategy  = (row.library_strategy ?: '').trim()
                   def assembler = (row.assembler ?: '').trim()
                   [sra, srr, platform, model, strategy, assembler]
               }
-              .filter { it[1] }  // Ensure run_accession (SRR) is not empty
+              .filter { it[1] }  // ensure SRR not empty
               .distinct()
 
-
-    // Step 2: check if srr has sandpiper results
+    // Step 2: SANDPIPER prescreening
     sandpiper = SANDPIPER(srr_ch, validated_taxa, sandpiper_db_ch)
     // decision: NEGATIVE / RUN_SINGLEM / PASS
     sandpiper_decision_ch = sandpiper.decision.map { sra, srr, platform, model, strategy, assembler, dec_path ->
-        def decision = file(dec_path).text.trim()
-        tuple(sra, srr, platform, model, strategy, assembler, decision)
+      def decision = file(dec_path).text.trim()
+      tuple(sra, srr, platform, model, strategy, assembler, decision)
     }
 
     srr_prescreened = sandpiper_decision_ch
       .filter { sra, srr, platform, model, strategy, assembler, decision ->
-          decision == 'PASS' || decision == 'RUN_SINGLEM'
+        decision == 'PASS' || decision == 'RUN_SINGLEM'
       }
-
 
     // Step 3: download SRR reads
     download_srr = DOWNLOAD_SRR(srr_prescreened)
+
     srr_reads = download_srr.reads.map { sra, srr, platform, model, strategy, asm, sandpiper_dec, reads, asm_txt ->
       def fixedAsm = file(asm_txt)?.text?.trim() ?: asm
       tuple(sra, srr, platform, model, strategy, fixedAsm, sandpiper_dec, reads)
     }
 
-
-    // Step 4: run SingleM to screen reads
+    // Step 4: SINGLEM prescreening
     singlem = SINGLEM(srr_reads, validated_taxa, singlem_db_ch)
     singlem_reads = singlem.reads
+
+  emit:
+    // For assembly
+    singlem_reads         = singlem_reads
+
+    // For summary
+    sra_metadata_filtered = filtered_srr
+    sra_metadata_skipped  = sra_metadata.skipped_sra
+    sra_metadata_note     = sra_metadata.note
+    sandpiper_note        = sandpiper.note
+    download_srr_note     = download_srr.note
+    singlem_note          = singlem.note
+}
 
 
     // Step 5: assemble reads
@@ -945,6 +933,39 @@ workflow {
 
     // Write summary.tsv into output dir (not work dir)
     APPEND_SUMMARY(summary, outdir)
+workflow {
+  main:
+    if (params.help) {
+      helpMessage()
+      exit 0
+    }
+
+    if (!params.sra || !params.uniprot_db || !params.taxa \
+        || !params.taxdump || !params.gtdb_ncbi_map \
+        || !params.sandpiper_db || !params.singlem_db) {
+      missingParametersError()
+    }
+
+    // Channel setup
+    outdir = file(params.outdir).toAbsolutePath().toString()
+    sra_ch = channel.fromPath(params.sra, checkIfExists: true)
+                    .splitCsv(header: true, strip: true)
+                    .map { row -> row.sra.trim() }
+                    .filter { it }
+                    .distinct()
+    taxa_ch           = channel.value( file(params.taxa) )
+    taxdump_ch        = channel.value( file(params.taxdump) )
+    gtdb_ncbi_map_ch  = channel.value( file(params.gtdb_ncbi_map) )
+    singlem_db_ch     = channel.value( file(params.singlem_db) )
+    sandpiper_db_ch   = channel.value( file(params.sandpiper_db) )
+    uniprot_db_ch     = channel.value( file(params.uniprot_db) )
+
+    // Step 0: validate taxa
+    validated_taxa = VALIDATE_TAXA(taxa_ch, taxdump_ch, gtdb_ncbi_map_ch).valid_taxa
+
+    // Step 1: PRE_SCREENING: DOWNLOAD_SRA_METADATA -> SANDPIPER -> DOWNLOAD_SRR -> SINGLEM
+    pre = PRE_SCREENING(sra_ch, validated_taxa, sandpiper_db_ch, singlem_db_ch)
+
 
 
   onComplete:
@@ -963,8 +984,8 @@ workflow {
       return
     }
     if( !traceFile.exists() ) {
-        log.warn "onComplete: ${traceFile} not found; skipping scheduler annotation"
-        return
+      log.warn "onComplete: ${traceFile} not found; skipping scheduler annotation"
+      return
     }
 
     // python3 annotate_summary_from_trace.py summary.tsv trace.tsv
