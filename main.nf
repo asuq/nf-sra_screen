@@ -1029,9 +1029,9 @@ workflow {
       exit 0
     }
 
-    if (!params.sra || !params.uniprot_db || !params.taxa \
-        || !params.taxdump || !params.gtdb_ncbi_map \
-        || !params.sandpiper_db || !params.singlem_db) {
+    if (!params.sra || !params.uniprot_db || !params.taxa ||
+        !params.taxdump || !params.gtdb_ncbi_map ||
+        !params.sandpiper_db || !params.singlem_db) {
       missingParametersError()
     }
 
