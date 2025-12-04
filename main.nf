@@ -976,19 +976,19 @@ workflow SUMMARY {
       tuple(sra, srr, platform, model, strategy, assembler, summary_csv, '')
     }
 
-    // Aggregate binning errors per sample into a single note string
-    binning_notes = BINNING_ERROR_SUMMARY(binning_errors_grouped).binning_notes
-
-    // Combine succeeded_sra and binning_notes by key
-    succ_keyed = succeeded_sra.map { sra, srr, platform, model, strategy, assembler, summary_csv, note ->
-      def key   = [sra, srr, platform, model, strategy, assembler]
-      def value = [summary_csv, note]  // base note is ''
-      tuple(key, value)
+    // Combine succeeded_sra and binning_note by key
+    def N_SUMMARY_ITEMS = 2
+    succ_keyed = succeeded_sra.map { sra, srr, platform, model, strategy, assembler, summary_csv, base_note ->
+      def keyMap = [sra: sra, srr: srr, platform: platform, model: model, strategy: strategy, assembler: assembler]
+      def key = groupKey(keyMap, N_SUMMARY_ITEMS)
+      tuple(key, [summary_csv, base_note])
     }
-    binning_keyed = binning_notes.map { sra, srr, platform, model, strategy, assembler, bin_note_file ->
-      def key  = [sra, srr, platform, model, strategy, assembler]
-      def note = file(bin_note_file).text.trim()
-      tuple(key, note)
+
+    binning_keyed = binning_note.map { sra, srr, platform, model, strategy, assembler, binning_note ->
+      def keyMap = [sra: sra, srr: srr, platform: platform,
+                    model: model, strategy: strategy, assembler: assembler]
+      def key = groupKey(keyMap, N_SUMMARY_ITEMS)
+      tuple(key, binning_note)
     }
 
     succ_and_bin = channel.empty()
@@ -999,7 +999,9 @@ workflow SUMMARY {
     // Build final succeeded_sra with binning annotations in the note field
     succeeded_with_binning = succ_and_bin
       .map { key, values ->
-        def (sra, srr, platform, model, strategy, assembler) = key
+        def m = (Map) key.target
+        def (sra, srr, platform, model, strategy, assembler) =
+          [m.sra, m.srr, m.platform, m.model, m.strategy, m.assembler]
 
         // Find the summary entry (List [summary_csv, base_note])
         def summaryEntry = values.find { it instanceof List && it.size() == 2 }
