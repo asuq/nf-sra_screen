@@ -16,6 +16,10 @@
 
 set -euo pipefail
 
+# To avoid blobtools plot error
+export HOME="$PWD/.btk_home"
+mkdir -p "$HOME"
+
 assembly=""
 bam=""
 csi=""
@@ -62,7 +66,7 @@ if ! blobtools filter --table 'blobtools.tsv' \
   fail "Blobtools: failed to filter result"
 fi
 
-if ! blobtools view --format png --out 'blobtools' --plot 'blobtools'; then
+if ! blobtools view --format svg --out '.' --plot 'blobtools'; then
 	fail "Blobtools: failed to generate plots"
 fi
 

@@ -186,6 +186,7 @@ process SINGLEM {
 
 process METASPADES {
     tag "${sra}:${srr}"
+    label 'assembly'
     publishDir "${params.outdir}/${sra}/${srr}/",
       mode: 'copy',
       overwrite: true,
@@ -227,6 +228,7 @@ process METASPADES {
 
 process METAFLYE_NANO {
     tag "${sra}:${srr}"
+    label 'assembly'
     publishDir "${params.outdir}/${sra}/${srr}/",
       mode: 'copy',
       overwrite: true,
@@ -263,6 +265,7 @@ process METAFLYE_NANO {
 
 process METAFLYE_PACBIO {
     tag "${sra}:${srr}"
+    label 'assembly'
     publishDir "${params.outdir}/${sra}/${srr}/",
       mode: 'copy',
       overwrite: true,
@@ -299,6 +302,7 @@ process METAFLYE_PACBIO {
 
 process MYLOASM {
     tag "${sra}:${srr}"
+    label 'assembly'
     publishDir "${params.outdir}/${sra}/${srr}/",
       mode: 'copy',
       overwrite: true,
@@ -414,20 +418,17 @@ process EXTRACT_TAXA {
 
 process METABAT {
     tag "${sra}:${srr}"
+    label 'binning'
     publishDir "${params.outdir}/${sra}/${srr}/binning",
       mode: 'copy',
-      overwrite: true,
-      saveAs: { filename ->
-        if (filename == "FAIL.note") return "metabat.FAIL.note"
-        return filename
-      }
+      overwrite: true
 
     input:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path(assembly_fasta), path(assembly_bam)
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path(assembly_fasta), path(assembly_bam), path(assembly_csi)
 
     output:
-    tuple val(sra), val(srr), path("metabat"),                                                             optional: true, emit: bins
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("FAIL.note"), optional: true, emit: note
+    tuple val(sra), val(srr), path("metabat"),                                                                emit: bins
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("metabat.note"), emit: note
 
     script:
     """
@@ -441,26 +442,23 @@ process METABAT {
 }
 
 
-process CONCOCT {
+process COMEBIN {
     tag "${sra}:${srr}"
+    label 'binning'
     publishDir "${params.outdir}/${sra}/${srr}/binning",
       mode: 'copy',
-      overwrite: true,
-      saveAs: { filename ->
-        if (filename == "FAIL.note") return "concoct.FAIL.note"
-        return filename
-      }
+      overwrite: true
 
     input:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path(assembly_fasta), path(assembly_bam)
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path(assembly_fasta), path(assembly_bam), path(assembly_csi)
 
     output:
-    tuple val(sra), val(srr), path("concoct"),                                                             optional: true, emit: bins
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("FAIL.note"), optional: true, emit: note
+    tuple val(sra), val(srr), path("comebin"),                                                                emit: bins
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("comebin.note"), emit: note
 
     script:
     """
-    run_concoct.sh \\
+    run_comebin.sh \\
       --assembly "${assembly_fasta}" \\
       --bam "${assembly_bam}" \\
       --cpus ${task.cpus} \\
@@ -472,21 +470,18 @@ process CONCOCT {
 
 process SEMIBIN {
     tag "${sra}:${srr}"
+    label 'binning'
     publishDir "${params.outdir}/${sra}/${srr}/binning",
       mode: 'copy',
-      overwrite: true,
-      saveAs: { filename ->
-        if (filename == "FAIL.note") return "semibin.FAIL.note"
-        return filename
-      }
+      overwrite: true
 
     input:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path(assembly_fasta), path(assembly_bam)
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path(assembly_fasta), path(assembly_bam), path(assembly_csi)
     path uniprot_db
 
     output:
-    tuple val(sra), val(srr), path("semibin"), path("semibin/contig_bins.tsv"),                            optional: true, emit: bins
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("FAIL.note"), optional: true, emit: note
+    tuple val(sra), val(srr), path("semibin"), path("semibin/contig_bins.tsv"),                               emit: bins
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("semibin.note"), emit: note
 
     script:
     """
@@ -503,20 +498,17 @@ process SEMIBIN {
 
 process ROSELLA {
     tag "${sra}:${srr}"
+    label 'binning'
     publishDir "${params.outdir}/${sra}/${srr}/binning",
       mode: 'copy',
-      overwrite: true,
-      saveAs: { filename ->
-        if (filename == "FAIL.note") return "rosella.FAIL.note"
-        return filename
-      }
+      overwrite: true
 
     input:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path(assembly_fasta), path(assembly_bam)
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path(assembly_fasta), path(assembly_bam), path(assembly_csi)
 
     output:
-    tuple val(sra), val(srr), path("rosella"),                                                             optional: true, emit: bins
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("FAIL.note"), optional: true, emit: note
+    tuple val(sra), val(srr), path("rosella"),                                                                emit: bins
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("rosella.note"), emit: note
 
     script:
     """
@@ -534,28 +526,24 @@ process DASTOOL {
     tag "${sra}:${srr}"
     publishDir "${params.outdir}/${sra}/${srr}/binning",
       mode: 'copy',
-      overwrite: true,
-      saveAs: { filename ->
-        if (filename == "FAIL.note") return "dastool.FAIL.note"
-        return filename
-      }
+      overwrite: true
 
     input:
     tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler),
           path(assembly_fasta),
-          val(metabat_dir),
-          val(concoct_dir),
-          val(semibin_dir),
-          val(semibin_contig_bins),
-          val(rosella_dir)
+          path(metabat_dir),
+          path(comebin_dir),
+          path(semibin_dir),
+          path(semibin_contig_bins),
+          path(rosella_dir)
 
     output:
-    tuple val(sra), val(srr), path("dastool"),                                                             optional: true, emit: bins
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("FAIL.note"), optional: true, emit: note
+    tuple val(sra), val(srr), path("dastool"),                                                                emit: bins
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("dastool.note"), emit: note
 
     script:
     def metaDir     = metabat_dir          ?: ''
-    def concoctDir  = concoct_dir          ?: ''
+    def comebinDir  = comebin_dir          ?: ''
     def semibinDir  = semibin_dir          ?: ''
     def semibinMap  = semibin_contig_bins  ?: ''
     def rosellaDir  = rosella_dir          ?: ''
@@ -563,7 +551,7 @@ process DASTOOL {
     run_dastool.sh \\
       --assembly "${assembly_fasta}" \\
       --metabat-dir "${metaDir}" \\
-      --concoct-dir "${concoctDir}" \\
+      --comebin-dir "${comebinDir}" \\
       --semibin-dir "${semibinDir}" \\
       --semibin-map "${semibinMap}" \\
       --rosella-dir "${rosellaDir}" \\
@@ -594,20 +582,50 @@ process BINNING_ERROR_SUMMARY {
     tag "${sra}:${srr}"
 
     input:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path(note_files)
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler),
+      path(metabat_note),
+      path(comebin_note),
+      path(semibin_note),
+      path(rosella_note),
+      path(dastool_note)
 
     output:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("binning_note.txt"), emit: binning_notes
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("binning_note.txt"), emit: note
 
     script:
-    // note_files is a List<File> staged into the work dir
-    def list = note_files.collect { it.name }.join(' ')
     """
-    # Concatenate and flatten all binning FAIL.note messages into a single line
-    cat ${list} 2>/dev/null \\
-      | tr '\\n' ' ' \\
-      | sed 's/  */ /g' \\
-      > binning_note.txt
+    : > binning_note.txt
+
+    add_note() {
+      local file="\$1"
+
+      if [ -f "\$file" ]; then
+        # Flatten file content to a single line
+        note=\$(paste -sd' ' "\$file")
+
+        # Skip if note is only whitespace
+        if ! printf '%s' "\$note" | grep -q '[^[:space:]]'; then
+          return 0
+        fi
+
+        # If we already wrote something, prepend a separator
+        if [ -s binning_note.txt ]; then
+          printf ';' >> binning_note.txt
+        fi
+
+        # Append the note as-is (no extra label; note already contains tool info)
+        printf '%s' "\$note" >> binning_note.txt
+      fi
+    }
+
+    add_note "${metabat_note}"
+    add_note "${comebin_note}"
+    add_note "${semibin_note}"
+    add_note "${rosella_note}"
+    add_note "${dastool_note}"
+
+    # End the file with a single newline
+    echo >> binning_note.txt
     """
 }
 
@@ -792,80 +810,115 @@ workflow BINNING {
     // Build binning_input from blobtable + BAM
     // blobtable_ch: (sra, srr, platform, model, strategy, assembler, assembly_fasta, blobtable)
     // assembly_bam_ch: (sra, srr, bam, csi)
-    bam_by = assembly_bam_ch.map { sra, srr, bam, csi -> tuple([sra, srr], bam) }
+    bam_by = assembly_bam_ch.map { sra, srr, bam, csi -> tuple([sra, srr], [bam, csi]) }
     binning_base_by = blobtable_ch.map { sra, srr, platform, model, strategy, assembler, assembly_fasta, blobtable ->
       tuple([sra, srr], [platform, model, strategy, assembler, assembly_fasta])
     }
     binning_join = binning_base_by.join(bam_by)
 
-    // binning_input: (sra, srr, platform, model, strategy, assembler, assembly_fasta, bam)
-    binning_input = binning_join.map { key, meta, bam ->
+    // binning_input: (sra, srr, platform, model, strategy, assembler, assembly_fasta, bam, csi)
+    binning_input = binning_join.map { key, meta, bam_idx ->
       def (sra, srr) = key
       def (platform, model, strategy, assembler, assembly_fasta) = meta
-      tuple(sra, srr, platform, model, strategy, assembler, assembly_fasta, bam)
+      def (bam, csi) = bam_idx
+      tuple(sra, srr, platform, model, strategy, assembler, assembly_fasta, bam, csi)
     }
 
     // Run individual binners
     metabat_binning = METABAT(binning_input)
-    concoct_binning = CONCOCT(binning_input)
+    comebin_binning = COMEBIN(binning_input)
     semibin_binning = SEMIBIN(binning_input, uniprot_db_ch)
     rosella_binning = ROSELLA(binning_input)
 
-    // Prepare DASTool input: run if at least ONE binner produced bins
-    dastool_base_by = binning_input.map { sra, srr, platform, model, strategy, assembler, assembly_fasta, bam ->
+    // Prepare DASTool input
+    dastool_base_by = binning_input.map { sra, srr, platform, model, strategy, assembler, assembly_fasta, bam, csi ->
       tuple([sra,srr], [platform, model, strategy, assembler, assembly_fasta])
     }
 
     // Tag each entry with a label
-    meta_by      = dastool_base_by.map { key, meta -> tuple(key, ['meta', meta]) }
-    metabat_by_key = metabat_binning.bins.map { sra, srr, metabat_dir -> tuple([sra,srr], ['metabat', metabat_dir]) }
-    concoct_by_key = concoct_binning.bins.map { sra, srr, concoct_dir -> tuple([sra,srr], ['concoct', concoct_dir]) }
-    semibin_by_key = semibin_binning.bins.map { sra, srr, semibin_dir, contig_bins -> tuple([sra,srr], ['semibin', [semibin_dir, contig_bins]]) }
-    rosella_by_key = rosella_binning.bins.map { sra, srr, rosella_dir -> tuple([sra,srr], ['rosella', rosella_dir]) }
+    metabat_entries = metabat_binning.bins.map { sra, srr, metabat_dir ->
+      tuple([sra, srr], metabat_dir)
+    }
+    comebin_entries = comebin_binning.bins.map { sra, srr, comebin_dir ->
+      tuple([sra, srr], comebin_dir)
+    }
+    semibin_entries = semibin_binning.bins.map { sra, srr, semibin_dir, semibin_bins ->
+      tuple([sra, srr], [semibin_dir, semibin_bins])
+    }
+    rosella_entries = rosella_binning.bins.map { sra, srr, rosella_dir ->
+      tuple([sra, srr], rosella_dir)
+    }
 
     // Group all tool-entries by sample
-    grouped = channel.empty()
-                .mix(meta_by)
-                .mix(metabat_by_key)
-                .mix(concoct_by_key)
-                .mix(semibin_by_key)
-                .mix(rosella_by_key)
-                .groupTuple()
+    dastool_join = dastool_base_by
+      .join(metabat_entries)
+      .join(comebin_entries)
+      .join(semibin_entries)
+      .join(rosella_entries)
 
     // Build DASTool input
-    dastool_in = grouped.map { key, entries ->
-        def (sra, srr) = key
-        def meta_entry = entries.find { it[0] == 'meta' }
-        if (!meta_entry) return null  // should not happen
-
-        def meta = meta_entry[1]
-        def (platform, model, strategy, assembler, assembly_fasta) = meta
-        def metabat_dir  = entries.find { it[0] == 'metabat' }?.getAt(1)
-        def concoct_dir  = entries.find { it[0] == 'concoct' }?.getAt(1)
-        def semibin_data = entries.find { it[0] == 'semibin' }?.getAt(1)
-        def rosella_dir  = entries.find { it[0] == 'rosella' }?.getAt(1)
-        def (semibin_dir, contig_bins) = semibin_data ?: [null, null]
-
-        tuple(
-          sra, srr, platform, model, strategy, assembler,
-          assembly_fasta,
-          metabat_dir,
-          concoct_dir,
-          semibin_dir,
-          contig_bins,
-          rosella_dir
-        )
-      }
-      .filter { it != null }
+    dastool_in = dastool_join.map { key, meta, metabat_dir, comebin_dir, semibin_pair, rosella_dir ->
+      def (sra, srr) = key
+      def (platform, model, strategy, assembler, assembly_fasta) = meta
+      def (semibin_dir, semibin_bins) = semibin_pair
+      tuple(
+        sra, srr, platform, model, strategy, assembler, assembly_fasta,
+        metabat_dir, comebin_dir, semibin_dir, semibin_bins, rosella_dir
+      )
+    }
+    .filter { it != null }
 
     dastool_binning = DASTOOL(dastool_in)
 
+    // Binning error aggregation
+    def N_BIN_STATUS = 5
+
+    metabat_status = metabat_binning.note.map { sra, srr, platform, model, strategy, assembler, note ->
+      def key = groupKey([sra: sra, srr: srr, platform: platform, model: model, strategy: strategy, assembler: assembler], N_BIN_STATUS)
+      tuple(key, ['metabat', note])
+    }
+
+    comebin_status = comebin_binning.note.map { sra, srr, platform, model, strategy, assembler, note ->
+      def key = groupKey([sra: sra, srr: srr, platform: platform, model: model, strategy: strategy, assembler: assembler], N_BIN_STATUS)
+      tuple(key, ['comebin', note])
+    }
+
+    semibin_status = semibin_binning.note.map { sra, srr, platform, model, strategy, assembler, note ->
+      def key = groupKey([sra: sra, srr: srr, platform: platform, model: model, strategy: strategy, assembler: assembler], N_BIN_STATUS)
+      tuple(key, ['semibin', note])
+    }
+
+    rosella_status = rosella_binning.note.map { sra, srr, platform, model, strategy, assembler, note ->
+      def key = groupKey([sra: sra, srr: srr, platform: platform, model: model, strategy: strategy, assembler: assembler], N_BIN_STATUS)
+      tuple(key, ['rosella', note])
+    }
+
+    dastool_status = dastool_binning.note.map { sra, srr, platform, model, strategy, assembler, note ->
+      def key = groupKey([sra: sra, srr: srr, platform: platform, model: model, strategy: strategy, assembler: assembler], N_BIN_STATUS)
+      tuple(key, ['dastool', note])
+    }
+
+    binning_mix = channel.empty()
+      .mix(metabat_status)
+      .mix(comebin_status)
+      .mix(semibin_status)
+      .mix(rosella_status)
+      .mix(dastool_status)
+      .groupTuple()
+
+    binning_status_grouped = binning_mix
+      .map { key, items ->
+        def m = (Map) key.target
+        def (sra, srr, platform, model, strategy, assembler) = [m.sra, m.srr, m.platform, m.model, m.strategy, m.assembler]
+        def mp = items.collectEntries { tool, note -> [(tool): note] }
+        tuple(sra, srr, platform, model, strategy, assembler, mp.metabat, mp.comebin, mp.semibin, mp.rosella, mp.dastool)
+      }
+
+    binning_error_summary = BINNING_ERROR_SUMMARY(binning_status_grouped)
+
+
   emit:
-    metabat_note = metabat_binning.note
-    concoct_note = concoct_binning.note
-    semibin_note = semibin_binning.note
-    rosella_note = rosella_binning.note
-    dastool_note = dastool_binning.note
+    binning_note = binning_error_summary.note
 }
 
 
@@ -886,11 +939,7 @@ workflow SUMMARY {
     taxa_summary
 
     // from BINNING
-    metabat_note
-    concoct_note
-    semibin_note
-    rosella_note
-    dastool_note
+    binning_note
 
     // constant
     outdir
@@ -935,40 +984,21 @@ workflow SUMMARY {
       tuple(sra, srr, platform, model, strategy, assembler, summary_csv, '')
     }
 
-    // Collect all binning FAIL.notes (MetaBAT, CONCOCT, SemiBin2, Rosella, DASTool)
-    binning_errors_raw = channel.empty()
-                          .mix(metabat_note)
-                          .mix(concoct_note)
-                          .mix(semibin_note)
-                          .mix(rosella_note)
-                          .mix(dastool_note)
-
-    // Group binning FAIL.notes by sample
-    binning_errors_grouped = binning_errors_raw
-      .map { sra, srr, platform, model, strategy, assembler, note_path ->
-        def key = [sra, srr, platform, model, strategy, assembler]
-        tuple(key, note_path)
-      }
-      .groupTuple()
-      .map { key, note_paths ->
-        def (sra, srr, platform, model, strategy, assembler) = key
-        tuple(sra, srr, platform, model, strategy, assembler, note_paths)
-      }
-
-    // Aggregate binning errors per sample into a single note string
-    binning_notes = BINNING_ERROR_SUMMARY(binning_errors_grouped).binning_notes
-
-    // Combine succeeded_sra and binning_notes by key
-    succ_keyed = succeeded_sra.map { sra, srr, platform, model, strategy, assembler, summary_csv, note ->
-      def key   = [sra, srr, platform, model, strategy, assembler]
-      def value = [summary_csv, note]  // base note is ''
-      tuple(key, value)
+    // Combine succeeded_sra and binning_note by key
+    def N_SUMMARY_ITEMS = 2
+    succ_keyed = succeeded_sra.map { sra, srr, platform, model, strategy, assembler, summary_csv, base_note ->
+      def keyMap = [sra: sra, srr: srr, platform: platform, model: model, strategy: strategy, assembler: assembler]
+      def key = groupKey(keyMap, N_SUMMARY_ITEMS)
+      tuple(key, [summary_csv, base_note])
     }
-    binning_keyed = binning_notes.map { sra, srr, platform, model, strategy, assembler, bin_note_file ->
-      def key  = [sra, srr, platform, model, strategy, assembler]
-      def note = file(bin_note_file).text.trim()
-      tuple(key, note)
+
+    binning_keyed = binning_note.map { sra, srr, platform, model, strategy, assembler, binning_note ->
+      def keyMap = [sra: sra, srr: srr, platform: platform,
+                    model: model, strategy: strategy, assembler: assembler]
+      def key = groupKey(keyMap, N_SUMMARY_ITEMS)
+      tuple(key, binning_note)
     }
+
     succ_and_bin = channel.empty()
                         .mix(succ_keyed)
                         .mix(binning_keyed)
@@ -977,7 +1007,9 @@ workflow SUMMARY {
     // Build final succeeded_sra with binning annotations in the note field
     succeeded_with_binning = succ_and_bin
       .map { key, values ->
-        def (sra, srr, platform, model, strategy, assembler) = key
+        def m = (Map) key.target
+        def (sra, srr, platform, model, strategy, assembler) =
+          [m.sra, m.srr, m.platform, m.model, m.strategy, m.assembler]
 
         // Find the summary entry (List [summary_csv, base_note])
         def summaryEntry = values.find { it instanceof List && it.size() == 2 }
@@ -989,14 +1021,15 @@ workflow SUMMARY {
         def base_note   = summaryEntry[1] ?: ''
 
         // All other values are binning notes (Strings)
-        def bin_notes = values.findAll { !(it instanceof List) }
-                              .collect { it as String }
-                              .findAll { it }
+        def binning_note_file = values.find { !(it instanceof List) }
+        def binning_note_test = ''
+        if (binning_note_file) {
+          binning_note_test = file(binning_note_file as String).text.trim()
+        }
 
-        def bin_note   = bin_notes ? bin_notes.join('; ') : ''
         def final_note = base_note
-        if (bin_note) {
-          final_note = final_note ? "${final_note}; ${bin_note}" : bin_note
+        if (binning_note_test) {
+          final_note = final_note ? "${final_note}; ${binning_note_test}" : binning_note_test
         }
 
         tuple(sra, srr, platform, model, strategy, assembler, summary_csv, final_note)
@@ -1016,7 +1049,6 @@ workflow SUMMARY {
 
 
 workflow {
-  main:
     if (params.help) {
       helpMessage()
       exit 0
@@ -1051,7 +1083,7 @@ workflow {
     // Step 2: ASSEMBLY: assemblers -> DIAMOND -> BLOBTOOLS -> EXTRACT_TAXA
     asm = ASSEMBLY(pre.singlem_reads, validated_taxa, uniprot_db_ch, taxdump_ch)
 
-    // Step 3: BINNING: METABAT, CONCOCT, SEMIBIN, ROSELLA -> DASTOOL
+    // Step 3: BINNING: METABAT, COMEBin, SEMIBIN, ROSELLA -> DASTOOL
     binning = BINNING(asm.blobtable, asm.assembly_bam_all, uniprot_db_ch)
 
     // Step 4: Build summary.tsv (including binning annotations)
@@ -1071,21 +1103,17 @@ workflow {
       asm.taxa_summary,
 
       // BINNING: notes from each binner
-      binning.metabat_note,
-      binning.concoct_note,
-      binning.semibin_note,
-      binning.rosella_note,
-      binning.dastool_note,
+      binning.binning_note,
 
       // constant
       outdir
     )
+}
 
-
-  onComplete:
+workflow.onComplete {
     def outdirPath  = file(params.outdir ?: './output').toAbsolutePath()
     def summaryFile = outdirPath.resolve('summary.tsv')
-    def traceFile   = file("${workflow.launchDir}/execution-report/trace.tsv").toAbsolutePath()
+    def traceFile   = file("${workflow.launchDir}/execution-reports/trace.tsv").toAbsolutePath()
     def scriptFile  = file("${workflow.projectDir}/bin/annotate_summary_from_trace.py").toAbsolutePath()
 
     log.info "onComplete: summary.tsv -> ${summaryFile}"

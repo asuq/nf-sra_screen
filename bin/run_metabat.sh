@@ -2,10 +2,10 @@
 # Run MetaBAT2 binning on an assembly + BAM
 #
 # Args:
-#   --assembly   assembly fasta
-#   --bam        BAM mapped against the assembly
-#   --cpus       threads to use
-#   --attempt    current attempt number (for Nextflow retries)
+#   --assembly    assembly fasta
+#   --bam         BAM mapped against the assembly
+#   --cpus        threads to use
+#   --attempt     current attempt number (for Nextflow retries)
 #   --max-retries maximum attempts before writing FAIL.note and exiting 0
 
 set -euo pipefail
@@ -34,32 +34,38 @@ if [[ -z "$assembly" || -z "$bam" ]]; then
   exit 1
 fi
 
+tmp_dir="tmp_metabat"
+final_dir="metabat"
+note_file="metabat.note"
+
+rm -rf "$tmp_dir" "$final_dir" "$note_file"
+mkdir -p "$tmp_dir"
+: > "$note_file"
+
+
 fail() {
   local msg="$1"
   echo "$msg" >&2
   if [[ "$attempt" -lt "$max_retries" ]]; then
     exit 1
   fi
-  echo "$msg" > FAIL.note
+  # Final attempt: record soft fail but still emit an empty metabat dir & note
+  rm -rf "$final_dir"
+  mkdir -p "$final_dir"
+  printf '%s\n' "$msg" > "$note_file"
   exit 0
 }
 
-tmp_dir="tmp_metabat"
-out_dir="metabat_tmp"
-final_dir="metabat"
 
-rm -rf "$tmp_dir" "$out_dir" "$final_dir"
-mkdir -p "$tmp_dir" "$out_dir"
-
-if ! jgi_summarize_bam_contig_depths --outputDepth "${tmp_dir}/depth.txt" "$bam"; then
+if ! jgi_summarize_bam_contig_depths --outputDepth "depth.txt" "$bam"; then
   fail "Metabat: jgi_summarize_bam_contig_depths failed"
 fi
 
 if ! metabat2 --inFile "$assembly" \
-              --abdFile "${tmp_dir}/depth.txt" \
-              --outFile "${out_dir}/metabatbin" \
+              --abdFile "depth.txt" \
+              --outFile "${tmp_dir}/metabatbin" \
               --numThreads "$cpus"; then
   fail "Metabat: metabat2 failed"
 fi
 
-mv "$out_dir" "$final_dir"
+mv "$tmp_dir" "$final_dir"
