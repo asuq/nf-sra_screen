@@ -186,6 +186,7 @@ process SINGLEM {
 
 process METASPADES {
     tag "${sra}:${srr}"
+    label 'assembly'
     publishDir "${params.outdir}/${sra}/${srr}/",
       mode: 'copy',
       overwrite: true,
@@ -227,6 +228,7 @@ process METASPADES {
 
 process METAFLYE_NANO {
     tag "${sra}:${srr}"
+    label 'assembly'
     publishDir "${params.outdir}/${sra}/${srr}/",
       mode: 'copy',
       overwrite: true,
@@ -263,6 +265,7 @@ process METAFLYE_NANO {
 
 process METAFLYE_PACBIO {
     tag "${sra}:${srr}"
+    label 'assembly'
     publishDir "${params.outdir}/${sra}/${srr}/",
       mode: 'copy',
       overwrite: true,
@@ -299,6 +302,7 @@ process METAFLYE_PACBIO {
 
 process MYLOASM {
     tag "${sra}:${srr}"
+    label 'assembly'
     publishDir "${params.outdir}/${sra}/${srr}/",
       mode: 'copy',
       overwrite: true,
@@ -414,6 +418,7 @@ process EXTRACT_TAXA {
 
 process METABAT {
     tag "${sra}:${srr}"
+    label 'binning'
     publishDir "${params.outdir}/${sra}/${srr}/binning",
       mode: 'copy',
       overwrite: true
@@ -439,6 +444,7 @@ process METABAT {
 
 process CONCOCT {
     tag "${sra}:${srr}"
+    label 'binning'
     publishDir "${params.outdir}/${sra}/${srr}/binning",
       mode: 'copy',
       overwrite: true
@@ -464,6 +470,7 @@ process CONCOCT {
 
 process SEMIBIN {
     tag "${sra}:${srr}"
+    label 'binning'
     publishDir "${params.outdir}/${sra}/${srr}/binning",
       mode: 'copy',
       overwrite: true
@@ -491,6 +498,7 @@ process SEMIBIN {
 
 process ROSELLA {
     tag "${sra}:${srr}"
+    label 'binning'
     publishDir "${params.outdir}/${sra}/${srr}/binning",
       mode: 'copy',
       overwrite: true
