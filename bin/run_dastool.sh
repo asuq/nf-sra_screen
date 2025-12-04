@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Run DAS_Tool to integrate bins from MetaBAT, CONCOCT, SemiBin, and Rosella
+# Run DAS_Tool to integrate bins from MetaBAT, COMEBin, SemiBin, and Rosella
 #
 # Args:
 #   --assembly     assembly fasta (required)
 #   --metabat-dir  MetaBAT bins directory (may be empty or non-existent)
-#   --concoct-dir  CONCOCT bins directory (may be empty or non-existent)
+#   --comebin-dir  comebin bins directory (may be empty or non-existent)
 #   --semibin-dir  SemiBin bins directory (unused but kept for symmetry)
 #   --semibin-map  SemiBin contig_bins.tsv (contig-to-bin mapping)
 #   --rosella-dir  Rosella bins directory (may be empty or non-existent)
@@ -16,7 +16,7 @@ set -euo pipefail
 
 assembly=""
 metabat_dir=""
-concoct_dir=""
+comebin_dir=""
 semibin_dir=""
 semibin_map=""
 rosella_dir=""
@@ -28,7 +28,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --assembly)    assembly="$2";    shift 2 ;;
     --metabat-dir) metabat_dir="$2"; shift 2 ;;
-    --concoct-dir) concoct_dir="$2"; shift 2 ;;
+    --comebin-dir) comebin_dir="$2"; shift 2 ;;
     --semibin-dir) semibin_dir="$2"; shift 2 ;;
     --semibin-map) semibin_map="$2"; shift 2 ;;
     --rosella-dir) rosella_dir="$2"; shift 2 ;;
@@ -70,12 +70,12 @@ shopt -s nullglob
 
 # Build contig2bin TSVs *only* for tools that actually have outputs
 metabat_tsv="${tmp_dir}/metabat_bins.tsv"
-concoct_tsv="${tmp_dir}/concoct_bins.tsv"
+comebin_tsv="${tmp_dir}/comebin_bins.tsv"
 rosella_tsv="${tmp_dir}/rosella_bins.tsv"
 semibin_tsv="${tmp_dir}/semibin_bins.tsv"
 
 : > "$metabat_tsv"
-: > "$concoct_tsv"
+: > "$comebin_tsv"
 : > "$rosella_tsv"
 : > "$semibin_tsv"
 
@@ -92,14 +92,14 @@ if [[ -n "$metabat_dir" && -d "$metabat_dir" ]]; then
   done
 fi
 
-# CONCOCT: .fa bins in $concoct_dir
-if [[ -n "$concoct_dir" && -d "$concoct_dir" ]]; then
-  for f in "$concoct_dir"/*.fa; do
+# COMEBin: .fa bins in $comebin_dir
+if [[ -n "$comebin_dir" && -d "$comebin_dir" ]]; then
+  for f in "$comebin_dir"/*.fa; do
     [[ -e "$f" ]] || break
     grep '^>' "$f" \
       | sed "s/>.*/&\t${f##*/} /" \
       | sed 's/^>//' \
-      >> "$concoct_tsv"
+      >> "$comebin_tsv"
   done
 fi
 
@@ -123,7 +123,7 @@ fi
 # If no TSV has any content, we consider this a "no bins" situation.
 bins_list=()
 [[ -s "$metabat_tsv"  ]] && bins_list+=("$metabat_tsv")
-[[ -s "$concoct_tsv"  ]] && bins_list+=("$concoct_tsv")
+[[ -s "$comebin_tsv"  ]] && bins_list+=("$comebin_tsv")
 [[ -s "$rosella_tsv"  ]] && bins_list+=("$rosella_tsv")
 [[ -s "$semibin_tsv"  ]] && bins_list+=("$semibin_tsv")
 
