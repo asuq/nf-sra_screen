@@ -1,13 +1,26 @@
 #!/usr/bin/env bash
 # Run Rosella on an assembly + BAM
+#
+# Args:
+#   --assembly     assembly fasta
+#   --bam          BAM mapped against the assembly
+#   --cpus         threads to use
+#   --attempt      current attempt number (for Nextflow retries)
+#   --max-retries  maximum attempts before treating failures as soft and writing rosella.note
 
 set -euo pipefail
+
+export MPLCONFIGDIR="$PWD/.mplconfig"
+export NUMBA_CACHE_DIR="$PWD/.numba_cache"
+
+mkdir -p "$MPLCONFIGDIR" "$NUMBA_CACHE_DIR"
 
 assembly=""
 bam=""
 cpus=1
 attempt=0
 max_retries=1
+has_bins=false 
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -27,31 +40,46 @@ if [[ -z "$assembly" || -z "$bam" ]]; then
   exit 1
 fi
 
+tmp_dir="tmp_rosella"
+final_dir="rosella"
+log_file="${tmp_dir}/rosella_recover.log"
+note_file="rosella.note"
+
+rm -rf "$tmp_dir" "$final_dir" "$note_file"
+mkdir -p "$tmp_dir" "$final_dir"
+: > "$note_file"
+
 fail() {
   local msg="$1"
   echo "$msg" >&2
   if [[ "$attempt" -lt "$max_retries" ]]; then
     exit 1
   fi
-  echo "$msg" > FAIL.note
+  rm -rf "$final_dir"
+  mkdir -p "$final_dir"
+  printf '%s\n' "$msg" > "$note_file"
   exit 0
 }
 
-tmp_dir="tmp_rosella"
-final_dir="rosella"
-
-rm -rf "$tmp_dir" "$final_dir"
-mkdir -p "$tmp_dir"
 
 if ! rosella recover \
         --assembly "$assembly" \
         --output-directory "$tmp_dir" \
         --bam-files "$bam" \
-        --threads "$cpus"; then
+        --threads "$cpus" \
+        &> "$log_file"; then
+
+  # Special-case: known Rosella bug when there are 0 bins to refine
+  if grep -q "attempt to divide by zero" "$log_file"; then
+    echo "Rosella: no bins were generated" >&2
+    mkdir -p "$final_dir"
+    exit 0
+  fi
+
   fail "Rosella: recover failed"
 fi
 
-mkdir -p "${tmp_dir}/unbinned" "$final_dir"
+mkdir -p "${tmp_dir}/unbinned"
 
 shopt -s nullglob
 
@@ -62,15 +90,14 @@ for f in "$tmp_dir"/*unbinned.fna; do
 done
 
 # Move bins if any
-has_bins=false
 for f in "$tmp_dir"/rosella_*.fna; do
   [[ -e "$f" ]] || break
   has_bins=true
   mv "$f" "$final_dir"/
 done
 
-if [[ "$has_bins" = false ]]; then
-  echo "Rosella: no rosella_*.fna bins produced (this is allowed)" >&2
-fi
-
 shopt -u nullglob
+
+if [[ "$has_bins" = false ]]; then
+  echo "Rosella: no rosella_*.fna bins produced" >&2
+fi
