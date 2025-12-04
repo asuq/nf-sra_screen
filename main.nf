@@ -1016,7 +1016,6 @@ workflow SUMMARY {
 
 
 workflow {
-  main:
     if (params.help) {
       helpMessage()
       exit 0
@@ -1071,21 +1070,17 @@ workflow {
       asm.taxa_summary,
 
       // BINNING: notes from each binner
-      binning.metabat_note,
-      binning.concoct_note,
-      binning.semibin_note,
-      binning.rosella_note,
-      binning.dastool_note,
+      binning.binning_note,
 
       // constant
       outdir
     )
+}
 
-
-  onComplete:
+workflow.onComplete {
     def outdirPath  = file(params.outdir ?: './output').toAbsolutePath()
     def summaryFile = outdirPath.resolve('summary.tsv')
-    def traceFile   = file("${workflow.launchDir}/execution-report/trace.tsv").toAbsolutePath()
+    def traceFile   = file("${workflow.launchDir}/execution-reports/trace.tsv").toAbsolutePath()
     def scriptFile  = file("${workflow.projectDir}/bin/annotate_summary_from_trace.py").toAbsolutePath()
 
     log.info "onComplete: summary.tsv -> ${summaryFile}"
