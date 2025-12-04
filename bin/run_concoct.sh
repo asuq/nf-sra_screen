@@ -1,5 +1,12 @@
 #!/usr/bin/env bash
 # Run CONCOCT binning on an assembly + BAM
+#
+# Args:
+#   --assembly     assembly fasta
+#   --bam          BAM mapped against the assembly
+#   --cpus         threads to use
+#   --attempt      current attempt number (for Nextflow retries)
+#   --max-retries  maximum attempts before treating failures as soft and writing concoct.note
 
 set -euo pipefail
 
@@ -27,21 +34,25 @@ if [[ -z "$assembly" || -z "$bam" ]]; then
   exit 1
 fi
 
+tmp_dir="tmp_concoct"
+final_dir="concoct"
+note_file="concoct.note"
+
+rm -rf "$tmp_dir" "$final_dir" "$note_file"
+mkdir -p "$tmp_dir"
+: > "$note_file"
+
 fail() {
   local msg="$1"
   echo "$msg" >&2
   if [[ "$attempt" -lt "$max_retries" ]]; then
     exit 1
   fi
-  echo "$msg" > FAIL.note
+  rm -rf "$final_dir"
+  mkdir -p "$final_dir"
+  printf '%s\n' "$msg" > "$note_file"
   exit 0
 }
-
-tmp_dir="tmp_concoct"
-final_dir="concoct"
-
-rm -rf "$tmp_dir" "$final_dir"
-mkdir -p "$tmp_dir"
 
 # Cut contigs into ~10 kb chunks
 if ! cut_up_fasta.py "$assembly" -c 10000 -o 0 --merge_last \
@@ -68,8 +79,6 @@ if ! merge_cutup_clustering.py "${tmp_dir}/concoct_clustering_gt1000.csv" \
   fail "Concoct: merge_cutup_clustering.py failed"
 fi
 
-rm -rf "$final_dir"
-mkdir -p "$final_dir"
 
 # Extract bins
 if ! extract_fasta_bins.py "$assembly" "${tmp_dir}/concoct_clustering_merged.csv" \

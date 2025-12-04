@@ -1,5 +1,16 @@
 #!/usr/bin/env bash
 # Run DAS_Tool to integrate bins from MetaBAT, CONCOCT, SemiBin, and Rosella
+#
+# Args:
+#   --assembly     assembly fasta (required)
+#   --metabat-dir  MetaBAT bins directory (may be empty or non-existent)
+#   --concoct-dir  CONCOCT bins directory (may be empty or non-existent)
+#   --semibin-dir  SemiBin bins directory (unused but kept for symmetry)
+#   --semibin-map  SemiBin contig_bins.tsv (contig-to-bin mapping)
+#   --rosella-dir  Rosella bins directory (may be empty or non-existent)
+#   --cpus         threads to use
+#   --attempt      current attempt number (for Nextflow retries)
+#   --max-retries  maximum attempts before treating failures as soft and writing dastool.note
 
 set -euo pipefail
 
@@ -35,21 +46,25 @@ if [[ -z "$assembly" ]]; then
   exit 1
 fi
 
+tmp_dir="tmp_dastool"
+final_dir="dastool"
+note_file="dastool.note"
+
+rm -rf "$tmp_dir" "$final_dir" "$note_file"
+mkdir -p "$tmp_dir" "$final_dir"
+: > "$note_file"
+
 fail() {
   local msg="$1"
   echo "$msg" >&2
   if [[ "$attempt" -lt "$max_retries" ]]; then
     exit 1
   fi
-  echo "$msg" > FAIL.note
+  rm -rf "$final_dir"
+  mkdir -p "$final_dir"
+  printf '%s\n' "$msg" > "$note_file"
   exit 0
 }
-
-tmp_dir="tmp_dastool"
-final_dir="dastool"
-
-rm -rf "$tmp_dir" "$final_dir"
-mkdir -p "$tmp_dir"
 
 shopt -s nullglob
 
@@ -82,7 +97,7 @@ if [[ -n "$concoct_dir" && -d "$concoct_dir" ]]; then
   for f in "$concoct_dir"/*.fa; do
     [[ -e "$f" ]] || break
     grep '^>' "$f" \
-      | sed 's/>.*/&\t'${f##*/}' /' \
+      | sed "s/>.*/&\t${f##*/} /" \
       | sed 's/^>//' \
       >> "$concoct_tsv"
   done
@@ -93,7 +108,7 @@ if [[ -n "$rosella_dir" && -d "$rosella_dir" ]]; then
   for f in "$rosella_dir"/rosella_*.fna; do
     [[ -e "$f" ]] || break
     grep '^>' "$f" \
-      | sed 's/>.*/&\t'${f##*/}' /' \
+      | sed "s/>.*/&\t${f##*/} /" \
       | sed 's/^>//' \
       >> "$rosella_tsv"
   done
@@ -105,7 +120,6 @@ if [[ -n "$semibin_map" && -f "$semibin_map" ]]; then
   tail -n +2 "$semibin_map" >> "$semibin_tsv"
 fi
 
-
 # If no TSV has any content, we consider this a "no bins" situation.
 bins_list=()
 [[ -s "$metabat_tsv"  ]] && bins_list+=("$metabat_tsv")
@@ -116,21 +130,32 @@ bins_list=()
 if (( ${#bins_list[@]} == 0 )); then
   msg="DASTool: no bins found for any tool"
   echo "$msg" >&2
-  echo "$msg" > FAIL.note
+  printf '%s\n' "$msg" > "$note_file"
   exit 0
 fi
 
 # Build comma‑separated list for DAS_Tool
-IFS=, read -r -a _ <<< "${bins_list[*]}"
 bins_arg=$(IFS=,; echo "${bins_list[*]}")
 
+dastool_log="${tmp_dir}/dastool.log"
 if ! DAS_Tool \
       --bins "$bins_arg" \
       --contigs "$assembly" \
       --outputbasename "${tmp_dir}/dastool" \
       --write_bin_evals \
       --write_bins \
-      --threads "$cpus"; then
+      --threads "$cpus" \
+      >"$dastool_log" 2>&1; then
+
+  # Special case: no high-quality bins – not a real error for our pipeline
+  if grep -q "No bins with bin-score >0.5 found" "$dastool_log"; then
+    msg="DASTool: no high-quality bins (bin-score > 0.5)"
+    echo "$msg" >&2
+    printf '%s\n' "$msg" > "$note_file"
+    exit 0
+  fi
+
+  # Any other DASTool failure is treated as a genuine error
   fail "DASTool: refinement failed"
 fi
 
@@ -138,4 +163,9 @@ if [[ ! -d "${tmp_dir}/dastool_DASTool_bins" ]]; then
   fail "DASTool: dastool_DASTool_bins directory not found"
 fi
 
-mv "${tmp_dir}/dastool_DASTool_bins" "$final_dir"
+# Move resulting bins to final directory
+for f in "${tmp_dir}/dastool_DASTool_bins"/*; do
+  [[ -e "$f" ]] || break
+  mv "$f" "$final_dir"/
+done
+shopt -u nullglob
