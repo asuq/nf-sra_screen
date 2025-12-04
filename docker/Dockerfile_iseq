@@ -13,7 +13,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends file \
 
 RUN mamba create -y -n "${CONDA_ENV_NAME}" \
     -c bioconda -c conda-forge \
-    "iseq==1.9.7" \
+    "iseq==1.9.8" \
     && mamba clean --all --yes
 
 CMD ["/bin/bash"]
