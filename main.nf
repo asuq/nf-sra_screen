@@ -416,18 +416,14 @@ process METABAT {
     tag "${sra}:${srr}"
     publishDir "${params.outdir}/${sra}/${srr}/binning",
       mode: 'copy',
-      overwrite: true,
-      saveAs: { filename ->
-        if (filename == "FAIL.note") return "metabat.FAIL.note"
-        return filename
-      }
+      overwrite: true
 
     input:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path(assembly_fasta), path(assembly_bam)
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path(assembly_fasta), path(assembly_bam), path(assembly_csi)
 
     output:
-    tuple val(sra), val(srr), path("metabat"),                                                             optional: true, emit: bins
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("FAIL.note"), optional: true, emit: note
+    tuple val(sra), val(srr), path("metabat"),                                                                emit: bins
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("metabat.note"), emit: note
 
     script:
     """
@@ -445,18 +441,14 @@ process CONCOCT {
     tag "${sra}:${srr}"
     publishDir "${params.outdir}/${sra}/${srr}/binning",
       mode: 'copy',
-      overwrite: true,
-      saveAs: { filename ->
-        if (filename == "FAIL.note") return "concoct.FAIL.note"
-        return filename
-      }
+      overwrite: true
 
     input:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path(assembly_fasta), path(assembly_bam)
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path(assembly_fasta), path(assembly_bam), path(assembly_csi)
 
     output:
-    tuple val(sra), val(srr), path("concoct"),                                                             optional: true, emit: bins
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("FAIL.note"), optional: true, emit: note
+    tuple val(sra), val(srr), path("concoct"),                                                                emit: bins
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("concoct.note"), emit: note
 
     script:
     """
@@ -474,19 +466,15 @@ process SEMIBIN {
     tag "${sra}:${srr}"
     publishDir "${params.outdir}/${sra}/${srr}/binning",
       mode: 'copy',
-      overwrite: true,
-      saveAs: { filename ->
-        if (filename == "FAIL.note") return "semibin.FAIL.note"
-        return filename
-      }
+      overwrite: true
 
     input:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path(assembly_fasta), path(assembly_bam)
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path(assembly_fasta), path(assembly_bam), path(assembly_csi)
     path uniprot_db
 
     output:
-    tuple val(sra), val(srr), path("semibin"), path("semibin/contig_bins.tsv"),                            optional: true, emit: bins
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("FAIL.note"), optional: true, emit: note
+    tuple val(sra), val(srr), path("semibin"), path("semibin/contig_bins.tsv"),                               emit: bins
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("semibin.note"), emit: note
 
     script:
     """
@@ -505,18 +493,14 @@ process ROSELLA {
     tag "${sra}:${srr}"
     publishDir "${params.outdir}/${sra}/${srr}/binning",
       mode: 'copy',
-      overwrite: true,
-      saveAs: { filename ->
-        if (filename == "FAIL.note") return "rosella.FAIL.note"
-        return filename
-      }
+      overwrite: true
 
     input:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path(assembly_fasta), path(assembly_bam)
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path(assembly_fasta), path(assembly_bam), path(assembly_csi)
 
     output:
-    tuple val(sra), val(srr), path("rosella"),                                                             optional: true, emit: bins
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("FAIL.note"), optional: true, emit: note
+    tuple val(sra), val(srr), path("rosella"),                                                                emit: bins
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("rosella.note"), emit: note
 
     script:
     """
@@ -792,17 +776,18 @@ workflow BINNING {
     // Build binning_input from blobtable + BAM
     // blobtable_ch: (sra, srr, platform, model, strategy, assembler, assembly_fasta, blobtable)
     // assembly_bam_ch: (sra, srr, bam, csi)
-    bam_by = assembly_bam_ch.map { sra, srr, bam, csi -> tuple([sra, srr], bam) }
+    bam_by = assembly_bam_ch.map { sra, srr, bam, csi -> tuple([sra, srr], [bam, csi]) }
     binning_base_by = blobtable_ch.map { sra, srr, platform, model, strategy, assembler, assembly_fasta, blobtable ->
       tuple([sra, srr], [platform, model, strategy, assembler, assembly_fasta])
     }
     binning_join = binning_base_by.join(bam_by)
 
-    // binning_input: (sra, srr, platform, model, strategy, assembler, assembly_fasta, bam)
-    binning_input = binning_join.map { key, meta, bam ->
+    // binning_input: (sra, srr, platform, model, strategy, assembler, assembly_fasta, bam, csi)
+    binning_input = binning_join.map { key, meta, bam_idx ->
       def (sra, srr) = key
       def (platform, model, strategy, assembler, assembly_fasta) = meta
-      tuple(sra, srr, platform, model, strategy, assembler, assembly_fasta, bam)
+      def (bam, csi) = bam_idx
+      tuple(sra, srr, platform, model, strategy, assembler, assembly_fasta, bam, csi)
     }
 
     // Run individual binners
