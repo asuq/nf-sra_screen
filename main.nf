@@ -442,7 +442,7 @@ process METABAT {
 }
 
 
-process CONCOCT {
+process COMEBIN {
     tag "${sra}:${srr}"
     label 'binning'
     publishDir "${params.outdir}/${sra}/${srr}/binning",
@@ -453,12 +453,12 @@ process CONCOCT {
     tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path(assembly_fasta), path(assembly_bam), path(assembly_csi)
 
     output:
-    tuple val(sra), val(srr), path("concoct"),                                                                emit: bins
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("concoct.note"), emit: note
+    tuple val(sra), val(srr), path("comebin"),                                                                emit: bins
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("comebin.note"), emit: note
 
     script:
     """
-    run_concoct.sh \\
+    run_comebin.sh \\
       --assembly "${assembly_fasta}" \\
       --bam "${assembly_bam}" \\
       --cpus ${task.cpus} \\
@@ -532,7 +532,7 @@ process DASTOOL {
     tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler),
           path(assembly_fasta),
           path(metabat_dir),
-          path(concoct_dir),
+          path(comebin_dir),
           path(semibin_dir),
           path(semibin_contig_bins),
           path(rosella_dir)
@@ -543,7 +543,7 @@ process DASTOOL {
 
     script:
     def metaDir     = metabat_dir          ?: ''
-    def concoctDir  = concoct_dir          ?: ''
+    def comebinDir  = comebin_dir          ?: ''
     def semibinDir  = semibin_dir          ?: ''
     def semibinMap  = semibin_contig_bins  ?: ''
     def rosellaDir  = rosella_dir          ?: ''
@@ -551,7 +551,7 @@ process DASTOOL {
     run_dastool.sh \\
       --assembly "${assembly_fasta}" \\
       --metabat-dir "${metaDir}" \\
-      --concoct-dir "${concoctDir}" \\
+      --comebin-dir "${comebinDir}" \\
       --semibin-dir "${semibinDir}" \\
       --semibin-map "${semibinMap}" \\
       --rosella-dir "${rosellaDir}" \\
@@ -584,7 +584,7 @@ process BINNING_ERROR_SUMMARY {
     input:
     tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler),
       path(metabat_note),
-      path(concoct_note),
+      path(comebin_note),
       path(semibin_note),
       path(rosella_note),
       path(dastool_note)
@@ -619,7 +619,7 @@ process BINNING_ERROR_SUMMARY {
     }
 
     add_note "${metabat_note}"
-    add_note "${concoct_note}"
+    add_note "${comebin_note}"
     add_note "${semibin_note}"
     add_note "${rosella_note}"
     add_note "${dastool_note}"
@@ -826,7 +826,7 @@ workflow BINNING {
 
     // Run individual binners
     metabat_binning = METABAT(binning_input)
-    concoct_binning = CONCOCT(binning_input)
+    comebin_binning = COMEBIN(binning_input)
     semibin_binning = SEMIBIN(binning_input, uniprot_db_ch)
     rosella_binning = ROSELLA(binning_input)
 
@@ -839,8 +839,8 @@ workflow BINNING {
     metabat_entries = metabat_binning.bins.map { sra, srr, metabat_dir ->
       tuple([sra, srr], metabat_dir)
     }
-    concoct_entries = concoct_binning.bins.map { sra, srr, concoct_dir ->
-      tuple([sra, srr], concoct_dir)
+    comebin_entries = comebin_binning.bins.map { sra, srr, comebin_dir ->
+      tuple([sra, srr], comebin_dir)
     }
     semibin_entries = semibin_binning.bins.map { sra, srr, semibin_dir, semibin_bins ->
       tuple([sra, srr], [semibin_dir, semibin_bins])
@@ -852,18 +852,18 @@ workflow BINNING {
     // Group all tool-entries by sample
     dastool_join = dastool_base_by
       .join(metabat_entries)
-      .join(concoct_entries)
+      .join(comebin_entries)
       .join(semibin_entries)
       .join(rosella_entries)
 
     // Build DASTool input
-    dastool_in = dastool_join.map { key, meta, metabat_dir, concoct_dir, semibin_pair, rosella_dir ->
+    dastool_in = dastool_join.map { key, meta, metabat_dir, comebin_dir, semibin_pair, rosella_dir ->
       def (sra, srr) = key
       def (platform, model, strategy, assembler, assembly_fasta) = meta
       def (semibin_dir, semibin_bins) = semibin_pair
       tuple(
         sra, srr, platform, model, strategy, assembler, assembly_fasta,
-        metabat_dir, concoct_dir, semibin_dir, semibin_bins, rosella_dir
+        metabat_dir, comebin_dir, semibin_dir, semibin_bins, rosella_dir
       )
     }
     .filter { it != null }
@@ -878,9 +878,9 @@ workflow BINNING {
       tuple(key, ['metabat', note])
     }
 
-    concoct_status = concoct_binning.note.map { sra, srr, platform, model, strategy, assembler, note ->
+    comebin_status = comebin_binning.note.map { sra, srr, platform, model, strategy, assembler, note ->
       def key = groupKey([sra: sra, srr: srr, platform: platform, model: model, strategy: strategy, assembler: assembler], N_BIN_STATUS)
-      tuple(key, ['concoct', note])
+      tuple(key, ['comebin', note])
     }
 
     semibin_status = semibin_binning.note.map { sra, srr, platform, model, strategy, assembler, note ->
@@ -900,7 +900,7 @@ workflow BINNING {
 
     binning_mix = channel.empty()
       .mix(metabat_status)
-      .mix(concoct_status)
+      .mix(comebin_status)
       .mix(semibin_status)
       .mix(rosella_status)
       .mix(dastool_status)
@@ -911,7 +911,7 @@ workflow BINNING {
         def m = (Map) key.target
         def (sra, srr, platform, model, strategy, assembler) = [m.sra, m.srr, m.platform, m.model, m.strategy, m.assembler]
         def mp = items.collectEntries { tool, note -> [(tool): note] }
-        tuple(sra, srr, platform, model, strategy, assembler, mp.metabat, mp.concoct, mp.semibin, mp.rosella, mp.dastool)
+        tuple(sra, srr, platform, model, strategy, assembler, mp.metabat, mp.comebin, mp.semibin, mp.rosella, mp.dastool)
       }
 
     binning_error_summary = BINNING_ERROR_SUMMARY(binning_status_grouped)
@@ -1083,7 +1083,7 @@ workflow {
     // Step 2: ASSEMBLY: assemblers -> DIAMOND -> BLOBTOOLS -> EXTRACT_TAXA
     asm = ASSEMBLY(pre.singlem_reads, validated_taxa, uniprot_db_ch, taxdump_ch)
 
-    // Step 3: BINNING: METABAT, CONCOCT, SEMIBIN, ROSELLA -> DASTOOL
+    // Step 3: BINNING: METABAT, COMEBin, SEMIBIN, ROSELLA -> DASTOOL
     binning = BINNING(asm.blobtable, asm.assembly_bam_all, uniprot_db_ch)
 
     // Step 4: Build summary.tsv (including binning annotations)
