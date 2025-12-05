@@ -671,7 +671,9 @@ workflow PRE_SCREENING {
     singlem_db_ch
 
   main:
-    // Step 1: extract metadata & filter SRR
+    def doScreening = params.taxa != null
+
+    // Extract metadata & filter SRR
     sra_metadata = DOWNLOAD_SRA_METADATA(sra_ch)
     filtered_srr = sra_metadata.filtered_sra
 
@@ -690,34 +692,65 @@ workflow PRE_SCREENING {
               .filter { it[1] }  // ensure SRR not empty
               .distinct()
 
-    // Step 2: SANDPIPER prescreening
-    sandpiper = SANDPIPER(srr_ch, validated_taxa, sandpiper_db_ch)
-    // decision: NEGATIVE / RUN_SINGLEM / PASS
-    sandpiper_decision_ch = sandpiper.decision.map { sra, srr, platform, model, strategy, assembler, dec_path ->
-      def decision = file(dec_path).text.trim()
-      tuple(sra, srr, platform, model, strategy, assembler, decision)
-    }
+    def singlem_reads_ch
+    def sandpiper_note_ch
+    def download_srr_note_ch
+    def singlem_note_ch
 
-    srr_prescreened = sandpiper_decision_ch
-      .filter { sra, srr, platform, model, strategy, assembler, decision ->
-        decision == 'PASS' || decision == 'RUN_SINGLEM'
+    if (doScreening) {
+      // SANDPIPER prescreening
+      sandpiper = SANDPIPER(srr_ch, validated_taxa, sandpiper_db_ch)
+      // decision: NEGATIVE / RUN_SINGLEM / PASS
+      sandpiper_decision_ch = sandpiper.decision.map { sra, srr, platform, model, strategy, assembler, dec_path ->
+        def decision = file(dec_path).text.trim()
+        tuple(sra, srr, platform, model, strategy, assembler, decision)
       }
 
-    // Step 3: download SRR reads
-    download_srr = DOWNLOAD_SRR(srr_prescreened)
+      srr_prescreened = sandpiper_decision_ch
+        .filter { sra, srr, platform, model, strategy, assembler, decision ->
+          decision == 'PASS' || decision == 'RUN_SINGLEM'
+        }
 
-    srr_reads = download_srr.reads.map { sra, srr, platform, model, strategy, asm, sandpiper_dec, reads, asm_txt ->
-      def fixedAsm = file(asm_txt)?.text?.trim() ?: asm
-      tuple(sra, srr, platform, model, strategy, fixedAsm, sandpiper_dec, reads)
+      // Download SRR reads
+      download_srr = DOWNLOAD_SRR(srr_prescreened)
+
+      srr_reads = download_srr.reads.map { sra, srr, platform, model, strategy, asm, sandpiper_dec, reads, asm_txt ->
+        def fixedAsm = file(asm_txt)?.text?.trim() ?: asm
+        tuple(sra, srr, platform, model, strategy, fixedAsm, sandpiper_dec, reads)
+      }
+
+      // SINGLEM prescreening
+      singlem = SINGLEM(srr_reads, validated_taxa, singlem_db_ch)
+      singlem_reads_ch     = singlem.reads
+
+      sandpiper_note_ch    = sandpiper.note
+      download_srr_note_ch = download_srr.note
+      singlem_note_ch      = singlem.note
     }
 
-    // Step 4: SINGLEM prescreening
-    singlem = SINGLEM(srr_reads, validated_taxa, singlem_db_ch)
-    singlem_reads = singlem.reads
+    else {
+      // If no screening, set all decisions to PASS
+      srr_prescreened = srr_ch.map { sra, srr, platform, model, strategy, assembler ->
+        tuple(sra, srr, platform, model, strategy, assembler, 'PASS')
+      }
+
+      // Download SRR reads
+      download_srr = DOWNLOAD_SRR(srr_prescreened)
+
+      // normalise assembler, then drop sandpiper decision
+      singlem_reads_ch = download_srr.reads.map { sra, srr, platform, model, strategy, asm, sandpiper_dec, reads, asm_txt ->
+        def fixedAsm = file(asm_txt)?.text?.trim() ?: asm
+        tuple(sra, srr, platform, model, strategy, fixedAsm, reads)
+      }
+
+      sandpiper_note_ch    = channel.empty()
+      download_srr_note_ch = download_srr.note
+      singlem_note_ch      = channel.empty()
+    }
 
   emit:
     // For assembly
-    singlem_reads         = singlem_reads
+    singlem_reads         = singlem_reads_ch
 
     // For summary
     sra_metadata_skipped  = sra_metadata.skipped_sra
