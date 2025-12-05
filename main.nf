@@ -15,16 +15,18 @@ def helpMessage() {
   ===============================
   Usage: nextflow run main.nf [parameters]
 
-  Required parameters:
+  Required parameters (assembly + binning):
     --sra           Path to sra.csv (header: sra)
-    --taxa          Path to taxa.csv for extraction (header: rank, taxa)
     --taxdump       Path to taxdump database folder
+    --uniprot_db    Path to Uniprot database (.dmnd)
+
+  Optional parameters ( enable target taxa screening & extraction):
+    --taxa          Path to taxa.csv for extraction (header: rank, taxa)
     --gtdb_ncbi_map Path to folder with GTDB-NCBI mapping Excel files
     --sandpiper_db  Path to Sandpiper database folder
     --singlem_db    Path to SingleM database folder
-    --uniprot_db    Path to Uniprot database (.dmnd)
 
-  Optional parameters:
+  Misc:
     --help          Show this help message
     --outdir        Output directory (default: ./output)
     --max_retries   Maximum number of retries for each process (default: 3)
@@ -35,7 +37,12 @@ def helpMessage() {
 def missingParametersError() {
     log.error "Missing input parameters"
     helpMessage()
-    error "Please provide all required parameters: --sra, --taxa, --taxdump, --gtdb_ncbi_map, --sandpiper_db, --singlem_db, and --uniprot_db"
+    error """
+    For assembly + binning, please provide at least:
+      --sra, --taxdump, and --uniprot_db
+    If you also want to enable target taxa screening & extraction, please provide:
+      --taxa, --gtdb_ncbi_map, --sandpiper_db, and --singlem_db
+    """.stripIndent()
 }
 
 
