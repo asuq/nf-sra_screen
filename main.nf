@@ -15,16 +15,18 @@ def helpMessage() {
   ===============================
   Usage: nextflow run main.nf [parameters]
 
-  Required parameters:
+  Required parameters (assembly + binning):
     --sra           Path to sra.csv (header: sra)
-    --taxa          Path to taxa.csv for extraction (header: rank, taxa)
     --taxdump       Path to taxdump database folder
+    --uniprot_db    Path to Uniprot database (.dmnd)
+
+  Optional parameters ( enable target taxa screening & extraction):
+    --taxa          Path to taxa.csv for extraction (header: rank, taxa)
     --gtdb_ncbi_map Path to folder with GTDB-NCBI mapping Excel files
     --sandpiper_db  Path to Sandpiper database folder
     --singlem_db    Path to SingleM database folder
-    --uniprot_db    Path to Uniprot database (.dmnd)
 
-  Optional parameters:
+  Misc:
     --help          Show this help message
     --outdir        Output directory (default: ./output)
     --max_retries   Maximum number of retries for each process (default: 3)
@@ -35,7 +37,12 @@ def helpMessage() {
 def missingParametersError() {
     log.error "Missing input parameters"
     helpMessage()
-    error "Please provide all required parameters: --sra, --taxa, --taxdump, --gtdb_ncbi_map, --sandpiper_db, --singlem_db, and --uniprot_db"
+    error """
+    For assembly + binning, please provide at least:
+      --sra, --taxdump, and --uniprot_db
+    If you also want to enable target taxa screening & extraction, please provide:
+      --taxa, --gtdb_ncbi_map, --sandpiper_db, and --singlem_db
+    """.stripIndent()
 }
 
 
@@ -73,7 +80,6 @@ process DOWNLOAD_SRA_METADATA {
 
     input:
     val sra
-    path valid_taxa
 
     output:
     tuple val(sra), path("${sra}.filtered.csv"),                                    optional: true, emit: filtered_sra
@@ -665,8 +671,10 @@ workflow PRE_SCREENING {
     singlem_db_ch
 
   main:
-    // Step 1: extract metadata & filter SRR
-    sra_metadata = DOWNLOAD_SRA_METADATA(sra_ch, validated_taxa)
+    def doScreening = params.taxa != null
+
+    // Extract metadata & filter SRR
+    sra_metadata = DOWNLOAD_SRA_METADATA(sra_ch)
     filtered_srr = sra_metadata.filtered_sra
 
     // Build nested channels per CSV, then flatten
@@ -684,34 +692,65 @@ workflow PRE_SCREENING {
               .filter { it[1] }  // ensure SRR not empty
               .distinct()
 
-    // Step 2: SANDPIPER prescreening
-    sandpiper = SANDPIPER(srr_ch, validated_taxa, sandpiper_db_ch)
-    // decision: NEGATIVE / RUN_SINGLEM / PASS
-    sandpiper_decision_ch = sandpiper.decision.map { sra, srr, platform, model, strategy, assembler, dec_path ->
-      def decision = file(dec_path).text.trim()
-      tuple(sra, srr, platform, model, strategy, assembler, decision)
-    }
+    def singlem_reads_ch
+    def sandpiper_note_ch
+    def download_srr_note_ch
+    def singlem_note_ch
 
-    srr_prescreened = sandpiper_decision_ch
-      .filter { sra, srr, platform, model, strategy, assembler, decision ->
-        decision == 'PASS' || decision == 'RUN_SINGLEM'
+    if (doScreening) {
+      // SANDPIPER prescreening
+      sandpiper = SANDPIPER(srr_ch, validated_taxa, sandpiper_db_ch)
+      // decision: NEGATIVE / RUN_SINGLEM / PASS
+      sandpiper_decision_ch = sandpiper.decision.map { sra, srr, platform, model, strategy, assembler, dec_path ->
+        def decision = file(dec_path).text.trim()
+        tuple(sra, srr, platform, model, strategy, assembler, decision)
       }
 
-    // Step 3: download SRR reads
-    download_srr = DOWNLOAD_SRR(srr_prescreened)
+      srr_prescreened = sandpiper_decision_ch
+        .filter { sra, srr, platform, model, strategy, assembler, decision ->
+          decision == 'PASS' || decision == 'RUN_SINGLEM'
+        }
 
-    srr_reads = download_srr.reads.map { sra, srr, platform, model, strategy, asm, sandpiper_dec, reads, asm_txt ->
-      def fixedAsm = file(asm_txt)?.text?.trim() ?: asm
-      tuple(sra, srr, platform, model, strategy, fixedAsm, sandpiper_dec, reads)
+      // Download SRR reads
+      download_srr = DOWNLOAD_SRR(srr_prescreened)
+
+      srr_reads = download_srr.reads.map { sra, srr, platform, model, strategy, asm, sandpiper_dec, reads, asm_txt ->
+        def fixedAsm = file(asm_txt)?.text?.trim() ?: asm
+        tuple(sra, srr, platform, model, strategy, fixedAsm, sandpiper_dec, reads)
+      }
+
+      // SINGLEM prescreening
+      singlem = SINGLEM(srr_reads, validated_taxa, singlem_db_ch)
+      singlem_reads_ch     = singlem.reads
+
+      sandpiper_note_ch    = sandpiper.note
+      download_srr_note_ch = download_srr.note
+      singlem_note_ch      = singlem.note
     }
 
-    // Step 4: SINGLEM prescreening
-    singlem = SINGLEM(srr_reads, validated_taxa, singlem_db_ch)
-    singlem_reads = singlem.reads
+    else {
+      // If no screening, set all decisions to PASS
+      srr_prescreened = srr_ch.map { sra, srr, platform, model, strategy, assembler ->
+        tuple(sra, srr, platform, model, strategy, assembler, 'PASS')
+      }
+
+      // Download SRR reads
+      download_srr = DOWNLOAD_SRR(srr_prescreened)
+
+      // normalise assembler, then drop sandpiper decision
+      singlem_reads_ch = download_srr.reads.map { sra, srr, platform, model, strategy, asm, sandpiper_dec, reads, asm_txt ->
+        def fixedAsm = file(asm_txt)?.text?.trim() ?: asm
+        tuple(sra, srr, platform, model, strategy, fixedAsm, reads)
+      }
+
+      sandpiper_note_ch    = channel.empty()
+      download_srr_note_ch = download_srr.note
+      singlem_note_ch      = channel.empty()
+    }
 
   emit:
     // For assembly
-    singlem_reads         = singlem_reads
+    singlem_reads         = singlem_reads_ch
 
     // For summary
     sra_metadata_skipped  = sra_metadata.skipped_sra
@@ -1054,31 +1093,50 @@ workflow {
       exit 0
     }
 
-    if (!params.sra || !params.uniprot_db || !params.taxa ||
-        !params.taxdump || !params.gtdb_ncbi_map ||
-        !params.sandpiper_db || !params.singlem_db) {
+    if (!params.sra || !params.taxdump || !params.uniprot_db) {
+      missingParametersError()
+    }
+
+    def useTaxa = params.taxa != null
+    if (useTaxa && (!params.taxdump || !params.gtdb_ncbi_map || !params.sandpiper_db || !params.singlem_db)) {
       missingParametersError()
     }
 
     // Channel setup
     outdir = file(params.outdir).toAbsolutePath().toString()
+
     sra_ch = channel.fromPath(params.sra, checkIfExists: true)
                     .splitCsv(header: true, strip: true)
                     .map { row -> row.sra.trim() }
                     .filter { it }
                     .distinct()
-    taxa_ch           = channel.value( file(params.taxa) )
     taxdump_ch        = channel.value( file(params.taxdump) )
-    gtdb_ncbi_map_ch  = channel.value( file(params.gtdb_ncbi_map) )
-    singlem_db_ch     = channel.value( file(params.singlem_db) )
-    sandpiper_db_ch   = channel.value( file(params.sandpiper_db) )
     uniprot_db_ch     = channel.value( file(params.uniprot_db) )
 
-    // Step 0: validate taxa
-    validated_taxa = VALIDATE_TAXA(taxa_ch, taxdump_ch, gtdb_ncbi_map_ch).valid_taxa
+    if (useTaxa) {
+      gtdb_ncbi_map_ch = channel.value( file(params.gtdb_ncbi_map) )
+      taxa_ch          = channel.value( file(params.taxa) )
+      singlem_db_ch    = channel.value( file(params.singlem_db) )
+      sandpiper_db_ch  = channel.value( file(params.sandpiper_db) )
+
+      // Step 0: validate taxa
+      validated_taxa = VALIDATE_TAXA(taxa_ch, taxdump_ch, gtdb_ncbi_map_ch).valid_taxa
+
+      gated_sra_ch = sra_ch.combine(validated_taxa)
+                          .map { sra, vt -> sra }
+    }
+    else {
+      taxa_ch           = channel.empty()
+      gtdb_ncbi_map_ch  = channel.empty()
+      taxa_ch           = channel.empty()
+      singlem_db_ch     = channel.empty()
+      sandpiper_db_ch   = channel.empty()
+
+      gated_sra_ch = sra_ch
+    }
 
     // Step 1: PRE_SCREENING: DOWNLOAD_SRA_METADATA -> SANDPIPER -> DOWNLOAD_SRR -> SINGLEM
-    pre = PRE_SCREENING(sra_ch, validated_taxa, sandpiper_db_ch, singlem_db_ch)
+    pre = PRE_SCREENING(gated_sra_ch, validated_taxa, sandpiper_db_ch, singlem_db_ch)
 
     // Step 2: ASSEMBLY: assemblers -> DIAMOND -> BLOBTOOLS -> EXTRACT_TAXA
     asm = ASSEMBLY(pre.singlem_reads, validated_taxa, uniprot_db_ch, taxdump_ch)
