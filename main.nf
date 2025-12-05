@@ -80,7 +80,6 @@ process DOWNLOAD_SRA_METADATA {
 
     input:
     val sra
-    path valid_taxa
 
     output:
     tuple val(sra), path("${sra}.filtered.csv"),                                    optional: true, emit: filtered_sra
@@ -673,7 +672,7 @@ workflow PRE_SCREENING {
 
   main:
     // Step 1: extract metadata & filter SRR
-    sra_metadata = DOWNLOAD_SRA_METADATA(sra_ch, validated_taxa)
+    sra_metadata = DOWNLOAD_SRA_METADATA(sra_ch)
     filtered_srr = sra_metadata.filtered_sra
 
     // Build nested channels per CSV, then flatten
