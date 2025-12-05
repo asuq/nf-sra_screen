@@ -1060,28 +1060,42 @@ workflow {
       exit 0
     }
 
-    if (!params.sra || !params.uniprot_db || !params.taxa ||
-        !params.taxdump || !params.gtdb_ncbi_map ||
-        !params.sandpiper_db || !params.singlem_db) {
+    if (!params.sra || !params.taxdump || !params.uniprot_db) {
+      missingParametersError()
+    }
+
+    def useTaxa = params.taxa != null
+    if (useTaxa && (!params.taxdump || !params.gtdb_ncbi_map || !params.sandpiper_db || !params.singlem_db)) {
       missingParametersError()
     }
 
     // Channel setup
     outdir = file(params.outdir).toAbsolutePath().toString()
+
     sra_ch = channel.fromPath(params.sra, checkIfExists: true)
                     .splitCsv(header: true, strip: true)
                     .map { row -> row.sra.trim() }
                     .filter { it }
                     .distinct()
-    taxa_ch           = channel.value( file(params.taxa) )
     taxdump_ch        = channel.value( file(params.taxdump) )
-    gtdb_ncbi_map_ch  = channel.value( file(params.gtdb_ncbi_map) )
-    singlem_db_ch     = channel.value( file(params.singlem_db) )
-    sandpiper_db_ch   = channel.value( file(params.sandpiper_db) )
     uniprot_db_ch     = channel.value( file(params.uniprot_db) )
 
-    // Step 0: validate taxa
-    validated_taxa = VALIDATE_TAXA(taxa_ch, taxdump_ch, gtdb_ncbi_map_ch).valid_taxa
+    if (useTaxa) {
+      gtdb_ncbi_map_ch = channel.value( file(params.gtdb_ncbi_map) )
+      taxa_ch          = channel.value( file(params.taxa) )
+      singlem_db_ch    = channel.value( file(params.singlem_db) )
+      sandpiper_db_ch  = channel.value( file(params.sandpiper_db) )
+
+      // Step 0: validate taxa
+      validated_taxa = VALIDATE_TAXA(taxa_ch, taxdump_ch, gtdb_ncbi_map_ch).valid_taxa
+    }
+    else {
+      taxa_ch           = channel.empty()
+      gtdb_ncbi_map_ch  = channel.empty()
+      taxa_ch           = channel.empty()
+      singlem_db_ch     = channel.empty()
+      sandpiper_db_ch   = channel.empty()
+    }
 
     // Step 1: PRE_SCREENING: DOWNLOAD_SRA_METADATA -> SANDPIPER -> DOWNLOAD_SRR -> SINGLEM
     pre = PRE_SCREENING(sra_ch, validated_taxa, sandpiper_db_ch, singlem_db_ch)
