@@ -1121,6 +1121,9 @@ workflow {
 
       // Step 0: validate taxa
       validated_taxa = VALIDATE_TAXA(taxa_ch, taxdump_ch, gtdb_ncbi_map_ch).valid_taxa
+
+      gated_sra_ch = sra_ch.combine(validated_taxa)
+                          .map { sra, vt -> sra }
     }
     else {
       taxa_ch           = channel.empty()
@@ -1128,10 +1131,12 @@ workflow {
       taxa_ch           = channel.empty()
       singlem_db_ch     = channel.empty()
       sandpiper_db_ch   = channel.empty()
+
+      gated_sra_ch = sra_ch
     }
 
     // Step 1: PRE_SCREENING: DOWNLOAD_SRA_METADATA -> SANDPIPER -> DOWNLOAD_SRR -> SINGLEM
-    pre = PRE_SCREENING(sra_ch, validated_taxa, sandpiper_db_ch, singlem_db_ch)
+    pre = PRE_SCREENING(gated_sra_ch, validated_taxa, sandpiper_db_ch, singlem_db_ch)
 
     // Step 2: ASSEMBLY: assemblers -> DIAMOND -> BLOBTOOLS -> EXTRACT_TAXA
     asm = ASSEMBLY(pre.singlem_reads, validated_taxa, uniprot_db_ch, taxdump_ch)
