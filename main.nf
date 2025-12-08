@@ -9,19 +9,26 @@ def helpMessage() {
   ===============================
   nf-sra_screen
   Nextflow pipeline for screening SRA genomes
-  Version: 0.2.0
+  Version: ${params.version}
   Author : Akito Shima (ASUQ)
   Email: asuq.4096@gmail.com
   ===============================
   Usage: nextflow run main.nf [parameters]
 
   Required parameters (assembly + binning):
+    (A) SRA mode:
     --sra           Path to sra.csv (header: sra)
+    (B) FASTQ mode:
+    --fastq_tsv     Path to fastq.tsv (header: sample,read_type,reads)
+                    (reads: comma-separated FASTQ paths)
+    You can combine both modes by providing both --sra and --fastq_tsv
+
+    And:
     --taxdump       Path to taxdump database folder
     --uniprot_db    Path to Uniprot database (.dmnd)
 
-  Optional parameters ( enable target taxa screening & extraction):
-    --taxa          Path to taxa.csv for extraction (header: rank, taxa)
+  Optional parameters (enable target taxa screening & extraction):
+    --taxa          Path to taxa.csv for extraction (header: rank, ncbi_taxa)
     --gtdb_ncbi_map Path to folder with GTDB-NCBI mapping Excel files
     --sandpiper_db  Path to Sandpiper database folder
     --singlem_db    Path to SingleM database folder
@@ -38,10 +45,12 @@ def missingParametersError() {
     log.error "Missing input parameters"
     helpMessage()
     error """
-    For assembly + binning, please provide at least:
-      --sra, --taxdump, and --uniprot_db
+    For assembly + binning, please provide:
+      --taxdump and --uniprot_db
+      and at least one of --sra or --fastq_tsv
     If you also want to enable target taxa screening & extraction, please provide:
-      --taxa, --gtdb_ncbi_map, --sandpiper_db, and --singlem_db
+      --taxa, --gtdb_ncbi_map, and --singlem_db
+      and for sra mode also --sandpiper_db
     """.stripIndent()
 }
 
@@ -568,7 +577,7 @@ process DASTOOL {
 }
 
 
-process LOG_FAILED_PROCESS {
+process CREATE_EMPTY_SUMMARY {
   tag "${sra}"
 
   input:
@@ -673,8 +682,13 @@ workflow PRE_SCREENING {
   main:
     def doScreening = params.taxa != null
 
+    // Start PRE_SCREENING after taxa validation
+    def gated_sra_ch = doScreening
+                        ? sra_ch.combine(validated_taxa).map { sra, vt -> sra }
+                        : sra_ch
+
     // Extract metadata & filter SRR
-    sra_metadata = DOWNLOAD_SRA_METADATA(sra_ch)
+    sra_metadata = DOWNLOAD_SRA_METADATA(gated_sra_ch)
     filtered_srr = sra_metadata.filtered_sra
 
     // Build nested channels per CSV, then flatten
@@ -755,9 +769,9 @@ workflow PRE_SCREENING {
     // For summary
     sra_metadata_skipped  = sra_metadata.skipped_sra
     sra_metadata_note     = sra_metadata.note
-    sandpiper_note        = sandpiper.note
-    download_srr_note     = download_srr.note
-    singlem_note          = singlem.note
+    sandpiper_note        = sandpiper_note_ch
+    download_srr_note     = download_srr_note_ch
+    singlem_note          = singlem_note_ch
 }
 
 
@@ -769,6 +783,8 @@ workflow ASSEMBLY {
     taxdump_ch
 
   main:
+    def doScreening = params.taxa != null
+
     // Step 5: assemble reads
     short_ch       = singlem_reads.filter { sra, srr, platform, model, strategy, assembler, reads -> assembler.equalsIgnoreCase('short') }
     long_nano_ch   = singlem_reads.filter { sra, srr, platform, model, strategy, assembler, reads -> assembler.equalsIgnoreCase('long_nano') }
@@ -817,7 +833,33 @@ workflow ASSEMBLY {
     blobtools = BLOBTOOLS(blobtools_in, taxdump_ch)
 
     // Step 8: EXTRACT_TAXA
-    taxa_extraction = EXTRACT_TAXA(blobtools.blobtable, validated_taxa, taxdump_ch)
+    def taxa_summary_ch
+    def taxa_note_ch
+
+    if (doScreening) {
+      taxa_extraction = EXTRACT_TAXA(blobtools.blobtable, validated_taxa, taxdump_ch)
+      taxa_summary_ch = taxa_extraction.summary
+      taxa_note_ch    = taxa_extraction.note
+
+    }
+    else{
+      // No-taxa mode:
+      // Treat any sample that reached BlobTools as "successful" and
+      // synthesize an empty per-sample summary.csv using CREATE_EMPTY_SUMMARY.
+
+      no_taxa_success_meta = blobtools.blobtable
+        .map { sra, srr, platform, model, strategy, assembler, assembly_fasta, blobtable_csv ->
+          // note field is empty string for successful runs
+          tuple(sra, srr, platform, model, strategy, assembler, '')
+        }
+      no_taxa_summary = CREATE_EMPTY_SUMMARY(no_taxa_success_meta).skipped_rows
+
+      taxa_summary_ch = no_taxa_summary.map { sra, srr, platform, model, strategy, assembler, summary_csv, note ->
+        tuple(sra, srr, platform, model, strategy, assembler, summary_csv)
+      }
+
+      taxa_note_ch    = channel.empty()
+    }
 
     assembly_notes_ch = channel.empty()
                           .mix(spades_asm.note)
@@ -831,8 +873,8 @@ workflow ASSEMBLY {
     blobtable        = blobtools.blobtable
 
     // For summary
-    taxa_summary     = taxa_extraction.summary
-    taxa_note        = taxa_extraction.note
+    taxa_summary     = taxa_summary_ch
+    taxa_note        = taxa_note_ch
     assembly_notes   = assembly_notes_ch
     diamond_note     = diamond.note
     blobtools_note   = blobtools.note
@@ -949,7 +991,11 @@ workflow BINNING {
       .map { key, items ->
         def m = (Map) key.target
         def (sra, srr, platform, model, strategy, assembler) = [m.sra, m.srr, m.platform, m.model, m.strategy, m.assembler]
-        def mp = items.collectEntries { tool, note -> [(tool): note] }
+        def mp = items.collectEntries {
+          entry ->
+          def (tool, note) = entry
+          [(tool): note]
+        }
         tuple(sra, srr, platform, model, strategy, assembler, mp.metabat, mp.comebin, mp.semibin, mp.rosella, mp.dastool)
       }
 
@@ -1016,7 +1062,7 @@ workflow SUMMARY {
                     }
                     .mix(skipped_srr)
 
-    failed_sra = LOG_FAILED_PROCESS(errors)
+    failed_sra = CREATE_EMPTY_SUMMARY(errors)
 
     // Successful samples: have a summary.csv (note starts empty)
     succeeded_sra = taxa_summary.map { sra, srr, platform, model, strategy, assembler, summary_csv ->
@@ -1093,65 +1139,143 @@ workflow {
       exit 0
     }
 
-    if (!params.sra || !params.taxdump || !params.uniprot_db) {
+    def sraMode   = params.sra != null
+    def fastqMode = params.fastq_tsv != null
+
+    if (!sraMode && !fastqMode) {
+      log.error "Error: either --sra or --fastq_tsv parameter must be provided"
       missingParametersError()
     }
 
-    def useTaxa = params.taxa != null
-    if (useTaxa && (!params.taxdump || !params.gtdb_ncbi_map || !params.sandpiper_db || !params.singlem_db)) {
+    if (!params.taxdump || !params.uniprot_db) {
+      log.error "Error: Missing --taxdump or --uniprot_db"
       missingParametersError()
     }
 
-    // Channel setup
-    outdir = file(params.outdir).toAbsolutePath().toString()
-
-    sra_ch = channel.fromPath(params.sra, checkIfExists: true)
-                    .splitCsv(header: true, strip: true)
-                    .map { row -> row.sra.trim() }
-                    .filter { it }
-                    .distinct()
-    taxdump_ch        = channel.value( file(params.taxdump) )
-    uniprot_db_ch     = channel.value( file(params.uniprot_db) )
-
-    if (useTaxa) {
-      gtdb_ncbi_map_ch = channel.value( file(params.gtdb_ncbi_map) )
-      taxa_ch          = channel.value( file(params.taxa) )
-      singlem_db_ch    = channel.value( file(params.singlem_db) )
-      sandpiper_db_ch  = channel.value( file(params.sandpiper_db) )
-
-      // Step 0: validate taxa
-      validated_taxa = VALIDATE_TAXA(taxa_ch, taxdump_ch, gtdb_ncbi_map_ch).valid_taxa
-
-      gated_sra_ch = sra_ch.combine(validated_taxa)
-                          .map { sra, vt -> sra }
-    }
-    else {
-      taxa_ch           = channel.empty()
-      gtdb_ncbi_map_ch  = channel.empty()
-      taxa_ch           = channel.empty()
-      singlem_db_ch     = channel.empty()
-      sandpiper_db_ch   = channel.empty()
-
-      gated_sra_ch = sra_ch
+    def doScreening = params.taxa != null
+    if (doScreening) {
+      if (!params.taxdump || !params.gtdb_ncbi_map || !params.singlem_db) {
+        log.error "Error: Missing --taxdump, --gtdb_ncbi_map, or --singlem_db required for taxa filtering"
+        missingParametersError()
+      }
+      if (sraMode && !params.sandpiper_db) {
+        log.error "Error: --sandpiper_db is required for SRA-based taxa screening"
+        missingParametersError()
+      }
     }
 
-    // Step 1: PRE_SCREENING: DOWNLOAD_SRA_METADATA -> SANDPIPER -> DOWNLOAD_SRR -> SINGLEM
-    pre = PRE_SCREENING(gated_sra_ch, validated_taxa, sandpiper_db_ch, singlem_db_ch)
+    // Common channels
+    def outdir        = file(params.outdir).toAbsolutePath().toString()
+    def taxdump_ch    = channel.value( file(params.taxdump) )
+    def uniprot_db_ch = channel.value( file(params.uniprot_db) )
 
-    // Step 2: ASSEMBLY: assemblers -> DIAMOND -> BLOBTOOLS -> EXTRACT_TAXA
-    asm = ASSEMBLY(pre.singlem_reads, validated_taxa, uniprot_db_ch, taxdump_ch)
+    // Taxa-related channels
+    def validated_taxa_ch = channel.empty()
+    def singlem_db_ch     = channel.empty()
+    def sandpiper_db_ch   = channel.empty()
+    if (doScreening) {
+      def taxa_ch          = channel.value( file(params.taxa) )
+      def gtdb_ncbi_map_ch = channel.value( file(params.gtdb_ncbi_map) )
+      singlem_db_ch        = channel.value( file(params.singlem_db) )
+      sandpiper_db_ch      = sraMode ? channel.value( file(params.sandpiper_db) ) : channel.empty()
 
-    // Step 3: BINNING: METABAT, COMEBin, SEMIBIN, ROSELLA -> DASTOOL
+      // validate taxa
+      validated_taxa_ch = VALIDATE_TAXA(taxa_ch, taxdump_ch, gtdb_ncbi_map_ch).valid_taxa
+    }
+
+
+    // SRA mode
+    def sra_singlem_reads_ch    = channel.empty()
+    def sra_metadata_skipped_ch = channel.empty()
+    def sra_metadata_note       = channel.empty()
+    def sra_sandpiper_note      = channel.empty()
+    def sra_download_srr_note   = channel.empty()
+    def sra_singlem_note        = channel.empty()
+    if (sraMode) {
+      sra_ch = channel.fromPath(params.sra, checkIfExists: true)
+                      .splitCsv(header: true, strip: true)
+                      .map { row -> row.sra.trim() }
+                      .filter { it }
+                      .distinct()
+
+      pre = PRE_SCREENING(sra_ch, validated_taxa_ch, sandpiper_db_ch, singlem_db_ch)
+
+      sra_singlem_reads_ch    = pre.singlem_reads
+      sra_metadata_skipped_ch = pre.sra_metadata_skipped
+      sra_metadata_note       = pre.sra_metadata_note
+      sra_sandpiper_note      = pre.sandpiper_note
+      sra_download_srr_note   = pre.download_srr_note
+      sra_singlem_note        = pre.singlem_note
+    }
+
+    // FASTQ mode
+    def fastq_singlem_reads_ch = channel.empty()
+    def fastq_singlem_note     = channel.empty()
+    if (fastqMode) {
+      fastq_ch = channel.fromPath(params.fastq_tsv, checkIfExists: true)
+                        .splitCsv(header: true, sep: '\t', strip: true)
+                        .map { row ->
+                          def sample    = (row.sample ?: '').trim()
+                          def read_type = (row.read_type ?: '').trim()
+                          def reads_raw = (row.reads ?: '').trim()
+
+                          if (!sample || !read_type || !reads_raw) {
+                            log.warn "Skipping FASTQ TSV row with missing fields: ${row}"
+                            return null
+                          }
+
+                          def read_files = reads_raw.split(/\s*,\s*/).findAll { it }.collect { file(it) }
+
+                          if (!read_files) {
+                            log.warn "No valid FASTQ paths for sample ${sample}; skipping"
+                            return null
+                          }
+
+                          def sra       = sample
+                          def srr       = sample
+                          def platform  = "UNKNOWN"
+                          def model     = read_type
+                          def strategy  = "UNKNOWN"
+                          def assembler = read_type
+
+                          tuple(sra, srr, platform, model, strategy, assembler, read_files)
+                        }
+                        .filter { it != null }
+
+      if (doScreening) {
+        fastq_for_singlem_ch = fastq_ch.map { sra, srr, platform, model, strategy, assembler, reads ->
+          tuple(sra, srr, platform, model, strategy, assembler, "RUN_SINGLEM", reads)
+        }
+
+        singlem_fastq = SINGLEM(fastq_for_singlem_ch, validated_taxa_ch, singlem_db_ch)
+        fastq_singlem_reads_ch = singlem_fastq.reads
+        fastq_singlem_note     = singlem_fastq.note
+      }
+      else {
+        fastq_singlem_reads_ch = fastq_ch
+        fastq_singlem_note     = channel.empty()
+      }
+    }
+
+    // Merge SRA and FASTQ reads for assembly
+    def singlem_reads_all = channel.empty()
+                                  .mix(sra_singlem_reads_ch)
+                                  .mix(fastq_singlem_reads_ch)
+    def singlem_notes_all = channel.empty()
+                                  .mix(sra_singlem_note)
+                                  .mix(fastq_singlem_note)
+
+    asm = ASSEMBLY(singlem_reads_all, validated_taxa_ch, uniprot_db_ch, taxdump_ch)
+
     binning = BINNING(asm.blobtable, asm.assembly_bam_all, uniprot_db_ch)
 
-    // Step 4: Build summary.tsv (including binning annotations)
     SUMMARY(
       // PRE_SCREENING: summary-related outputs
-      pre.sra_metadata_skipped,
-      pre.sra_metadata_note,
-      pre.sandpiper_note,
-      pre.download_srr_note,
-      pre.singlem_note,
+      sra_metadata_skipped_ch,
+      sra_metadata_note,
+      sra_sandpiper_note,
+      sra_download_srr_note,
+      singlem_notes_all,
 
       // ASSEMBLY: summary-related outputs
       asm.assembly_notes,
