@@ -786,22 +786,22 @@ workflow ASSEMBLY {
     def doScreening = params.taxa != null
 
     // Step 5: assemble reads
-    short_ch       = singlem_reads.filter { sra, srr, platform, model, strategy, assembler, reads -> assembler.equalsIgnoreCase('short') }
-    long_nano_ch   = singlem_reads.filter { sra, srr, platform, model, strategy, assembler, reads -> assembler.equalsIgnoreCase('long_nano') }
-    long_pacbio_ch = singlem_reads.filter { sra, srr, platform, model, strategy, assembler, reads -> assembler.equalsIgnoreCase('long_pacbio') }
-    long_hifi_ch   = singlem_reads.filter { sra, srr, platform, model, strategy, assembler, reads -> assembler.equalsIgnoreCase('long_hifi') }
+    short_ch    = singlem_reads.filter { sra, srr, platform, model, strategy, assembler, reads -> assembler.equalsIgnoreCase('short') }
+    nanopore_ch = singlem_reads.filter { sra, srr, platform, model, strategy, assembler, reads -> assembler.equalsIgnoreCase('nanopore') }
+    pacbio_ch   = singlem_reads.filter { sra, srr, platform, model, strategy, assembler, reads -> assembler.equalsIgnoreCase('pacbio') }
+    hifi_ch     = singlem_reads.filter { sra, srr, platform, model, strategy, assembler, reads -> assembler.equalsIgnoreCase('hifi') }
 
     spades_asm     = METASPADES(short_ch)
-    flyenano_asm   = METAFLYE_NANO(long_nano_ch)
-    flyepacbio_asm = METAFLYE_PACBIO(long_pacbio_ch)
-    hifimeta_asm   = MYLOASM(long_hifi_ch)
+    flyenano_asm   = METAFLYE_NANO(nanopore_ch)
+    flyepacbio_asm = METAFLYE_PACBIO(pacbio_ch)
+    myloasm_asm    = MYLOASM(hifi_ch)
 
     // Step 6: DIAMOND
     asm_fasta_ch = channel.empty()
                         .mix(spades_asm.assembly_fasta)
                         .mix(flyenano_asm.assembly_fasta)
                         .mix(flyepacbio_asm.assembly_fasta)
-                        .mix(hifimeta_asm.assembly_fasta)
+                        .mix(myloasm_asm.assembly_fasta)
 
     diamond = DIAMOND(asm_fasta_ch, uniprot_db_ch)
 
@@ -810,7 +810,7 @@ workflow ASSEMBLY {
                   .mix(spades_asm.assembly_bam)
                   .mix(flyenano_asm.assembly_bam)
                   .mix(flyepacbio_asm.assembly_bam)
-                  .mix(hifimeta_asm.assembly_bam)
+                  .mix(myloasm_asm.assembly_bam)
 
     // Step 7: BlobTools
     // Key every stream by (sra,srr)
@@ -865,7 +865,7 @@ workflow ASSEMBLY {
                           .mix(spades_asm.note)
                           .mix(flyenano_asm.note)
                           .mix(flyepacbio_asm.note)
-                          .mix(hifimeta_asm.note)
+                          .mix(myloasm_asm.note)
 
   emit:
     // For binning
