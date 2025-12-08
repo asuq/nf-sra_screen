@@ -473,7 +473,7 @@ process COMEBIN {
 
     script:
     """
-    run_comebin.sh \\
+    run_comebin_nf.sh \\
       --assembly "${assembly_fasta}" \\
       --bam "${assembly_bam}" \\
       --cpus ${task.cpus} \\
