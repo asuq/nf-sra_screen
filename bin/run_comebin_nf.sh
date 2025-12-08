@@ -57,7 +57,7 @@ fail() {
 }
 
 # Symlink the BAM into a directory, as COMEBin expects a bam directory (-p)
-ln -s "$bam" "${bam_dir}/$(basename "$bam")"
+ln -s "../$(basename "$bam")" "${bam_dir}/$(basename "$bam")"
 
 # Run COMEBin (CPU mode)
 if ! run_comebin.sh \
