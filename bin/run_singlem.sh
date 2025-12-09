@@ -79,8 +79,8 @@ if [[ ${#read_files[@]} -eq 0 || -z "$valid_taxa" || -z "$singlem_db" ]]; then
   fail "SingleM: missing required arguments (--reads, --valid-taxa, --singlem-db)"
 fi
 
-# Build phyla_to_check.txt from validated_taxa.csv
-make_phyla_list_from_validated_taxa.sh "$valid_taxa" phyla_to_check.txt \
+# Build gtdb_taxa_to_check.txt from validated_taxa.csv
+make_gtdb_taxa_list_from_validated_taxa.sh "$valid_taxa" gtdb_taxa_to_check.txt \
   || fail "SingleM: failed to parse validated_taxa"
 
 # Parse reads: paired‑end if ≥2, else single‑end
@@ -125,9 +125,9 @@ singlem summarise \
 # ---------------------- Inline phylum check logic ---------------------- #
 
 rc=0
-if check_singlem_phyla.py \
+if check_singlem_taxa.py \
       -i "singlem_taxonomic_profile.tsv" \
-      -p "phyla_to_check.txt" \
+      -g "gtdb_taxa_to_check.txt" \
       -o "singlem_output.tsv"; then
   rc=0
 else
@@ -147,7 +147,7 @@ case "$rc" in
     fail "SingleM: phylum check internal error"
     ;;
   2)
-    echo "SingleM: No target phyla detected" > FAIL.note
+    echo "SingleM: No target gtdb_taxa detected" > FAIL.note
     exit 0
     ;;
   *)
