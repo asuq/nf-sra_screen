@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Usage: make_phyla_list_from_validated_taxa.sh validated_taxa.csv phyla_to_check.txt
+# Usage: make_gtdb_taxa_list_from_validated_taxa.sh validated_taxa.csv taxa_to_check.txt
 #
 # Semantics:
 #   - validated_taxa.csv comes from validate_taxa.py and has columns:
@@ -7,12 +7,12 @@
 #   - For Sandpiper / SingleM filtering:
 #       * If 'taxa' is GTDB style (d__/p__/c__/o__/f__/g__/s__), use that value.
 #       * Otherwise, use the value from 'gtdb_phylum' (if non-empty).
-#   - Output is a text file with header 'phyla', one target per line.
+#   - Output is a text file with header 'gtdb_taxa', one target per line.
 
 set -euo pipefail
 
 if [[ $# -ne 2 ]]; then
-  echo "Usage: $0 validated_taxa.csv phyla_to_check.txt" >&2
+  echo "Usage: $0 validated_taxa.csv taxa_to_check.txt" >&2
   exit 1
 fi
 
@@ -27,7 +27,7 @@ fi
 
 # header: rank,taxa,ncbi_phylum,gtdb_phylum
 {
-  echo "phyla"
+  echo "gtdb_taxa"
 
   awk -F',' '
     BEGIN {

@@ -8,7 +8,7 @@
 #       --max-retries M
 #
 # Produces:
-#   - phyla_to_check.txt
+#   - gtdb_taxa_to_check.txt
 #   - sandpiper_report.txt
 #   - sandpiper_output.tsv (optional)
 #   - sandpiper_decision.txt
@@ -54,8 +54,8 @@ if [[ -z "$srr" || -z "$valid_taxa" || -z "$db_dir" ]]; then
 fi
 
 
-# Extract phyla
-make_phyla_list_from_validated_taxa.sh "$valid_taxa" phyla_to_check.txt \
+# Extract gtdb_taxa
+make_gtdb_taxa_list_from_validated_taxa.sh "$valid_taxa" gtdb_taxa_to_check.txt \
   || hard_fail "Sandpiper: failed to parse validated_taxa"
 
 # Lookup SRR in Sandpiper DB
@@ -72,9 +72,9 @@ fi
 
 # Check taxa
 rc=0
-if check_singlem_phyla.py \
+if check_singlem_taxa.py \
 	-i sandpiper_report.txt \
-	-p phyla_to_check.txt \
+	-g gtdb_taxa_to_check.txt \
 	-o sandpiper_output.tsv; then
   rc=0
 else
@@ -93,7 +93,7 @@ case "$rc" in
 
   2)
     echo "NEGATIVE" > sandpiper_decision.txt
-    echo "Sandpiper: No target phyla detected" > FAIL.note
+    echo "Sandpiper: No target gtdb_taxa detected" > FAIL.note
     exit 0
     ;;
 
