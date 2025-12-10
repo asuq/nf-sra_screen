@@ -1161,6 +1161,8 @@ workflow {
       }
     }
 
+    def doBinning = (params.binning == true)
+
     // Common channels
     def outdir        = file(params.outdir).toAbsolutePath().toString()
     def taxdump_ch    = channel.value( file(params.taxdump) )
@@ -1264,7 +1266,11 @@ workflow {
 
     asm = ASSEMBLY(singlem_reads_all, validated_taxa_ch, uniprot_db_ch, taxdump_ch)
 
-    binning = BINNING(asm.blobtable, asm.assembly_bam_all, uniprot_db_ch)
+    def binning_note_ch = channel.empty()
+    if (doBinning) {
+      def binning = BINNING(asm.blobtable, asm.assembly_bam_all, uniprot_db_ch)
+      binning_note_ch = binning.binning_note
+    }
 
     SUMMARY(
       // PRE_SCREENING: summary-related outputs
@@ -1282,7 +1288,7 @@ workflow {
       asm.taxa_summary,
 
       // BINNING: notes from each binner
-      binning.binning_note,
+      binning_note_ch,
 
       // constant
       outdir
