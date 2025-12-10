@@ -42,19 +42,22 @@ if [[ -z "${srr}" || -z "${platform}" ]]; then
 fi
 
 # Download sequence data
-tmpdir="${TMPDIR:-.}"
+tmp_dir="tmp_srr"
+mkdir -p "$tmp_dir"
 if ! fasterq-dump \
   -e "${cpus}" \
-  -t "${tmpdir}" \
+  -t "${tmp_dir}" \
   -p \
   --outdir . \
   "${srr}"; then
   if [[ "${attempt}" -lt "${max_retries}" ]]; then
+    rm -rf "${tmp_dir}" 2>/dev/null || true
     # Ask Nextflow to retry
     exit 1
   fi
   echo "Fastq: download raw data failed" > FAIL.note
   # Clean up partial FASTQ
+  rm -rf "${tmp_dir}" 2>/dev/null || true
   rm -f ./*.f*q* "${srr}" 2>/dev/null || true
   exit 0
 fi
