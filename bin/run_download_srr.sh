@@ -46,6 +46,7 @@ tmpdir="${TMPDIR:-.}"
 if ! fasterq-dump \
   -e "${cpus}" \
   -t "${tmpdir}" \
+  -p \
   --outdir . \
   "${srr}"; then
   if [[ "${attempt}" -lt "${max_retries}" ]]; then
