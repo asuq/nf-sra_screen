@@ -76,9 +76,9 @@ if [[ "${platform}" == "PACBIO_SMRT" && ( -z "${assembler}" || "${assembler}" ==
   if zcat -f ./*.f*q* 2>/dev/null \
     | awk 'NR%4==1{ h=tolower($0); if (h ~ /\/ccs([[:space:]]|$)/) { found=1; exit } } END{ exit(!found) }'
   then
-    final_asm="long_hifi"
+    final_asm="hifi"
   else
-    final_asm="long_pacbio"
+    final_asm="pacbio"
   fi
   printf '%s\n' "${final_asm}" > assembler.txt
 else

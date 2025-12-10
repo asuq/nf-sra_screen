@@ -99,15 +99,15 @@ if [[ $header == Run,Center,ReleaseDate,FileType,FileName,FileSize,Download_path
       lm2=tolower(model); gsub(/[[:space:]]+/, " ", lm2); lm2=trim(lm2)
       asm=""
       if (plat ~ /^(ILLUMINA|DNBSEQ|BGISEQ)$/) asm="short"
-      else if (plat=="OXFORD_NANOPORE")        asm="long_nano"
+      else if (plat=="OXFORD_NANOPORE")        asm="nanopore"
       else if (plat=="PACBIO_SMRT"){
         if (model=="N/A" || model=="") {
           asm="unknown"
         } else {
           lm2=tolower(model); gsub(/[[:space:]]+/, " ", lm2); lm2=trim(lm2)
           if (lm2 ~ /(^|[^a-z])rs($|[^a-z])|(^|[^a-z])rs[[:space:]]*ii($|[^a-z])|(^|[^a-z])sequel($|[^a-z])/ &&
-              lm2 !~ /sequel[[:space:]]*ii|sequel[[:space:]]*2|iie|revio/) asm="long_pacbio"
-          else asm="long_hifi"
+              lm2 !~ /sequel[[:space:]]*ii|sequel[[:space:]]*2|iie|revio/) asm="pacbio"
+          else asm="hifi"
         }
       } else asm="unknown"
 
@@ -181,15 +181,15 @@ NR==1{
     if (plat ~ /^(ILLUMINA|DNBSEQ|BGISEQ)$/) {
       asm = "short"
     } else if (plat == "OXFORD_NANOPORE") {
-      asm = "long_nano"
+      asm = "nanopore"
     } else if (plat=="PACBIO_SMRT"){
       if (model=="N/A" || model=="") {
         asm="unknown"
       } else {
         lm2=tolower(model); gsub(/[[:space:]]+/, " ", lm2); lm2=trim(lm2)
         if (lm2 ~ /(^|[^a-z])rs($|[^a-z])|(^|[^a-z])rs[[:space:]]*ii($|[^a-z])|(^|[^a-z])sequel($|[^a-z])/ &&
-          lm2 !~ /sequel[[:space:]]*ii|sequel[[:space:]]*2|iie|revio/) asm="long_pacbio"
-        else asm="long_hifi"
+          lm2 !~ /sequel[[:space:]]*ii|sequel[[:space:]]*2|iie|revio/) asm="pacbio"
+        else asm="hifi"
       }
     } else asm="unknown"
 
