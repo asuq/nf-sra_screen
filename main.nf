@@ -547,7 +547,6 @@ process DASTOOL {
     tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler),
           path(assembly_fasta),
           path(metabat_dir),
-          path(comebin_dir),
           path(semibin_dir),
           path(semibin_contig_bins),
           path(rosella_dir)
@@ -935,13 +934,13 @@ workflow BINNING {
       // .join(comebin_entries)
 
     // Build DASTool input
-    dastool_in = dastool_join.map { key, meta, metabat_dir, comebin_dir, semibin_pair, rosella_dir ->
+    dastool_in = dastool_join.map { key, meta, metabat_dir, semibin_pair, rosella_dir ->
       def (sra, srr) = key
       def (platform, model, strategy, assembler, assembly_fasta) = meta
       def (semibin_dir, semibin_bins) = semibin_pair
       tuple(
         sra, srr, platform, model, strategy, assembler, assembly_fasta,
-        metabat_dir, comebin_dir, semibin_dir, semibin_bins, rosella_dir
+        metabat_dir, semibin_dir, semibin_bins, rosella_dir
       )
     }
     .filter { it != null }
