@@ -457,30 +457,30 @@ process METABAT {
 }
 
 
-process COMEBIN {
-    tag "${sra}:${srr}"
-    label 'binning'
-    publishDir "${params.outdir}/${sra}/${srr}/binning",
-      mode: 'copy',
-      overwrite: true
+// process COMEBIN {
+//     tag "${sra}:${srr}"
+//     label 'binning'
+//     publishDir "${params.outdir}/${sra}/${srr}/binning",
+//       mode: 'copy',
+//       overwrite: true
 
-    input:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path(assembly_fasta), path(assembly_bam), path(assembly_csi)
+//     input:
+//     tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path(assembly_fasta), path(assembly_bam), path(assembly_csi)
 
-    output:
-    tuple val(sra), val(srr), path("comebin"),                                                                emit: bins
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("comebin.note"), emit: note
+//     output:
+//     tuple val(sra), val(srr), path("comebin"),                                                                emit: bins
+//     tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("comebin.note"), emit: note
 
-    script:
-    """
-    run_comebin_nf.sh \\
-      --assembly "${assembly_fasta}" \\
-      --bam "${assembly_bam}" \\
-      --cpus ${task.cpus} \\
-      --attempt ${task.attempt} \\
-      --max-retries ${params.max_retries}
-    """
-}
+//     script:
+//     """
+//     run_comebin_nf.sh \\
+//       --assembly "${assembly_fasta}" \\
+//       --bam "${assembly_bam}" \\
+//       --cpus ${task.cpus} \\
+//       --attempt ${task.attempt} \\
+//       --max-retries ${params.max_retries}
+//     """
+// }
 
 
 process SEMIBIN {
@@ -558,7 +558,7 @@ process DASTOOL {
 
     script:
     def metaDir     = metabat_dir          ?: ''
-    def comebinDir  = comebin_dir          ?: ''
+    // def comebinDir  = comebin_dir          ?: ''
     def semibinDir  = semibin_dir          ?: ''
     def semibinMap  = semibin_contig_bins  ?: ''
     def rosellaDir  = rosella_dir          ?: ''
@@ -566,7 +566,6 @@ process DASTOOL {
     run_dastool.sh \\
       --assembly "${assembly_fasta}" \\
       --metabat-dir "${metaDir}" \\
-      --comebin-dir "${comebinDir}" \\
       --semibin-dir "${semibinDir}" \\
       --semibin-map "${semibinMap}" \\
       --rosella-dir "${rosellaDir}" \\
@@ -599,7 +598,6 @@ process BINNING_ERROR_SUMMARY {
     input:
     tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler),
       path(metabat_note),
-      path(comebin_note),
       path(semibin_note),
       path(rosella_note),
       path(dastool_note)
@@ -634,7 +632,6 @@ process BINNING_ERROR_SUMMARY {
     }
 
     add_note "${metabat_note}"
-    add_note "${comebin_note}"
     add_note "${semibin_note}"
     add_note "${rosella_note}"
     add_note "${dastool_note}"
@@ -907,7 +904,7 @@ workflow BINNING {
 
     // Run individual binners
     metabat_binning = METABAT(binning_input)
-    comebin_binning = COMEBIN(binning_input)
+    // comebin_binning = COMEBIN(binning_input)
     semibin_binning = SEMIBIN(binning_input, uniprot_db_ch)
     rosella_binning = ROSELLA(binning_input)
 
@@ -920,9 +917,9 @@ workflow BINNING {
     metabat_entries = metabat_binning.bins.map { sra, srr, metabat_dir ->
       tuple([sra, srr], metabat_dir)
     }
-    comebin_entries = comebin_binning.bins.map { sra, srr, comebin_dir ->
-      tuple([sra, srr], comebin_dir)
-    }
+    // comebin_entries = comebin_binning.bins.map { sra, srr, comebin_dir ->
+    //   tuple([sra, srr], comebin_dir)
+    // }
     semibin_entries = semibin_binning.bins.map { sra, srr, semibin_dir, semibin_bins ->
       tuple([sra, srr], [semibin_dir, semibin_bins])
     }
@@ -933,9 +930,9 @@ workflow BINNING {
     // Group all tool-entries by sample
     dastool_join = dastool_base_by
       .join(metabat_entries)
-      .join(comebin_entries)
       .join(semibin_entries)
       .join(rosella_entries)
+      // .join(comebin_entries)
 
     // Build DASTool input
     dastool_in = dastool_join.map { key, meta, metabat_dir, comebin_dir, semibin_pair, rosella_dir ->
@@ -952,17 +949,17 @@ workflow BINNING {
     dastool_binning = DASTOOL(dastool_in)
 
     // Binning error aggregation
-    def N_BIN_STATUS = 5
+    def N_BIN_STATUS = 4
 
     metabat_status = metabat_binning.note.map { sra, srr, platform, model, strategy, assembler, note ->
       def key = groupKey([sra: sra, srr: srr, platform: platform, model: model, strategy: strategy, assembler: assembler], N_BIN_STATUS)
       tuple(key, ['metabat', note])
     }
 
-    comebin_status = comebin_binning.note.map { sra, srr, platform, model, strategy, assembler, note ->
-      def key = groupKey([sra: sra, srr: srr, platform: platform, model: model, strategy: strategy, assembler: assembler], N_BIN_STATUS)
-      tuple(key, ['comebin', note])
-    }
+    // comebin_status = comebin_binning.note.map { sra, srr, platform, model, strategy, assembler, note ->
+    //   def key = groupKey([sra: sra, srr: srr, platform: platform, model: model, strategy: strategy, assembler: assembler], N_BIN_STATUS)
+    //   tuple(key, ['comebin', note])
+    // }
 
     semibin_status = semibin_binning.note.map { sra, srr, platform, model, strategy, assembler, note ->
       def key = groupKey([sra: sra, srr: srr, platform: platform, model: model, strategy: strategy, assembler: assembler], N_BIN_STATUS)
@@ -981,11 +978,11 @@ workflow BINNING {
 
     binning_mix = channel.empty()
       .mix(metabat_status)
-      .mix(comebin_status)
       .mix(semibin_status)
       .mix(rosella_status)
       .mix(dastool_status)
       .groupTuple()
+      // .mix(comebin_status)
 
     binning_status_grouped = binning_mix
       .map { key, items ->
@@ -996,7 +993,7 @@ workflow BINNING {
           def (tool, note) = entry
           [(tool): note]
         }
-        tuple(sra, srr, platform, model, strategy, assembler, mp.metabat, mp.comebin, mp.semibin, mp.rosella, mp.dastool)
+        tuple(sra, srr, platform, model, strategy, assembler, mp.metabat, mp.semibin, mp.rosella, mp.dastool)
       }
 
     binning_error_summary = BINNING_ERROR_SUMMARY(binning_status_grouped)
