@@ -10,6 +10,8 @@
 
 **nf-sra_screen** is a Nextflow pipeline for taxon‑focused screening and assembly of public SRA runs and local FASTQ files, followed by taxonomical annotation and binning.
 
+![nf-sra_screen diagram](./images/nf-sra_screen_diagram.png)
+
 Given:
 - a list of SRA accessions and/or local FASTQ files,
 - a pinned NCBI taxonomy snapshot and NCBI <-> GTDB mapping tables,
@@ -43,7 +45,7 @@ The **top‑level orchestration** is split into four named workflows in `main.nf
 
 - **Nextflow**: `== 25.04.8`
 - **Plugins**:
-  - `nf-boost@~0.6.0` (used for intermediate filesclean‑up and helper functions such as `groupKey`)
+  - `nf-boost@~0.6.0` (used for intermediate files clean‑up and helper functions such as `groupKey`)
 - **Container back‑end**:
   - Docker, or
   - Singularity / Apptainer
