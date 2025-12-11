@@ -1016,22 +1016,13 @@ workflow SUMMARY {
         .filter { it != null }
 
       // Split EXTRACT_TAXA outcomes into "success" vs "fatal"
-      def taxa_branches = succ_and_taxa_annot.branch {
-        sra, srr, platform, model, strategy, assembler, summary_csv, base_note, taxa_text ->
+      def softPattern = 'skipping extraction because taxa list contains only GTDB-style taxa'
 
-          // Empty note => success
-          if( !taxa_text ) {
-            return 'success'
-          }
-
-          // Soft case: GTDB-only taxa skip
-          def softPattern = 'skipping extraction because taxa list contains only GTDB-style taxa'
-          if( taxa_text.contains(softPattern) ) {
-            return 'success'
-          }
-
-          // Everything else from EXTRACT_TAXA is treated as fatal
-          return 'fatal'
+      def taxa_branches = succ_and_taxa_annot.branch { sra, srr, platform, model, strategy, assembler, summary_csv, base_note, taxa_text ->
+        // Empty note or GTDB-only “soft skip” => success
+        success: (!taxa_text || taxa_text.contains(softPattern))
+        // Anything else => fatal
+        fatal:   (taxa_text && !taxa_text.contains(softPattern))
       }
 
       taxa_success = taxa_branches.success
