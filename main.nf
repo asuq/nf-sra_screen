@@ -28,7 +28,7 @@ def helpMessage() {
     --uniprot_db    Path to Uniprot database (.dmnd)
 
   Optional parameters (enable target taxa screening & extraction):
-    --taxa          Path to taxa.csv for extraction (header: rank, ncbi_taxa)
+    --taxa          Path to taxa.csv for extraction (header: rank, taxa)
     --gtdb_ncbi_map Path to folder with GTDB-NCBI mapping Excel files
     --sandpiper_db  Path to Sandpiper database folder
     --singlem_db    Path to SingleM database folder
