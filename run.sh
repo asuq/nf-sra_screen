@@ -7,7 +7,7 @@ set -euo pipefail
 RUN_DIR='/path/to/running_dir'
 DEST_DIR='/path/to/destination_dir'
 INTERVAL_MIN=10
-NF_SRA_SCREEN='/flash/HusnikU/Akito/Mollicutes/Analyses/CRISPR/sra_screen/nf-sra_screen_test'
+NF_SRA_SCREEN='/path/to/nf-sra_screen'
 
 WATCH_PID=""
 
