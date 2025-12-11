@@ -1,6 +1,6 @@
 FROM condaforge/mambaforge:24.9.2-0
 
-ARG CONDA_ENV_NAME='iseq'
+ARG CONDA_ENV_NAME='rosella'
 ENV CONDA_DIR=/opt/conda \
     MAMBA_NO_BANNER=1 \
     DEBIAN_FRONTEND=noninteractive \
@@ -8,12 +8,10 @@ ENV CONDA_DIR=/opt/conda \
 
 WORKDIR /work
 
-RUN apt-get update && apt-get install -y --no-install-recommends file \
-    && rm -rf /var/lib/apt/lists/*
-
 RUN mamba create -y -n "${CONDA_ENV_NAME}" \
     -c bioconda -c conda-forge \
-    "iseq==1.9.8" \
+    "rosella==0.5.4" \
+    "umap-learn==0.5.3" \
     && mamba clean --all --yes
 
 CMD ["/bin/bash"]
