@@ -16,7 +16,9 @@
 #   - We derive an intermediate CSV 'ncbi_taxa_for_extraction.csv' with header
 #     'rank,ncbi_taxa' and pass that to extract_records.py.
 #   - If there are no NCBI taxa (i.e. all input taxa are GTDB style), we skip
-#     extraction, emit a FAIL.note with a warning, and exit 0.
+#     extraction, emit a note with a warning, and still create an empty
+#     summary.csv so the pipeline can treat the sample as "successful" with a
+#     soft warning.
 
 set -euo pipefail
 
@@ -42,20 +44,39 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+note_file="FAIL.note"
+summary_file="summary.csv"
+
+# Always start from a clean state for this attempt
+rm -f "$note_file" "$summary_file"
+: > "$note_file"   # empty note by default (treated as "no note" by Nextflow)
+
+write_empty_summary() {
+  # Only create a header-only summary if extract_records.py has not already produced one.
+  if [[ ! -f "$summary_file" ]]; then
+    printf 'rank,ncbi_taxa,n_contigs,output_ids_csv,output_fasta\n' > "$summary_file"
+  fi
+}
+
 fail() {
   local msg="$1"
   echo "$msg" >&2
   if [[ "$attempt" -lt "$max_retries" ]]; then
     exit 1
   fi
-  echo "$msg" > FAIL.note
+  # Last attempt: treat as a soft failure but record an empty summary + fatal note,
+  # so SUMMARY can classify it.
+  write_empty_summary
+  printf '%s\n' "$msg" > "$note_file"
   exit 0
 }
 
 skip_extraction() {
   local msg="$1"
   echo "$msg" >&2
-  echo "$msg" > FAIL.note
+  # Soft case: GTDB-only taxa. Make an empty summary and write a warning note.
+  write_empty_summary
+  printf '%s\n' "$msg" > "$note_file"
   exit 0
 }
 
@@ -94,7 +115,7 @@ if ! awk -F',' '
       }
     }
     if (!col_rank || !col_taxa) {
-      print "ERROR: taxa file must have columns 'rank' and 'taxa'/'ncbi_taxa'" > "/dev/stderr"
+      print "ERROR: taxa file must have columns '\''rank'\'' and '\''taxa'\''/'\''ncbi_taxa'\''" > "/dev/stderr"
       exit 1
     }
 
@@ -143,4 +164,10 @@ fi
 if ! extract_records.py --blobtable "$blobtable" \
       --fasta "$fasta" --taxa "$ncbi_taxa_csv" --taxdump "$taxdump"; then
   fail "Extract_records: run failed"
+fi
+
+# Post-condition: a summary CSV must exist, otherwise treat as a failure so
+# Nextflow never sees a note without a summary for the sample.
+if [[ ! -f "$summary_file" ]]; then
+  fail "Extract_records: completed without producing ${summary_file}"
 fi
