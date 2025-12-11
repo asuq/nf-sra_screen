@@ -28,7 +28,7 @@ def helpMessage() {
     --uniprot_db    Path to Uniprot database (.dmnd)
 
   Optional parameters (enable target taxa screening & extraction):
-    --taxa          Path to taxa.csv for extraction (header: rank, ncbi_taxa)
+    --taxa          Path to taxa.csv for extraction (header: rank, taxa)
     --gtdb_ncbi_map Path to folder with GTDB-NCBI mapping Excel files
     --sandpiper_db  Path to Sandpiper database folder
     --singlem_db    Path to SingleM database folder
@@ -591,56 +591,6 @@ process CREATE_EMPTY_SUMMARY {
 }
 
 
-process BINNING_ERROR_SUMMARY {
-    tag "${sra}:${srr}"
-
-    input:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler),
-      path(metabat_note),
-      path(semibin_note),
-      path(rosella_note),
-      path(dastool_note)
-
-    output:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("binning_note.txt"), emit: note
-
-    script:
-    """
-    : > binning_note.txt
-
-    add_note() {
-      local file="\$1"
-
-      if [ -f "\$file" ]; then
-        # Flatten file content to a single line
-        note=\$(paste -sd' ' "\$file")
-
-        # Skip if note is only whitespace
-        if ! printf '%s' "\$note" | grep -q '[^[:space:]]'; then
-          return 0
-        fi
-
-        # If we already wrote something, prepend a separator
-        if [ -s binning_note.txt ]; then
-          printf ';' >> binning_note.txt
-        fi
-
-        # Append the note as-is (no extra label; note already contains tool info)
-        printf '%s' "\$note" >> binning_note.txt
-      fi
-    }
-
-    add_note "${metabat_note}"
-    add_note "${semibin_note}"
-    add_note "${rosella_note}"
-    add_note "${dastool_note}"
-
-    # End the file with a single newline
-    echo >> binning_note.txt
-    """
-}
-
-
 process APPEND_SUMMARY {
     tag "${sra}:${srr}"
 
@@ -909,7 +859,7 @@ workflow BINNING {
 
     // Prepare DASTool input
     dastool_base_by = binning_input.map { sra, srr, platform, model, strategy, assembler, assembly_fasta, bam, csi ->
-      tuple([sra,srr], [platform, model, strategy, assembler, assembly_fasta])
+      tuple([sra, srr], [platform, model, strategy, assembler, assembly_fasta])
     }
 
     // Tag each entry with a label
@@ -947,59 +897,12 @@ workflow BINNING {
 
     dastool_binning = DASTOOL(dastool_in)
 
-    // Binning error aggregation
-    def N_BIN_STATUS = 4
-
-    metabat_status = metabat_binning.note.map { sra, srr, platform, model, strategy, assembler, note ->
-      def key = groupKey([sra: sra, srr: srr, platform: platform, model: model, strategy: strategy, assembler: assembler], N_BIN_STATUS)
-      tuple(key, ['metabat', note])
-    }
-
-    // comebin_status = comebin_binning.note.map { sra, srr, platform, model, strategy, assembler, note ->
-    //   def key = groupKey([sra: sra, srr: srr, platform: platform, model: model, strategy: strategy, assembler: assembler], N_BIN_STATUS)
-    //   tuple(key, ['comebin', note])
-    // }
-
-    semibin_status = semibin_binning.note.map { sra, srr, platform, model, strategy, assembler, note ->
-      def key = groupKey([sra: sra, srr: srr, platform: platform, model: model, strategy: strategy, assembler: assembler], N_BIN_STATUS)
-      tuple(key, ['semibin', note])
-    }
-
-    rosella_status = rosella_binning.note.map { sra, srr, platform, model, strategy, assembler, note ->
-      def key = groupKey([sra: sra, srr: srr, platform: platform, model: model, strategy: strategy, assembler: assembler], N_BIN_STATUS)
-      tuple(key, ['rosella', note])
-    }
-
-    dastool_status = dastool_binning.note.map { sra, srr, platform, model, strategy, assembler, note ->
-      def key = groupKey([sra: sra, srr: srr, platform: platform, model: model, strategy: strategy, assembler: assembler], N_BIN_STATUS)
-      tuple(key, ['dastool', note])
-    }
-
-    binning_mix = channel.empty()
-      .mix(metabat_status)
-      .mix(semibin_status)
-      .mix(rosella_status)
-      .mix(dastool_status)
-      .groupTuple()
-      // .mix(comebin_status)
-
-    binning_status_grouped = binning_mix
-      .map { key, items ->
-        def m = (Map) key.target
-        def (sra, srr, platform, model, strategy, assembler) = [m.sra, m.srr, m.platform, m.model, m.strategy, m.assembler]
-        def mp = items.collectEntries {
-          entry ->
-          def (tool, note) = entry
-          [(tool): note]
-        }
-        tuple(sra, srr, platform, model, strategy, assembler, mp.metabat, mp.semibin, mp.rosella, mp.dastool)
-      }
-
-    binning_error_summary = BINNING_ERROR_SUMMARY(binning_status_grouped)
-
-
   emit:
-    binning_note = binning_error_summary.note
+    // Expose raw note channels so SUMMARY can aggregate them together
+    metabat_note = metabat_binning.note
+    semibin_note = semibin_binning.note
+    rosella_note = rosella_binning.note
+    dastool_note = dastool_binning.note
 }
 
 
@@ -1019,14 +922,20 @@ workflow SUMMARY {
     taxa_note
     taxa_summary
 
-    // from BINNING
-    binning_note
+    // from BINNING (empty channels when binning disabled)
+    metabat_note
+    semibin_note
+    rosella_note
+    dastool_note
 
     // constant
     outdir
 
   main:
-    // Turn skipped_sra CSVs into rows with a textual note
+    def doScreening = (params.taxa != null)
+    def doBinning   = (params.binning == true)
+
+    // 1) Convert skipped SRA metadata into per‑SRR rows with a textual note
     skipped_srr = sra_metadata_skipped
       .map { sra, csvfile -> file(csvfile) }
       .splitCsv(header: true, strip: true)
@@ -1042,85 +951,257 @@ workflow SUMMARY {
       }
       .filter { it[1] } // keep only rows with srr
 
-    // Collect all non-binning errors
-    errors = channel.empty()
-                    .mix(sra_metadata_note)
-                    .mix(sandpiper_note)
-                    .mix(download_srr_note)
-                    .mix(singlem_note)
-                    .mix(assembly_notes)
-                    .mix(diamond_note)
-                    .mix(blobtools_note)
-                    .mix(taxa_note)
-                    .map { sra, srr, platform, model, strategy, assembler, note_path ->
-                      def note = file(note_path).text.trim()
-                      tuple(sra, srr, platform, model, strategy, assembler, note)
-                    }
-                    .mix(skipped_srr)
 
-    failed_sra = CREATE_EMPTY_SUMMARY(errors)
-
-    // Successful samples: have a summary.csv (note starts empty)
+    // 2) Base "successful" samples: anything with a taxa_summary (summary.csv)
+    //    Note starts empty here; will add taxa/binning notes later.
     succeeded_sra = taxa_summary.map { sra, srr, platform, model, strategy, assembler, summary_csv ->
       tuple(sra, srr, platform, model, strategy, assembler, summary_csv, '')
     }
 
-    // Combine succeeded_sra and binning_note by key
-    def N_SUMMARY_ITEMS = 2
-    succ_keyed = succeeded_sra.map { sra, srr, platform, model, strategy, assembler, summary_csv, base_note ->
-      def keyMap = [sra: sra, srr: srr, platform: platform, model: model, strategy: strategy, assembler: assembler]
-      def key = groupKey(keyMap, N_SUMMARY_ITEMS)
-      tuple(key, [summary_csv, base_note])
+
+    // 3) Attach taxa notes and classify soft vs fatal EXTRACT_TAXA outcomes
+    def succeeded_with_taxa = succeeded_sra
+    def taxa_fatal_errors   = channel.empty()
+
+    if( doScreening ) {
+      // Exactly 2 entries per sample:
+      // - [summary_csv, base_note] from succeeded_sra
+      // - note_path from taxa_note
+      def N_TAXA_ITEMS = 2
+
+      succ_keyed = succeeded_sra.map { sra, srr, platform, model, strategy, assembler, summary_csv, base_note ->
+        def keyMap = [sra: sra, srr: srr, platform: platform,
+                      model: model, strategy: strategy, assembler: assembler]
+        def key = groupKey(keyMap, N_TAXA_ITEMS)
+        tuple(key, [summary_csv, base_note])
+      }
+
+      taxa_keyed = taxa_note.map { sra, srr, platform, model, strategy, assembler, note_path ->
+        def keyMap = [sra: sra, srr: srr, platform: platform,
+                      model: model, strategy: strategy, assembler: assembler]
+        def key = groupKey(keyMap, N_TAXA_ITEMS)
+        tuple(key, note_path)
+      }
+
+      succ_and_taxa = channel.empty()
+        .mix(succ_keyed)
+        .mix(taxa_keyed)
+        .groupTuple()
+
+      // Unpack to: (sra, srr, platform, model, strategy, assembler, summary_csv, base_note, taxa_text)
+      succ_and_taxa_annot = succ_and_taxa
+        .map { key, values ->
+          def m = (Map) key.target
+          def (sra, srr, platform, model, strategy, assembler) =
+            [m.sra, m.srr, m.platform, m.model, m.strategy, m.assembler]
+
+          // [summary_csv, base_note]
+          def summaryEntry = values.find { it instanceof List && it.size() == 2 }
+          if( !summaryEntry ) {
+            return null
+          }
+
+          def summary_csv = summaryEntry[0]
+          def base_note   = summaryEntry[1] ?: ''
+
+          // note_path for EXTRACT_TAXA
+          def taxa_note_file = values.find { !(it instanceof List) }
+          def taxa_text = ''
+          if( taxa_note_file ) {
+            taxa_text = file(taxa_note_file as String).text.trim()
+          }
+
+          tuple(sra, srr, platform, model, strategy, assembler, summary_csv, base_note, taxa_text)
+        }
+        .filter { it != null }
+
+      // Split EXTRACT_TAXA outcomes into "success" vs "fatal"
+      def taxa_branches = succ_and_taxa_annot.branch {
+        sra, srr, platform, model, strategy, assembler, summary_csv, base_note, taxa_text ->
+
+          // Empty note => success
+          if( !taxa_text ) {
+            return 'success'
+          }
+
+          // Soft case: GTDB-only taxa skip
+          def softPattern = 'skipping extraction because taxa list contains only GTDB-style taxa'
+          if( taxa_text.contains(softPattern) ) {
+            return 'success'
+          }
+
+          // Everything else from EXTRACT_TAXA is treated as fatal
+          return 'fatal'
+      }
+
+      taxa_success = taxa_branches.success
+      taxa_fatal   = taxa_branches.fatal
+
+      // Non-fatal EXTRACT_TAXA results remain as "successful" samples.
+      // Append taxa_text (if any) to the note field.
+      succeeded_with_taxa = taxa_success.map { sra, srr, platform, model, strategy, assembler, summary_csv, base_note, taxa_text ->
+        def final_note = base_note
+        if( taxa_text ) {
+          final_note = final_note ? "${final_note}; ${taxa_text}" : taxa_text
+        }
+        tuple(sra, srr, platform, model, strategy, assembler, summary_csv, final_note)
+      }
+
+      // Fatal EXTRACT_TAXA outcomes become "errors" that will go through
+      // CREATE_EMPTY_SUMMARY, similar to other fatal notes.
+      taxa_fatal_errors = taxa_fatal.map { sra, srr, platform, model, strategy, assembler, summary_csv, base_note, taxa_text ->
+        def note_text = base_note
+        if( taxa_text ) {
+          note_text = note_text ? "${note_text}; ${taxa_text}" : taxa_text
+        }
+        tuple(sra, srr, platform, model, strategy, assembler, note_text)
+      }
     }
 
-    binning_keyed = binning_note.map { sra, srr, platform, model, strategy, assembler, binning_note ->
-      def keyMap = [sra: sra, srr: srr, platform: platform,
-                    model: model, strategy: strategy, assembler: assembler]
-      def key = groupKey(keyMap, N_SUMMARY_ITEMS)
-      tuple(key, binning_note)
-    }
 
-    succ_and_bin = channel.empty()
-                        .mix(succ_keyed)
-                        .mix(binning_keyed)
-                        .groupTuple()
+    // 4) Aggregate binning notes into a single string per sample (if binning)
+    def binning_agg = channel.empty()
 
-    // Build final succeeded_sra with binning annotations in the note field
-    succeeded_with_binning = succ_and_bin
-      .map { key, values ->
+    if( doBinning ) {
+      // Expect exactly 4 notes per sample: metabat, semibin, rosella, dastool.
+      def N_BIN_STATUS = 4
+
+      metabat_status = metabat_note.map { sra, srr, platform, model, strategy, assembler, note_path ->
+        def keyMap = [sra: sra, srr: srr, platform: platform, model: model,
+                      strategy: strategy, assembler: assembler]
+        def key = groupKey(keyMap, N_BIN_STATUS)
+        tuple(key, ['metabat', note_path])
+      }
+
+      semibin_status = semibin_note.map { sra, srr, platform, model, strategy, assembler, note_path ->
+        def keyMap = [sra: sra, srr: srr, platform: platform, model: model,
+                      strategy: strategy, assembler: assembler]
+        def key = groupKey(keyMap, N_BIN_STATUS)
+        tuple(key, ['semibin', note_path])
+      }
+
+      rosella_status = rosella_note.map { sra, srr, platform, model, strategy, assembler, note_path ->
+        def keyMap = [sra: sra, srr: srr, platform: platform, model: model,
+                      strategy: strategy, assembler: assembler]
+        def key = groupKey(keyMap, N_BIN_STATUS)
+        tuple(key, ['rosella', note_path])
+      }
+
+      dastool_status = dastool_note.map { sra, srr, platform, model, strategy, assembler, note_path ->
+        def keyMap = [sra: sra, srr: srr, platform: platform, model: model,
+                      strategy: strategy, assembler: assembler]
+        def key = groupKey(keyMap, N_BIN_STATUS)
+        tuple(key, ['dastool', note_path])
+      }
+
+      binning_mix = channel.empty()
+        .mix(metabat_status)
+        .mix(semibin_status)
+        .mix(rosella_status)
+        .mix(dastool_status)
+        .groupTuple()
+
+      // binning_agg: (sra, srr, platform, model, strategy, assembler, "tool1: msg; tool2: msg; ...")
+      binning_agg = binning_mix.map { key, items ->
         def m = (Map) key.target
         def (sra, srr, platform, model, strategy, assembler) =
           [m.sra, m.srr, m.platform, m.model, m.strategy, m.assembler]
 
-        // Find the summary entry (List [summary_csv, base_note])
-        def summaryEntry = values.find { it instanceof List && it.size() == 2 }
-        if (!summaryEntry) {
-          return null   // no summary => not a "successful" sample; ignore here
-        }
+        def note_texts = items.collect { entry ->
+          def (tool, note_path) = entry
+          def txt = file(note_path as String).text.trim()
+          txt ? "${tool}: ${txt}" : null
+        }.findAll { it }
 
-        def summary_csv = summaryEntry[0]
-        def base_note   = summaryEntry[1] ?: ''
-
-        // All other values are binning notes (Strings)
-        def binning_note_file = values.find { !(it instanceof List) }
-        def binning_note_test = ''
-        if (binning_note_file) {
-          binning_note_test = file(binning_note_file as String).text.trim()
-        }
-
-        def final_note = base_note
-        if (binning_note_test) {
-          final_note = final_note ? "${final_note}; ${binning_note_test}" : binning_note_test
-        }
-
-        tuple(sra, srr, platform, model, strategy, assembler, summary_csv, final_note)
+        def joined = note_texts ? note_texts.join('; ') : ''
+        tuple(sra, srr, platform, model, strategy, assembler, joined)
       }
-      .filter { it != null }
+    }
 
-    // Combine succeeded and failed
+
+    // 5) Combine successful rows with aggregated binning notes (if binning)
+    def final_success = succeeded_with_taxa
+
+    if( doBinning ) {
+      def N_SUCCESS_ITEMS = 2
+
+      succ_keyed2 = succeeded_with_taxa.map { sra, srr, platform, model, strategy, assembler, summary_csv, base_note ->
+        def keyMap = [sra: sra, srr: srr, platform: platform,
+                      model: model, strategy: strategy, assembler: assembler]
+        def key = groupKey(keyMap, N_SUCCESS_ITEMS)
+        tuple(key, [summary_csv, base_note])
+      }
+
+      binning_keyed = binning_agg.map { sra, srr, platform, model, strategy, assembler, binning_note ->
+        def keyMap = [sra: sra, srr: srr, platform: platform,
+                      model: model, strategy: strategy, assembler: assembler]
+        def key = groupKey(keyMap, N_SUCCESS_ITEMS)
+        tuple(key, binning_note)
+      }
+
+      succ_and_bin = channel.empty()
+        .mix(succ_keyed2)
+        .mix(binning_keyed)
+        .groupTuple()
+
+      final_success = succ_and_bin
+        .map { key, values ->
+          def m = (Map) key.target
+          def (sra, srr, platform, model, strategy, assembler) =
+            [m.sra, m.srr, m.platform, m.model, m.strategy, m.assembler]
+
+          def summaryEntry = values.find { it instanceof List && it.size() == 2 }
+          if( !summaryEntry ) {
+            return null
+          }
+
+          def summary_csv = summaryEntry[0]
+          def base_note   = summaryEntry[1] ?: ''
+
+          def binning_note_text = ''
+          def extra = values.find { !(it instanceof List) } as String
+          if( extra ) {
+            binning_note_text = extra.trim()
+          }
+
+          def final_note = base_note
+          if( binning_note_text ) {
+            final_note = final_note ? "${final_note}; ${binning_note_text}" : binning_note_text
+          }
+
+          tuple(sra, srr, platform, model, strategy, assembler, summary_csv, final_note)
+        }
+        .filter { it != null }
+    }
+
+
+    // 6) Collect all fatal errors (including fatal EXTRACT_TAXA) and turn them
+    //    into empty per-sample summaries.
+    errors = channel.empty()
+      .mix(sra_metadata_note)
+      .mix(sandpiper_note)
+      .mix(download_srr_note)
+      .mix(singlem_note)
+      .mix(assembly_notes)
+      .mix(diamond_note)
+      .mix(blobtools_note)
+      .map { sra, srr, platform, model, strategy, assembler, note_path ->
+        def note = file(note_path).text.trim()
+        tuple(sra, srr, platform, model, strategy, assembler, note)
+      }
+      // Fatal EXTRACT_TAXA errors (inc. "run failed") are added here
+      .mix(taxa_fatal_errors)
+      // Plus skipped SRR rows
+      .mix(skipped_srr)
+
+    // failed_sra: (sra, srr, platform, model, strategy, assembler, empty_summary.csv, note)
+    failed_sra = CREATE_EMPTY_SUMMARY(errors)
+
+
+    // 7) Combine succeeded and failed, and append rows to summary.tsv
     summary = channel.empty()
-                    .mix(succeeded_with_binning)
-                    .mix(failed_sra)
+      .mix(final_success)
+      .mix(failed_sra)
 
     summary_result = APPEND_SUMMARY(summary, outdir)
 
@@ -1265,10 +1346,18 @@ workflow {
 
     asm = ASSEMBLY(singlem_reads_all, validated_taxa_ch, uniprot_db_ch, taxdump_ch)
 
-    def binning_note_ch = channel.empty()
+    // BINNING notes: default to empty channels when binning disabled
+    def metabat_note_ch = channel.empty()
+    def semibin_note_ch = channel.empty()
+    def rosella_note_ch = channel.empty()
+    def dastool_note_ch = channel.empty()
+
     if (doBinning) {
       def binning = BINNING(asm.blobtable, asm.assembly_bam_all, uniprot_db_ch)
-      binning_note_ch = binning.binning_note
+      metabat_note_ch = binning.metabat_note
+      semibin_note_ch = binning.semibin_note
+      rosella_note_ch = binning.rosella_note
+      dastool_note_ch = binning.dastool_note
     }
 
     SUMMARY(
@@ -1286,8 +1375,11 @@ workflow {
       asm.taxa_note,
       asm.taxa_summary,
 
-      // BINNING: notes from each binner
-      binning_note_ch,
+      // BINNING: raw notes from each binner (or empty channels if binning disabled)
+      metabat_note_ch,
+      semibin_note_ch,
+      rosella_note_ch,
+      dastool_note_ch,
 
       // constant
       outdir

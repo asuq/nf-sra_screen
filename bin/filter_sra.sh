@@ -123,21 +123,47 @@ fi
 
 # --------------------- ENA TSV / NCBI-TSV generic branch ---------------------
 # Tab-delimited cases (ENA fields=all or NCBI RunInfo TSV via iSeq)
-awk -F'\t' -v OFS=',' \
+# Can handle tabs inside double-quoted fields (e.g. LibraryName).
+awk -v OFS=',' \
     -v P="$PLATFORMS" -v S="$SOURCES" -v T="$STRATEGIES" \
     -v A="$ACCESSION" -v OUT_KEEP="$out_kept" -v OUT_SKIP="$out_skip" '
 function trim(x){ sub(/^[[:space:]]+/,"",x); sub(/[[:space:]]+$/,"",x); return x }
 function normkey(x,   y){ y=tolower(x); gsub(/[^a-z0-9]+/,"_",y); return y }
 function pick(arr,  i) { for (i=1; i in arr; i++) if (arr[i] in idx) return arr[i]; return "" }
 
+# Split a line on TABs, but ignore TABs that occur inside double quotes.
+# Result is stored in arr[1..n]; function returns n.
+function split_tab_quoted(line, arr,    i, c, inq, field, n) {
+  inq=0; field=""; n=0
+  for (i=1; i<=length(line); i++) {
+    c = substr(line, i, 1)
+    if (c == "\"") {
+      inq = !inq
+      field = field c
+    } else if (c == "\t" && !inq) {
+      n++; arr[n] = field; field = ""
+    } else {
+      field = field c
+    }
+  }
+  n++; arr[n] = field
+  return n
+}
+
 BEGIN{
   want_run="run_accession"; want_plat="instrument_platform";
   want_model="instrument_model"; want_src="library_source"; want_strat="library_strategy";
 }
+
 NR==1{
-  for(i=1;i<=NF;i++){
-    sub(/\r$/,"",$i)
-    k = normkey($i)
+  sub(/\r$/,"",$0)
+  n = split_tab_quoted($0, fields)
+
+  for (i=1; i<=n; i++){
+    f = fields[i]
+    gsub(/\r$/,"", f)
+    gsub(/^"|"$/, "", f)         # just in case headers ever get quoted
+    k = normkey(f)
     idx[k] = i
   }
 
@@ -164,13 +190,23 @@ NR==1{
   ir = idx[rk]; ip = idx[pk]; im = idx[mk]; is = idx[sk]; it = idx[tk]
   next
 }
+
 {
   sub(/\r$/,"",$0)
-  run   = $(ir)
-  plat  = $(ip)
-  model = $(im)
-  src   = $(is)
-  strat = $(it)
+  n = split_tab_quoted($0, fields)
+
+  run   = (ir <= n ? fields[ir] : "")
+  plat  = (ip <= n ? fields[ip] : "")
+  model = (im <= n ? fields[im] : "")
+  src   = (is <= n ? fields[is] : "")
+  strat = (it <= n ? fields[it] : "")
+
+  # Trim whitespace and strip outer quotes
+  run   = trim(run);   gsub(/^"|"$/, "", run)
+  plat  = trim(plat);  gsub(/^"|"$/, "", plat)
+  model = trim(model); gsub(/^"|"$/, "", model)
+  src   = trim(src);   gsub(/^"|"$/, "", src)
+  strat = trim(strat); gsub(/^"|"$/, "", strat)
 
   keep = (toupper(plat) ~ P) && (toupper(src) ~ S) && (toupper(strat) ~ T)
 
@@ -188,7 +224,7 @@ NR==1{
       } else {
         lm2=tolower(model); gsub(/[[:space:]]+/, " ", lm2); lm2=trim(lm2)
         if (lm2 ~ /(^|[^a-z])rs($|[^a-z])|(^|[^a-z])rs[[:space:]]*ii($|[^a-z])|(^|[^a-z])sequel($|[^a-z])/ &&
-          lm2 !~ /sequel[[:space:]]*ii|sequel[[:space:]]*2|iie|revio/) asm="pacbio"
+            lm2 !~ /sequel[[:space:]]*ii|sequel[[:space:]]*2|iie|revio/) asm="pacbio"
         else asm="hifi"
       }
     } else asm="unknown"
