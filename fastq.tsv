@@ -1,0 +1,5 @@
+sample	read_type	reads
+A98	hifi	a98.fastq.gz
+B27	short	read_1.fastq.gz,read_2.fastq.gz
+C03	nanopore	c03_pass.fastq.gz
+D48	pacbio	d48.fastq.gz

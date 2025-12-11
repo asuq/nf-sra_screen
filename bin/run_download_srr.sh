@@ -42,18 +42,22 @@ if [[ -z "${srr}" || -z "${platform}" ]]; then
 fi
 
 # Download sequence data
-tmpdir="${TMPDIR:-.}"
+tmp_dir="tmp_srr"
+mkdir -p "$tmp_dir"
 if ! fasterq-dump \
   -e "${cpus}" \
-  -t "${tmpdir}" \
+  -t "${tmp_dir}" \
+  -p \
   --outdir . \
   "${srr}"; then
   if [[ "${attempt}" -lt "${max_retries}" ]]; then
+    rm -rf "${tmp_dir}" 2>/dev/null || true
     # Ask Nextflow to retry
     exit 1
   fi
   echo "Fastq: download raw data failed" > FAIL.note
   # Clean up partial FASTQ
+  rm -rf "${tmp_dir}" 2>/dev/null || true
   rm -f ./*.f*q* "${srr}" 2>/dev/null || true
   exit 0
 fi
@@ -76,9 +80,9 @@ if [[ "${platform}" == "PACBIO_SMRT" && ( -z "${assembler}" || "${assembler}" ==
   if zcat -f ./*.f*q* 2>/dev/null \
     | awk 'NR%4==1{ h=tolower($0); if (h ~ /\/ccs([[:space:]]|$)/) { found=1; exit } } END{ exit(!found) }'
   then
-    final_asm="long_hifi"
+    final_asm="hifi"
   else
-    final_asm="long_pacbio"
+    final_asm="pacbio"
   fi
   printf '%s\n' "${final_asm}" > assembler.txt
 else

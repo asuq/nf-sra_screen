@@ -16,6 +16,10 @@
 
 set -euo pipefail
 
+# To avoid blobtools plot error
+export HOME="$PWD/.btk_home"
+mkdir -p "$HOME"
+
 assembly=""
 bam=""
 csi=""
@@ -62,10 +66,9 @@ if ! blobtools filter --table 'blobtools.tsv' \
   fail "Blobtools: failed to filter result"
 fi
 
-blobtools view --format svg --plot 'blobtools' || {
-  echo "Blobtools view failed; leaving note and continuing." >&2
-  echo "Blobtools: view failed" > blobtools/_view_failed.txt
-}
+if ! blobtools view --format svg --out '.' --plot 'blobtools'; then
+	fail "Blobtools: failed to generate plots"
+fi
 
 # TSV → CSV
 header=$(head -n 1 'blobtools.tsv' | cut -f2- | sed 's/bestsumorder_//g' | sed "s/assembly_cov/coverage/" | tr '\t' ',')

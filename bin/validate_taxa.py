@@ -5,29 +5,38 @@
 Usage:
     validate_taxa --taxa <RANK_TAXA.csv> --taxdump <NEWTAXDUMP>
     validate_taxa --taxa <RANK_TAXA.csv> --taxdump <NEWTAXDUMP> --gtdb-map \
-                    --ncbi_to_gtdb /path/to/dir/with_xlsx \
+                    --gtdb-info /path/to/dir/with_gtdb_info \
                     [--out mapping.csv] [--threshold 20.0]
 
 Purpose:
     1) Validate that each (rank, taxa) pair in a taxa CSV exists in the given
-       taxdump (taxdump.json), and that its rank matches.
-    2) (Optional: --gtdb-map) Resolve each input to its NCBI phylum
+       NCBI taxdump (taxdump.json), and that its rank matches.
+
+       Additionally, if the taxa string is GTDB-prefixed (one of:
+         d__, p__, c__, o__, f__, g__, s__
+       ), treat it as a GTDB taxon (not an NCBI taxon) and validate it against:
+         <gtdb-info>/gtdb_r226.dic
+
+    2) (Optional: --gtdb-map) Resolve each NCBI input to its NCBI phylum
        (using ONLY taxdump.json parents) and map that NCBI phylum
        to GTDB phylum(s) using the Phylum sheets in:
         - ncbi_vs_gtdb_bacteria.xlsx
         - ncbi_vs_gtdb_archaea.xlsx
-       Output header: rank,ncbi_taxa,gtdb_phylum
+
+       For GTDB-prefixed inputs, mapping columns are left blank:
+         ncbi_phylum == "" and gtdb_phylum == ""
 
 Inputs:
     -t, --taxa      : CSV with header 'rank,taxa'
     -d, --taxdump   : Directory containing 'taxdump.json'
-    --ncbi_to_gtdb  : Directory containing
+    --gtdb-info     : Directory containing GTDB resources:
+                      - 'gtdb_r226.dic'
                       - 'ncbi_vs_gtdb_bacteria.xlsx'
                       - 'ncbi_vs_gtdb_archaea.xlsx'
 
 Notes:
     - (rank,taxa) pairs are deduplicated
-    - Rank normalization: 'realm' and 'domain' are treated as 'superkingdom'
+    - Rank normalisation: 'realm' and 'domain' are treated as 'superkingdom'
     - GTDB mapping is only for Bacteria/Archaea; others get blank gtdb_phylum
 
 Author: Akito Shima (asuq)
@@ -39,8 +48,8 @@ from __future__ import annotations
 import argparse
 import csv
 import json
-import re
 import logging
+import re
 import sys
 from pathlib import Path
 from typing import Any
@@ -58,6 +67,8 @@ if sys.version_info < (3, 12):
 
 
 TAXDUMP_TIMESTAMP: str = "20240914"
+GTDB_RELEASE: str = "R226"
+
 INPUT_RANK_TO_COLUMN: dict[str, str] = {
     "realm": "superkingdom",
     "domain": "superkingdom",
@@ -73,6 +84,7 @@ INPUT_RANK_TO_COLUMN: dict[str, str] = {
 
 ALLOWED_RANKS: tuple[str, ...] = tuple(INPUT_RANK_TO_COLUMN.keys())
 TAXA_PCT_RE = re.compile(r"([^\s%]+)\s*([0-9]+(?:\.[0-9]+)?)\s*%?")
+
 VIRUSES_REALM = {
     "adnaviria",
     "duplodnaviria",
@@ -83,18 +95,85 @@ VIRUSES_REALM = {
     "varidnaviria",
 }
 
+GTDB_PREFIX_TO_NORM_RANK: dict[str, str] = {
+    "d__": "superkingdom",
+    "p__": "phylum",
+    "c__": "class",
+    "o__": "order",
+    "f__": "family",
+    "g__": "genus",
+    "s__": "species",
+}
+GTDB_PREFIXES: tuple[str, ...] = tuple(GTDB_PREFIX_TO_NORM_RANK.keys())
 
-def _fmt_not_found(taxa: str, rank: str) -> str:
-    return f"Taxon '{taxa}' not found in the NCBI Taxonomy ({TAXDUMP_TIMESTAMP}) (requested rank={rank})."
+
+def is_gtdb_taxon(taxa: str) -> bool:
+    tx = taxa.strip()
+    return any(tx.startswith(pfx) for pfx in GTDB_PREFIXES)
 
 
-def _fmt_rank_mismatch(taxa: str, requested_norm_rank: str, found_ranks: list[str]) -> str:
+def gtdb_expected_norm_rank(taxa: str) -> str | None:
+    tx = taxa.strip()
+    for pfx, rk in GTDB_PREFIX_TO_NORM_RANK.items():
+        if tx.startswith(pfx):
+            return rk
+    return None
+
+
+def load_gtdb_dic(dic_path: Path) -> set[str]:
+    """
+    Load gtdb_r226.dic (ASCII, one taxon per line) into a set.
+
+    Entries are kept case-sensitive and include the GTDB prefix (e.g. 'p__Bacillota').
+    Blank lines and lines starting with '#' are ignored.
+    """
+    taxa: set[str] = set()
+    try:
+        with dic_path.open("r", encoding="ascii") as fh:
+            for line in fh:
+                s = line.strip()
+                if not s or s.startswith("#"):
+                    continue
+                taxa.add(s)
+    except UnicodeDecodeError as e:
+        raise ValueError(f"{dic_path} must be ASCII text: {e}") from e
+
+    return taxa
+
+
+def _fmt_not_found_ncbi(taxa: str, rank: str) -> str:
+    return (
+        f"Taxon '{taxa}' not found in the NCBI Taxonomy ({TAXDUMP_TIMESTAMP}) "
+        f"(requested rank={rank})."
+    )
+
+
+def _fmt_not_found_gtdb(taxa: str, rank: str, dic_path: Path) -> str:
+    return (
+        f"GTDB taxon '{taxa}' not found in {dic_path.name} ({GTDB_RELEASE}) "
+        f"(requested rank={rank})."
+    )
+
+
+def _fmt_rank_mismatch_ncbi(
+    taxa: str, requested_norm_rank: str, found_ranks: list[str]
+) -> str:
     found = ", ".join(found_ranks) if found_ranks else "unknown"
     return (
         f"Taxon '{taxa}' found but rank mismatch: taxdump has {found}; "
         f"requested '{requested_norm_rank}'. "
-        "Note: this tool normalizes 'realm'/'domain' to 'superkingdom'. "
+        "Note: this tool normalises 'realm'/'domain' to 'superkingdom'. "
         "Use the canonical rank from the pinned snapshot."
+    )
+
+
+def _fmt_rank_mismatch_gtdb(
+    taxa: str, requested_norm_rank: str, expected_norm_rank: str
+) -> str:
+    return (
+        f"GTDB taxon '{taxa}' found but rank mismatch: prefix implies '{expected_norm_rank}', "
+        f"requested '{requested_norm_rank}'. "
+        "Note: this tool normalises 'realm'/'domain' to 'superkingdom'."
     )
 
 
@@ -120,18 +199,23 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--gtdb-map",
         action="store_true",
-        help="Also map inputs to GTDB phylum using the Phylum sheet (bacteria/archaea).",
+        help="Also map NCBI inputs to GTDB phylum using the Phylum sheet (bacteria/archaea).",
     )
     parser.add_argument(
+        "--gtdb-info",
         "--ncbi_to_gtdb",
+        dest="gtdb_info",
         type=Path,
-        help="Directory containing 'ncbi_vs_gtdb_bacteria.xlsx' and 'ncbi_vs_gtdb_archaea.xlsx'.",
+        help=(
+            "Directory containing GTDB resources: "
+            "'gtdb_r226.dic', 'ncbi_vs_gtdb_bacteria.xlsx', 'ncbi_vs_gtdb_archaea.xlsx'. "
+        ),
     )
     parser.add_argument(
         "--out",
         type=Path,
         default=Path("mapping.csv"),
-        help="Output CSV for mapping results (header: rank,ncbi_taxa,ncbi_phylum,gtdb_phylum).",
+        help="Output CSV for mapping results (header: rank,taxa,ncbi_phylum,gtdb_phylum).",
     )
     parser.add_argument(
         "--threshold",
@@ -149,7 +233,6 @@ def validate_file(
     Validate that the path exists, matches the expected kind, and
     (optionally) has one of the allowed extensions.
     """
-
     if kind == "file" and not path.is_file():
         raise FileNotFoundError(f"File not found: {path}")
     if kind == "dir" and not path.is_dir():
@@ -165,9 +248,9 @@ def validate_file(
 # --------------------------------------------------------------------------- #
 #  Taxdump loader (JSON-only)
 # --------------------------------------------------------------------------- #
-class TaxdumpIndex(object):
+class TaxdumpIndex:
     """
-    Case-insensitive name → list[(taxid, normalized_rank)] built from taxdump.json.
+    Case-insensitive name -> list[(taxid, normalised_rank)] built from taxdump.json.
 
     Expected top-level keys:
       - names     : {taxid: "canonical name"}
@@ -175,12 +258,12 @@ class TaxdumpIndex(object):
       - ancestors : {taxid: {rank: int}}
                     (e.g. ancestors["1775750"]["phylum"] == 3055124)
 
-    Rank normalization:
+    Rank normalisation:
       - 'domain' → 'superkingdom'
       - 'realm'  → 'superkingdom'
     """
 
-    _RANK_NORMALIZE = {"domain": "superkingdom", "realm": "superkingdom"}
+    _RANK_NORMALISE = {"domain": "superkingdom", "realm": "superkingdom"}
 
     def __init__(self, taxdump_json: Path) -> None:
         self._name_index: dict[str, list[tuple[str, str]]] = {}
@@ -194,7 +277,7 @@ class TaxdumpIndex(object):
         if not rank:
             return ""
         r = rank.strip().lower()
-        return TaxdumpIndex._RANK_NORMALIZE.get(r, r)
+        return TaxdumpIndex._RANK_NORMALISE.get(r, r)
 
     def _load(self, path: Path) -> None:
         with path.open("r", encoding="utf-8") as fh:
@@ -251,7 +334,7 @@ class TaxdumpIndex(object):
             # Fallback to any entry if the requested rank doesn't match any
             candidates = [tid for (tid, _) in entries]
             logging.warning(
-                f"Name {name} found but no entry matched requested rank {requested_rank}; using first match",
+                f"Name {name} found but no entry matched requested rank {requested_rank}; using first match"
             )
 
         # Prefer canonical name match; else take the first
@@ -310,10 +393,13 @@ def load_taxa_file(taxa_csv: Path) -> list[tuple[str, str]]:
             if not rank or not taxa:
                 continue
             if rank not in ALLOWED_RANKS:
-                raise ValueError(f"Invalid rank '{rank}'. Allowed: {', '.join(ALLOWED_RANKS)}")
+                raise ValueError(
+                    f"Invalid rank '{rank}'. Allowed: {', '.join(ALLOWED_RANKS)}"
+                )
             pairs.append((rank, taxa))
 
-    seen, dedup = set(), []
+    seen: set[tuple[str, str]] = set()
+    dedup: list[tuple[str, str]] = []
     for p in pairs:
         if p not in seen:
             seen.add(p)
@@ -402,50 +488,84 @@ def main() -> int:
     taxdump_json = args.taxdump / "taxdump.json"
     validate_file(taxdump_json, "file", (".json",))
 
-    logging.info(f"Loading taxdump.json from {taxdump_json}")
-    taxidx = TaxdumpIndex(taxdump_json)
-
     selections = load_taxa_file(args.taxa)
     logging.info(f"{len(selections)} selection(s) loaded from --taxa.")
 
-    # Validate taxa presence/rank in taxdump
+    any_gtdb = any(is_gtdb_taxon(taxa) for _, taxa in selections)
+    if (args.gtdb_map or any_gtdb) and not args.gtdb_info:
+        logging.error(
+            "GTDB resources are required (input contains GTDB-prefixed taxa and/or --gtdb-map was set). "
+            "Provide --gtdb-info pointing to a directory containing gtdb_r226.dic "
+            "(and the ncbi_vs_gtdb_*.xlsx files if using --gtdb-map)."
+        )
+        return 1
+
+    gtdb_dic_path: Path | None = None
+    gtdb_taxa_set: set[str] = set()
+    if args.gtdb_info:
+        validate_file(args.gtdb_info, "dir")
+        gtdb_dic_path = args.gtdb_info / "gtdb_r226.dic"
+        if any_gtdb:
+            validate_file(gtdb_dic_path, "file")
+            logging.info(f"Loading {gtdb_dic_path} for GTDB taxon validation")
+            gtdb_taxa_set = load_gtdb_dic(gtdb_dic_path)
+
+    logging.info(f"Loading taxdump.json from {taxdump_json}")
+    taxidx = TaxdumpIndex(taxdump_json)
+
     errors: list[str] = []
     for rank, taxa in selections:
         requested_norm_rank = INPUT_RANK_TO_COLUMN[rank]
-        entries = taxidx.lookup(taxa)
 
+        if is_gtdb_taxon(taxa):
+            if not gtdb_dic_path:
+                errors.append(
+                    f"GTDB taxon '{taxa}' present but --gtdb-info was not provided."
+                )
+                continue
+
+            if taxa not in gtdb_taxa_set:
+                errors.append(_fmt_not_found_gtdb(taxa, rank, gtdb_dic_path))
+                continue
+
+            expected_norm = gtdb_expected_norm_rank(taxa) or ""
+            if expected_norm and expected_norm != requested_norm_rank:
+                errors.append(
+                    _fmt_rank_mismatch_gtdb(taxa, requested_norm_rank, expected_norm)
+                )
+            continue
+
+        entries = taxidx.lookup(taxa)
         if not entries:
-            errors.append(_fmt_not_found(taxa, rank))
+            errors.append(_fmt_not_found_ncbi(taxa, rank))
             continue
 
         ranks_found = sorted({rk for _, rk in entries if rk})
         if not any(rk == requested_norm_rank for rk in ranks_found):
-            errors.append(_fmt_rank_mismatch(taxa, requested_norm_rank, ranks_found))
+            errors.append(_fmt_rank_mismatch_ncbi(taxa, requested_norm_rank, ranks_found))
 
     if errors:
         logging.error("Validation failed:")
         for msg in errors:
             logging.error(f"  {msg}")
         logging.error(
-            f"Names must match the taxonomy snapshot ({TAXDUMP_TIMESTAMP}) used to build the GTDB ncbi_vs_gtdb tables."
+            f"NCBI names must match the taxonomy snapshot ({TAXDUMP_TIMESTAMP}) used to build the GTDB ncbi_vs_gtdb tables."
         )
-        sys.exit(1)
+        return 1
 
     logging.info("All taxa validated successfully.")
 
     if not args.gtdb_map:
         return 0
 
-    ## GTDB mapping
-    if not args.ncbi_to_gtdb:
+    if not args.gtdb_info:
         logging.error(
-            "--gtdb-map requires --ncbi_to_gtdb pointing to a directory with the GTDB Excel files."
+            "--gtdb-map requires --gtdb-info pointing to a directory with the GTDB resources."
         )
         return 1
-    validate_file(args.ncbi_to_gtdb, "dir")
 
-    bact_xlsx = args.ncbi_to_gtdb / "ncbi_vs_gtdb_bacteria.xlsx"
-    arch_xlsx = args.ncbi_to_gtdb / "ncbi_vs_gtdb_archaea.xlsx"
+    bact_xlsx = args.gtdb_info / "ncbi_vs_gtdb_bacteria.xlsx"
+    arch_xlsx = args.gtdb_info / "ncbi_vs_gtdb_archaea.xlsx"
 
     # Load mappings if present; warn if absent
     bact_map: dict[str, list[tuple[str, float]]] = {}
@@ -463,12 +583,16 @@ def main() -> int:
     out_path = args.out
     with out_path.open("w", newline="", encoding="utf-8") as out_fh:
         writer = csv.writer(out_fh, delimiter=",", lineterminator="\n")
-        writer.writerow(["rank", "ncbi_taxa", "ncbi_phylum", "gtdb_phylum"])
+        writer.writerow(["rank", "taxa", "ncbi_phylum", "gtdb_phylum"])
 
         threshold = float(args.threshold)
 
         for rank, taxa in selections:
-            # 1) Resolve to NCBI phylum + superkingdom
+            if is_gtdb_taxon(taxa):
+                # For GTDB inputs, leave mapping columns blank.
+                writer.writerow([rank, taxa, "", ""])
+                continue
+
             ncbi_phylum, superkingdom = taxidx.resolve_to_phylum(taxa, rank)
 
             # 2) Skip Eukaryotes / Viruses (but keep row).
@@ -477,7 +601,7 @@ def main() -> int:
                 logging.info(f"{taxa} is Eukaryotes")
                 writer.writerow([rank, taxa, ncbi_phylum or "", ""])
                 continue
-            elif sk_lower == "viruses" or sk_lower in VIRUSES_REALM:
+            if sk_lower == "viruses" or sk_lower in VIRUSES_REALM:
                 logging.info(f"{taxa} is Viruses")
                 writer.writerow([rank, taxa, ncbi_phylum or "", ""])
                 continue
@@ -529,7 +653,6 @@ def main() -> int:
 
             # 4) Filter strictly > threshold; emit one row per passing GTDB phylum
             passed = [g for (g, pct) in candidate if pct > threshold]
-
             if not passed:
                 logging.warning(
                     f"No GTDB phylum above threshold {threshold}% for NCBI phylum '{ncbi_phylum}' "
