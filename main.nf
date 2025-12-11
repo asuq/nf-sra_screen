@@ -1101,7 +1101,7 @@ workflow SUMMARY {
         def note_texts = items.collect { entry ->
           def (tool, note_path) = entry
           def txt = file(note_path as String).text.trim()
-          txt ? "${tool}: ${txt}" : null
+          txt ?: null
         }.findAll { it }
 
         def joined = note_texts ? note_texts.join('; ') : ''
