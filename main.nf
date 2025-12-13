@@ -35,6 +35,8 @@ def helpMessage() {
 
   Misc:
     --help          Show this help message
+    --noassembly    Skip ASSEMBLY/BINNING
+    --binning       Also run BINNING after ASSEMBLY
     --outdir        Output directory (default: ./output)
     --max_retries   Maximum number of retries for each process (default: 3)
   """.stripIndent()
@@ -42,8 +44,21 @@ def helpMessage() {
 
 
 def missingParametersError() {
-    log.error "Missing input parameters"
-    helpMessage()
+  log.error "Missing input parameters"
+  helpMessage()
+
+  def noAssembly = params.noassembly?.toString()?.toBoolean() ?: false
+
+  if (noAssembly) {
+    error """
+    For --noassembly (only PRE_SCREENING), please provide:
+      at least one of --sra or --fastq_tsv
+    If you enable taxa screening (--taxa), please also provide:
+      --taxdump, --gtdb_ncbi_map, and --singlem_db
+      and for sra mode also --sandpiper_db
+    """.stripIndent()
+  }
+  else {
     error """
     For assembly + binning, please provide:
       --taxdump and --uniprot_db
@@ -52,6 +67,7 @@ def missingParametersError() {
       --taxa, --gtdb_ncbi_map, and --singlem_db
       and for sra mode also --sandpiper_db
     """.stripIndent()
+  }
 }
 
 
@@ -933,7 +949,14 @@ workflow SUMMARY {
 
   main:
     def doScreening = (params.taxa != null)
-    def doBinning   = (params.binning == true)
+    def noAssembly  = params.noassembly?.toString()?.toBoolean() ?: false
+
+    // EXTRACT_TAXA only exists when assembly is running
+    def doExtraction = doScreening && !noAssembly
+
+    // Binning only exists when assembly is running
+    def doBinning    = (params.binning == true) && !noAssembly
+
 
     // 1) Convert skipped SRA metadata into per‑SRR rows with a textual note
     skipped_srr = sra_metadata_skipped
@@ -963,7 +986,7 @@ workflow SUMMARY {
     def succeeded_with_taxa = succeeded_sra
     def taxa_fatal_errors   = channel.empty()
 
-    if( doScreening ) {
+    if( doExtraction ) {
       // Exactly 2 entries per sample:
       // - [summary_csv, base_note] from succeeded_sra
       // - note_path from taxa_note
@@ -1215,12 +1238,24 @@ workflow {
       missingParametersError()
     }
 
-    if (!params.taxdump || !params.uniprot_db) {
-      log.error "Error: Missing --taxdump or --uniprot_db"
-      missingParametersError()
+    def doScreening = params.taxa != null
+    def noAssembly = params.noassembly?.toString()?.toBoolean() ?: false
+    def doAssembly = !noAssembly
+
+    // If noassembly, binning makes no sense
+    def doBinning  = doAssembly && (params.binning == true)
+    if (!doAssembly && params.binning == true) {
+      log.warn "Warning: --binning is ignored because --noassembly was set"
     }
 
-    def doScreening = params.taxa != null
+    // Only require assembly params when assembly is enabled
+    if (doAssembly) {
+      if (!params.taxdump || !params.uniprot_db) {
+        log.error "Error: Missing --taxdump or --uniprot_db"
+        missingParametersError()
+      }
+    }
+
     if (doScreening) {
       if (!params.taxdump || !params.gtdb_ncbi_map || !params.singlem_db) {
         log.error "Error: Missing --taxdump, --gtdb_ncbi_map, or --singlem_db required for taxa filtering"
@@ -1231,13 +1266,20 @@ workflow {
         missingParametersError()
       }
     }
+    else if (!doAssembly) {
+      log.warn "Warning: --noassembly was set but --taxa was not provided; SINGLEM will not run in this mode."
+    }
 
-    def doBinning = (params.binning == true)
 
     // Common channels
-    def outdir        = file(params.outdir).toAbsolutePath().toString()
-    def taxdump_ch    = channel.value( file(params.taxdump) )
-    def uniprot_db_ch = channel.value( file(params.uniprot_db) )
+    def outdir = file(params.outdir ?: './output').toAbsolutePath().toString()
+
+    // taxdump is needed for screening and/or assembly; keep it optional when not needed
+    def taxdump_ch = params.taxdump ? channel.value(file(params.taxdump)) : channel.empty()
+
+    // uniprot is only needed for assembly (DIAMOND/SEMIBIN)
+    def uniprot_db_ch = (doAssembly && params.uniprot_db) ? channel.value(file(params.uniprot_db)) : channel.empty()
+
 
     // Taxa-related channels
     def validated_taxa_ch = channel.empty()
@@ -1335,13 +1377,43 @@ workflow {
                                   .mix(sra_singlem_note)
                                   .mix(fastq_singlem_note)
 
-    asm = ASSEMBLY(singlem_reads_all, validated_taxa_ch, uniprot_db_ch, taxdump_ch)
 
-    // BINNING notes: default to empty channels when binning disabled
-    def metabat_note_ch = channel.empty()
-    def semibin_note_ch = channel.empty()
-    def rosella_note_ch = channel.empty()
-    def dastool_note_ch = channel.empty()
+  // Empty notes
+  def assembly_notes_ch = channel.empty()
+  def diamond_note_ch   = channel.empty()
+  def blobtools_note_ch = channel.empty()
+  def taxa_note_ch      = channel.empty()
+  def taxa_summary_ch   = channel.empty()
+  def metabat_note_ch = channel.empty()
+  def semibin_note_ch = channel.empty()
+  def rosella_note_ch = channel.empty()
+  def dastool_note_ch = channel.empty()
+
+  if (noAssembly) {
+    log.info "--noassembly set: skipping ASSEMBLY/BINNING; generating screening-only summary.tsv"
+
+    // Prepare empty summary for succeeded samples
+    def prescreen_success_meta = singlem_reads_all
+      .map { sra, srr, platform, model, strategy, assembler, reads ->
+        tuple(sra, srr, platform, model, strategy, assembler, '')
+      }
+      .distinct()
+    def prescreen_empty = CREATE_EMPTY_SUMMARY(prescreen_success_meta).skipped_rows
+
+    // Convert to the shape expected by SUMMARY's taxa_summary input:
+    // (sra, srr, platform, model, strategy, assembler, summary_csv)
+    taxa_summary_ch = prescreen_empty.map { sra, srr, platform, model, strategy, assembler, summary_csv, note ->
+      tuple(sra, srr, platform, model, strategy, assembler, summary_csv)
+    }
+  }
+  else {
+    def asm = ASSEMBLY(singlem_reads_all, validated_taxa_ch, uniprot_db_ch, taxdump_ch)
+
+    assembly_notes_ch = asm.assembly_notes
+    diamond_note_ch   = asm.diamond_note
+    blobtools_note_ch = asm.blobtools_note
+    taxa_note_ch      = asm.taxa_note
+    taxa_summary_ch   = asm.taxa_summary
 
     if (doBinning) {
       def binning = BINNING(asm.blobtable, asm.assembly_bam_all, uniprot_db_ch)
@@ -1350,31 +1422,33 @@ workflow {
       rosella_note_ch = binning.rosella_note
       dastool_note_ch = binning.dastool_note
     }
+  }
 
-    SUMMARY(
-      // PRE_SCREENING: summary-related outputs
-      sra_metadata_skipped_ch,
-      sra_metadata_note,
-      sra_sandpiper_note,
-      sra_download_srr_note,
-      singlem_notes_all,
 
-      // ASSEMBLY: summary-related outputs
-      asm.assembly_notes,
-      asm.diamond_note,
-      asm.blobtools_note,
-      asm.taxa_note,
-      asm.taxa_summary,
+  SUMMARY(
+    // PRE_SCREENING: summary-related outputs
+    sra_metadata_skipped_ch,
+    sra_metadata_note,
+    sra_sandpiper_note,
+    sra_download_srr_note,
+    singlem_notes_all,
 
-      // BINNING: raw notes from each binner (or empty channels if binning disabled)
-      metabat_note_ch,
-      semibin_note_ch,
-      rosella_note_ch,
-      dastool_note_ch,
+    // ASSEMBLY: summary-related outputs (empty in --noassembly)
+    assembly_notes_ch,
+    diamond_note_ch,
+    blobtools_note_ch,
+    taxa_note_ch,
+    taxa_summary_ch,
 
-      // constant
-      outdir
-    )
+    // BINNING: raw notes (empty in --noassembly or if binning off)
+    metabat_note_ch,
+    semibin_note_ch,
+    rosella_note_ch,
+    dastool_note_ch,
+
+    // constant
+    outdir
+  )
 }
 
 workflow.onComplete {
