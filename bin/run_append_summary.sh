@@ -40,7 +40,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if [[ -z "${outdir}" || -z "${sra}" || -z "${srr}" || -z "${summary_csv}" ]]; then
+if [[ -z "${outdir}" || -z "${sra}" || -z "${summary_csv}" ]]; then
   echo "append_summary.sh: missing required parameters" >&2
   exit 1
 fi
