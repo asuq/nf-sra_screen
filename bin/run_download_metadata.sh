@@ -59,7 +59,7 @@ if ! iseq -m -i "${sra}"; then
 fi
 
 # No metadata file
-if [[ ! -f "${sra}.metadata.tsv" ]] || [[ ! -f "${sra}.metadata.csv" ]]; then
+if [[ ! -f "${sra}.metadata.tsv" ]] && [[ ! -f "${sra}.metadata.csv" ]]; then
   fail "Metadata: no metadata file found for ${sra}"
 fi
 
