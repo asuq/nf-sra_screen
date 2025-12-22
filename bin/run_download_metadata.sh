@@ -58,6 +58,11 @@ if ! iseq -m -i "${sra}"; then
   fail "Metadata: iseq -m failed for ${sra}"
 fi
 
+# No metadata file
+if [[ ! -f "${sra}.metadata.tsv" ]] || [[ ! -f "${sra}.metadata.csv" ]]; then
+  fail "Metadata: no metadata file found for ${sra}"
+fi
+
 # Filter SRRs into .filtered.csv / .skipped.csv
 if ! filter_sra.sh "${sra}"; then
   fail "Metadata: filter_sra.sh failed for ${sra}"
