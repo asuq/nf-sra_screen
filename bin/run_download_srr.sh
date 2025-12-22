@@ -9,7 +9,7 @@
 #     --max-retries M
 #
 # Produces:
-#   - *.fastq.gz
+#   - *.fastq.gz / *.fq.gz
 #   - assembler.txt
 #   - FAIL.note (only on fatal problems)
 
@@ -74,6 +74,27 @@ cleanup_partial() {
   rm -f ./*.aria2 2>/dev/null || true
 }
 
+cleanup_sra_path() {
+  # Remove an .sra file and, if it looks like an NCBI prefetch tree ./SRRxxxx/SRRxxxx.sra,
+  # remove that directory as well.
+  local path="$1"
+  if [[ -z "${path}" ]]; then
+    return 0
+  fi
+
+  rm -f "${path}" "${path}.aria2" 2>/dev/null || true
+
+  local d
+  d="$(dirname "${path}")"
+  local b
+  b="$(basename "${d}")"
+
+  # Common prefetch layout: ./SRRxxxx/SRRxxxx.sra
+  if [[ "${b}" == "${srr}" ]]; then
+    rm -rf "${d}" 2>/dev/null || true
+  fi
+}
+
 normalise_ena_url() {
   # ENA often returns paths like "ftp.sra.ebi.ac.uk/vol1/fastq/..."
   local u="$1"
@@ -96,6 +117,19 @@ is_fastq_name() {
   esac
 }
 
+md5_of_file() {
+  local f="$1"
+  if command -v md5sum >/dev/null 2>&1; then
+    md5sum "${f}" | awk '{print $1}'
+    return 0
+  fi
+  if command -v md5 >/dev/null 2>&1; then
+    md5 -q "${f}"
+    return 0
+  fi
+  return 1
+}
+
 md5_ok() {
   local file="$1"
   local expected="$2"
@@ -106,8 +140,14 @@ md5_ok() {
     return 1
   fi
   local got
-  got="$(md5sum "${file}" | awk '{print $1}')"
+  got="$(md5_of_file "${file}")" || return 1
   [[ "${got}" == "${expected}" ]]
+}
+
+remove_bad_download() {
+  # Remove a file and its aria2 control file (if any)
+  local f="$1"
+  rm -f "${f}" "${f}.aria2" 2>/dev/null || true
 }
 
 aria2_download_with_md5() {
@@ -119,8 +159,6 @@ aria2_download_with_md5() {
   local tmp_input
   tmp_input="$(mktemp aria2_input.XXXXXX.txt)"
 
-  # aria2 input file format: URI line, then indented option lines apply to it.
-  # We also request checksum checking; still do an explicit md5sum afterwards.
   {
     printf '%s\n' "${url}"
     printf '  out=%s\n' "${out_file}"
@@ -130,34 +168,40 @@ aria2_download_with_md5() {
     fi
   } > "${tmp_input}"
 
-  local max_concurrent=1
-  if (( ARIA2_J_CAP > 1 )); then
-    max_concurrent=1
+  if ! aria2c \
+      --input-file="${tmp_input}" \
+      --allow-overwrite=true \
+      --auto-file-renaming=false \
+      --continue=true \
+      --file-allocation=none \
+      --max-concurrent-downloads=1 \
+      --split="${ARIA2_SPLIT}" \
+      --max-connection-per-server="${ARIA2_MAX_CONN}" \
+      --timeout="${ARIA2_TIMEOUT}" \
+      --connect-timeout="${ARIA2_CONNECT_TIMEOUT}" \
+      --retry-wait="${ARIA2_RETRY_WAIT}" \
+      --max-tries="${ARIA2_MAX_TRIES}" \
+      --summary-interval=0 \
+      --console-log-level=warn
+  then
+    rm -f "${tmp_input}" 2>/dev/null || true
+    return 1
   fi
-
-  aria2c \
-    --input-file="${tmp_input}" \
-    --allow-overwrite=true \
-    --auto-file-renaming=false \
-    --continue=true \
-    --file-allocation=none \
-    --max-concurrent-downloads="${max_concurrent}" \
-    --split="${ARIA2_SPLIT}" \
-    --max-connection-per-server="${ARIA2_MAX_CONN}" \
-    --timeout="${ARIA2_TIMEOUT}" \
-    --connect-timeout="${ARIA2_CONNECT_TIMEOUT}" \
-    --retry-wait="${ARIA2_RETRY_WAIT}" \
-    --max-tries="${ARIA2_MAX_TRIES}" \
-    --summary-interval=0 \
-    --console-log-level=warn
 
   rm -f "${tmp_input}" 2>/dev/null || true
 
   if [[ -n "${expected_md5}" ]]; then
-    md5_ok "${out_file}" "${expected_md5}"
+    if ! md5_ok "${out_file}" "${expected_md5}"; then
+      remove_bad_download "${out_file}"
+      return 1
+    fi
   else
-    [[ -s "${out_file}" ]]
+    [[ -s "${out_file}" ]] || return 1
   fi
+
+  # Clean up any leftover aria2 control file
+  rm -f "${out_file}.aria2" 2>/dev/null || true
+  return 0
 }
 
 download_many_with_aria2() {
@@ -190,40 +234,46 @@ download_many_with_aria2() {
     max_concurrent="${ARIA2_J_CAP}"
   fi
 
-  aria2c \
-    --input-file="${tmp_input}" \
-    --allow-overwrite=true \
-    --auto-file-renaming=false \
-    --continue=true \
-    --file-allocation=none \
-    --max-concurrent-downloads="${max_concurrent}" \
-    --split="${ARIA2_SPLIT}" \
-    --max-connection-per-server="${ARIA2_MAX_CONN}" \
-    --timeout="${ARIA2_TIMEOUT}" \
-    --connect-timeout="${ARIA2_CONNECT_TIMEOUT}" \
-    --retry-wait="${ARIA2_RETRY_WAIT}" \
-    --max-tries="${ARIA2_MAX_TRIES}" \
-    --summary-interval=0 \
-    --console-log-level=warn
+  if ! aria2c \
+      --input-file="${tmp_input}" \
+      --allow-overwrite=true \
+      --auto-file-renaming=false \
+      --continue=true \
+      --file-allocation=none \
+      --max-concurrent-downloads="${max_concurrent}" \
+      --split="${ARIA2_SPLIT}" \
+      --max-connection-per-server="${ARIA2_MAX_CONN}" \
+      --timeout="${ARIA2_TIMEOUT}" \
+      --connect-timeout="${ARIA2_CONNECT_TIMEOUT}" \
+      --retry-wait="${ARIA2_RETRY_WAIT}" \
+      --max-tries="${ARIA2_MAX_TRIES}" \
+      --summary-interval=0 \
+      --console-log-level=warn
+  then
+    rm -f "${tmp_input}" 2>/dev/null || true
+    return 1
+  fi
 
   rm -f "${tmp_input}" 2>/dev/null || true
 
-  # Verify md5 explicitly (parallel over files if possible)
-  local ok=0
-  ok=0
+  # Verify md5 explicitly; delete any bad files
+  local bad=0
   for (( i=0; i<n; i++ )); do
     if [[ -n "${MD5S[$i]}" ]]; then
       if ! md5_ok "${OUTS[$i]}" "${MD5S[$i]}"; then
-        ok=1
+        remove_bad_download "${OUTS[$i]}"
+        bad=1
       fi
     else
       if [[ ! -s "${OUTS[$i]}" ]]; then
-        ok=1
+        remove_bad_download "${OUTS[$i]}"
+        bad=1
       fi
     fi
+    rm -f "${OUTS[$i]}.aria2" 2>/dev/null || true
   done
 
-  return "${ok}"
+  return "${bad}"
 }
 
 bz2_to_gz_stream() {
@@ -241,7 +291,51 @@ bz2_to_gz_stream() {
     if (( pigz_threads < 1 )); then pigz_threads=1; fi
   fi
 
-  pbzip2 -dc -p "${pbz_threads}" "${in_bz2}" | pigz -p "${pigz_threads}" > "${out_gz}"
+  if ! pbzip2 -dc -p "${pbz_threads}" "${in_bz2}" | pigz -p "${pigz_threads}" > "${out_gz}"; then
+    rm -f "${out_gz}" 2>/dev/null || true
+    return 1
+  fi
+  return 0
+}
+
+convert_bz2_fastqs_if_any() {
+  shopt -s nullglob
+  local -a bz2s=( ./*.fastq.bz2 ./*.fq.bz2 )
+  shopt -u nullglob
+
+  if (( ${#bz2s[@]} == 0 )); then
+    return 0
+  fi
+
+  log "Converting ${#bz2s[@]} .bz2 FASTQ file(s) to .gz"
+  local f
+  for f in "${bz2s[@]}"; do
+    local out="${f%.bz2}.gz"
+    if ! bz2_to_gz_stream "${f}" "${out}" "${cpus}"; then
+      return 1
+    fi
+    # Remove input immediately once output exists
+    rm -f "${f}" 2>/dev/null || true
+  done
+  return 0
+}
+
+compress_plain_fastqs_if_any() {
+  # Compress any plain FASTQ downloaded from "submitted_ftp" (or elsewhere).
+  # pigz (like gzip) replaces the input with .gz and removes the original.
+  shopt -s nullglob
+  local -a plain=( ./*.fastq ./*.fq )
+  shopt -u nullglob
+
+  if (( ${#plain[@]} == 0 )); then
+    return 0
+  fi
+
+  log "Compressing ${#plain[@]} plain FASTQ file(s) with pigz"
+  if ! pigz -p "${cpus}" "${plain[@]}"; then
+    return 1
+  fi
+  return 0
 }
 
 fetch_ena_filereport() {
@@ -269,7 +363,7 @@ parse_ena_fields() {
 }
 
 try_ena_fastq_or_submitted() {
-  # Builds URLS/OUTS/MD5S arrays from ENA fastq_ftp first; else submitted_ftp filtered to fastq.
+# Builds URLS/OUTS/MD5S arrays from ENA fastq_ftp first; else submitted_ftp filtered to fastq.
   URLS=()
   OUTS=()
   MD5S=()
@@ -314,7 +408,6 @@ try_ena_fastq_or_submitted() {
     local fname
     fname="$(basename "${raw}")"
 
-    # If we are using submitted_ftp, filter to FASTQ-like names.
     if [[ "${ftp_list}" == "${SUB_FTP}" ]]; then
       if ! is_fastq_name "${fname}"; then
         continue
@@ -330,25 +423,19 @@ try_ena_fastq_or_submitted() {
     return 1
   fi
 
-  download_many_with_aria2
-}
-
-convert_bz2_fastqs_if_any() {
-  shopt -s nullglob
-  local -a bz2s=( ./*.fastq.bz2 ./*.fq.bz2 )
-  shopt -u nullglob
-
-  if (( ${#bz2s[@]} == 0 )); then
-    return 0
+  if ! download_many_with_aria2; then
+    return 1
   fi
 
-  log "Converting ${#bz2s[@]} .bz2 FASTQ file(s) to .gz"
-  local f
-  for f in "${bz2s[@]}"; do
-    local out="${f%.bz2}.gz"
-    bz2_to_gz_stream "${f}" "${out}" "${cpus}"
-    rm -f "${f}" 2>/dev/null || true
-  done
+  # Normalise outputs: bz2 -> gz, and compress any plain fastq immediately.
+  if ! convert_bz2_fastqs_if_any; then
+    return 1
+  fi
+  if ! compress_plain_fastqs_if_any; then
+    return 1
+  fi
+
+  return 0
 }
 
 try_ena_sra_then_fasterq_dump() {
@@ -369,13 +456,11 @@ try_ena_sra_then_fasterq_dump() {
   local sra_file
   sra_file="$(basename "${raw}")"
   if [[ "${sra_file}" != *.sra ]]; then
-    # Still download it, but name it predictably.
     sra_file="${srr}.sra"
   fi
 
   log "Downloading ENA SRA file ${sra_file}"
   if ! aria2_download_with_md5 "${url}" "${sra_file}" "${SRA_MD5}"; then
-    rm -f "${sra_file}" 2>/dev/null || true
     return 1
   fi
 
@@ -395,12 +480,12 @@ try_ena_sra_then_fasterq_dump() {
 
   rm -rf tmp_srr 2>/dev/null || true
 
-  shopt -s nullglob
-  local -a fq=( ./*.fastq ./*.fq )
-  shopt -u nullglob
-  if (( ${#fq[@]} > 0 )); then
-    log "Compressing FASTQ with pigz"
-    pigz -p "${cpus}" "${fq[@]}"
+  # Remove .sra immediately after dump (before compression) to reduce peak disk usage.
+  cleanup_sra_path "${sra_file}"
+
+  # Compress and remove uncompressed FASTQ immediately.
+  if ! compress_plain_fastqs_if_any; then
+    return 1
   fi
 
   return 0
@@ -435,11 +520,11 @@ try_ncbi_prefetch_then_fasterq_dump() {
   if [[ -n "${SRA_MD5}" ]]; then
     log "Validating .sra against ENA sra_md5"
     if ! md5_ok "${sra_path}" "${SRA_MD5}"; then
+      remove_bad_download "${sra_path}"
       rm -rf tmp_srr 2>/dev/null || true
       return 1
     fi
   else
-    # Otherwise do a structural validate (not md5, but better than nothing).
     vdb-validate "${sra_path}" >/dev/null 2>&1 || true
   fi
 
@@ -457,12 +542,11 @@ try_ncbi_prefetch_then_fasterq_dump() {
 
   rm -rf tmp_srr 2>/dev/null || true
 
-  shopt -s nullglob
-  local -a fq=( ./*.fastq ./*.fq )
-  shopt -u nullglob
-  if (( ${#fq[@]} > 0 )); then
-    log "Compressing FASTQ with pigz"
-    pigz -p "${cpus}" "${fq[@]}"
+  # Remove .sra (and prefetch dir if applicable) as soon as it is no longer needed.
+  cleanup_sra_path "${sra_path}"
+
+  if ! compress_plain_fastqs_if_any; then
+    return 1
   fi
 
   return 0
@@ -470,7 +554,6 @@ try_ncbi_prefetch_then_fasterq_dump() {
 
 # ---------------------- Main control flow ----------------------
 
-# 1) Try to fetch ENA file report (small + retry).
 ENA_OK=0
 for (( t=1; t<=INTERNAL_RETRIES; t++ )); do
   if fetch_ena_filereport; then
@@ -492,12 +575,12 @@ if (( ENA_OK == 1 )); then
   parse_ena_fields
 fi
 
-# 2) Download ENA FASTQ/submitted FASTQ if available.
 DONE=0
+
+# 1) ENA fastq/submitted
 if (( ENA_OK == 1 )); then
   for (( t=1; t<=INTERNAL_RETRIES; t++ )); do
     if try_ena_fastq_or_submitted; then
-      convert_bz2_fastqs_if_any
       DONE=1
       break
     fi
@@ -507,7 +590,7 @@ if (( ENA_OK == 1 )); then
   done
 fi
 
-# 3) If not done, try ENA SRA -> fasterq-dump
+# 2) ENA SRA -> fasterq-dump
 if (( DONE == 0 )) && (( ENA_OK == 1 )); then
   for (( t=1; t<=INTERNAL_RETRIES; t++ )); do
     if try_ena_sra_then_fasterq_dump; then
@@ -518,9 +601,14 @@ if (( DONE == 0 )) && (( ENA_OK == 1 )); then
     cleanup_partial
     backoff_sleep "${t}"
   done
+
+  # If ENA SRA retries exhausted, drop any leftover .sra before moving to NCBI.
+  if (( DONE == 0 )); then
+    rm -f ./*.sra 2>/dev/null || true
+  fi
 fi
 
-# 4) If still not done, NCBI prefetch -> fasterq-dump
+# 3) NCBI prefetch -> fasterq-dump
 if (( DONE == 0 )); then
   for (( t=1; t<=INTERNAL_RETRIES; t++ )); do
     if try_ncbi_prefetch_then_fasterq_dump; then
@@ -540,9 +628,14 @@ if (( DONE == 0 )); then
   fi
   echo "Fastq: download/conversion failed (ENA+SRA-toolkit fallback exhausted)" > FAIL.note
   cleanup_partial
-  rm -f ./*.f*q* "${srr}.sra" 2>/dev/null || true
+  rm -f ./*.f*q* ./*.sra 2>/dev/null || true
+  rm -rf "./${srr}" 2>/dev/null || true
   exit 0
 fi
+
+# Final hygiene: ensure no uncompressed fastq/fq or sra objects remain.
+rm -f ./*.fastq ./*.fq ./*.sra 2>/dev/null || true
+rm -rf "./${srr}" 2>/dev/null || true
 
 # PacBio assembler check (only if platform is PACBIO_SMRT and assembler is missing/unknown)
 final_asm="${assembler}"
