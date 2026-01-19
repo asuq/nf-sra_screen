@@ -604,7 +604,7 @@ if (( DONE == 0 )) && (( ENA_OK == 1 )); then
 
   # If ENA SRA retries exhausted, drop any leftover .sra before moving to NCBI.
   if (( DONE == 0 )); then
-    rm -f ./*.sra 2>/dev/null || true
+    rm -f ./*.sra ./*.sra.tmp 2>/dev/null || true
   fi
 fi
 
@@ -628,13 +628,13 @@ if (( DONE == 0 )); then
   fi
   echo "Fastq: download/conversion failed (ENA+SRA-toolkit fallback exhausted)" > FAIL.note
   cleanup_partial
-  rm -f ./*.f*q* ./*.sra 2>/dev/null || true
+  rm -f ./*.f*q* ./*.sra ./*.sra.tmp 2>/dev/null || true
   rm -rf "./${srr}" 2>/dev/null || true
   exit 0
 fi
 
 # Final hygiene: ensure no uncompressed fastq/fq or sra objects remain.
-rm -f ./*.fastq ./*.fq ./*.sra 2>/dev/null || true
+rm -f ./*.fastq ./*.fq ./*.sra ./*.sra.tmp 2>/dev/null || true
 rm -rf "./${srr}" 2>/dev/null || true
 
 # PacBio assembler check (only if platform is PACBIO_SMRT and assembler is missing/unknown)
