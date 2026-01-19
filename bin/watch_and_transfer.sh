@@ -48,7 +48,8 @@ Internal state:
   RUN_DIR/.pending_copy_jobs.tsv : pending (sra, srr, job_id)
 
 Environment:
-  SACCT_CHUNK       Number of JobIDs per sacct query (default: 50)
+  SACCT_CHUNK         Number of JobIDs per sacct query (default: 50)
+  DRAIN_SLEEP_SECONDS Seconds between checks once Nextflow is finished (default: same as scan interval)
 EOF
 }
 
@@ -74,6 +75,10 @@ STATE_FILE="$RUN_DIR/.processed_summary.tsv"
 PENDING_FILE="$RUN_DIR/.pending_copy_jobs.tsv"
 LOCK_FILE="$RUN_DIR/.watch_and_transfer.lock"
 
+# Nextflow "done" detection inputs (best-effort)
+NF_LOG_FILE="$RUN_DIR/.nextflow.log"
+NF_PID_FILE="$RUN_DIR/.nextflow.pid"
+
 # Validate INTERVAL_MINS as positive integer
 case "$INTERVAL_MINS" in
     ''|*[!0-9]*)
@@ -88,6 +93,23 @@ if [ "$INTERVAL_MINS" -le 0 ]; then
 fi
 
 SLEEP_SECONDS=$((INTERVAL_MINS * 60))
+
+# Drain-mode sleep
+DRAIN_SECONDS_RAW="${DRAIN_SLEEP_SECONDS:-$SLEEP_SECONDS}"
+case "$DRAIN_SECONDS_RAW" in
+    ''|*[!0-9]*)
+        log "DRAIN_SLEEP_SECONDS must be a positive integer (seconds), got '$DRAIN_SECONDS_RAW'. Falling back to $SLEEP_SECONDS."
+        DRAIN_SECONDS="$SLEEP_SECONDS"
+        ;;
+    *)
+        if [ "$DRAIN_SECONDS_RAW" -le 0 ]; then
+            log "DRAIN_SLEEP_SECONDS must be > 0, got '$DRAIN_SECONDS_RAW'. Falling back to $SLEEP_SECONDS."
+            DRAIN_SECONDS="$SLEEP_SECONDS"
+        else
+            DRAIN_SECONDS="$DRAIN_SECONDS_RAW"
+        fi
+        ;;
+esac
 
 # Basic sanity checks
 if [ ! -d "$RUN_DIR" ]; then
@@ -134,6 +156,76 @@ fi
 # Helpers
 # ----------------------------------------------------------------------
 
+is_nextflow_finished() {
+    # Return 0 if Nextflow run appears finished (completed or aborted), else 1.
+    #
+    # Primary signal: .nextflow.log contains a terminal marker after the last "Session uuid:".
+    # Fallback: .nextflow.pid exists (from `nextflow run -bg`) and the PID is no longer alive.
+
+    local log_file="$NF_LOG_FILE"
+
+    if [ -r "$log_file" ]; then
+        local start_line
+        start_line="$(awk '/Session uuid:/ {l=NR} END{print (l?l:0)}' "$log_file" 2>/dev/null || true)"
+
+        # Only treat the run as "finished" if we see a terminal marker after the last session start.
+        if [ "$start_line" -gt 0 ]; then
+            if awk -v start="$start_line" 'NR>start && /Execution complete -- Goodbye/ {found=1; exit} END{exit(found?0:1)}' "$log_file" 2>/dev/null; then
+                return 0
+            fi
+            if awk -v start="$start_line" 'NR>start && /Session aborted|Execution aborted/ {found=1; exit} END{exit(found?0:1)}' "$log_file" 2>/dev/null; then
+                return 0
+            fi
+        fi
+    fi
+
+    local pid_file="$NF_PID_FILE"
+    if [ -r "$pid_file" ]; then
+        local pid
+        pid="$(tr -d '[:space:]' < "$pid_file" 2>/dev/null || true)"
+        if [ -n "$pid" ] && printf '%s' "$pid" | grep -Eq '^[0-9]+$'; then
+            if ! kill -0 "$pid" 2>/dev/null; then
+                return 0
+            fi
+        fi
+    fi
+
+    return 1
+}
+
+pending_jobs_count() {
+    # Count valid pending lines (sra, srr, job_id).
+    [ -s "$PENDING_FILE" ] || { printf '0\n'; return; }
+    awk -F'\t' '($1!="" && $2!="" && $3!=""){n++} END{print n+0}' "$PENDING_FILE"
+}
+
+unhandled_samples_count() {
+    # Count samples in summary.tsv that are neither processed nor pending.
+    # (We only use this to decide whether it's safe to exit in drain mode.)
+    [ -r "$SUMMARY_FILE" ] || { printf '0\n'; return; }
+
+    awk -F'\t' -v state="$STATE_FILE" -v pend="$PENDING_FILE" '
+        BEGIN{
+            while((getline < state) > 0){
+                if($1!="" && $2!="") done[$1 FS $2]=1
+            }
+            close(state)
+
+            while((getline < pend) > 0){
+                if($1!="" && $2!="") pending[$1 FS $2]=1
+            }
+            close(pend)
+        }
+        NR==1 { next }   # header
+        {
+            if($1=="" || $2=="") next
+            key=$1 FS $2
+            if(!(key in done) && !(key in pending)) n++
+        }
+        END { print n+0 }
+    ' "$SUMMARY_FILE"
+}
+
 is_in_pending() {
     # Return 0 if (sra, srr) exists in PENDING_FILE, using strict tab-field match.
     local sra="$1" srr="$2"
@@ -163,18 +255,17 @@ check_pending_jobs() {
     # Batched sacct query in chunks (default 50 IDs per call; override with SACCT_CHUNK)
     local sacct_output=""
     local chunk_size_raw="${SACCT_CHUNK:-50}"
-		case "$chunk_size_raw" in
-				''|*[!0-9]*)
-						log "SACCT_CHUNK must be a positive integer; got '$chunk_size_raw'. Falling back to 50."
-						chunk_size_raw=50
-						;;
-		esac
-		if [ "$chunk_size_raw" -le 0 ]; then
-				log "SACCT_CHUNK must be > 0; got '$chunk_size_raw'. Falling back to 50."
-				chunk_size_raw=50
-		fi
-		local chunk_size="$chunk_size_raw"
-
+    case "$chunk_size_raw" in
+        ''|*[!0-9]*)
+            log "SACCT_CHUNK must be a positive integer; got '$chunk_size_raw'. Falling back to 50."
+            chunk_size_raw=50
+            ;;
+    esac
+    if [ "$chunk_size_raw" -le 0 ]; then
+        log "SACCT_CHUNK must be > 0; got '$chunk_size_raw'. Falling back to 50."
+        chunk_size_raw=50
+    fi
+    local chunk_size="$chunk_size_raw"
 
     local total="${#job_ids[@]}"
     local i=0
@@ -284,7 +375,7 @@ move_output_to_storage() {
     #   - else if note is non-empty and no output dir exists: mark processed (no transfer)
     #   - else, ensure output directory exists, then submit an sbatch rsync job
     #     that transfers the directory and removes the source on success, and
-		#     deletes the parent SRA directory if it becomes empty
+    #     deletes the parent SRA directory if it becomes empty
 
     if [ ! -r "$SUMMARY_FILE" ]; then
         log "summary.tsv not readable: $SUMMARY_FILE -- skipping this cycle."
@@ -313,14 +404,12 @@ move_output_to_storage() {
         # Normalise note (trim leading/trailing whitespace)
         note_trimmed="$(printf '%s' "${note:-}" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
 
-				sample_src_parent="$RUN_DIR/output/$sra"
+        sample_src_parent="$RUN_DIR/output/$sra"
         sample_src="$sample_src_parent/$srr"
         sample_dest_parent="$DEST_DIR/$sra"
         sample_dest="$sample_dest_parent/$srr"
 
         # 1. Special case: "did not match the criteria: ..."
-        # These are from the initial metadata filter. They are logically
-        # finished, but there is no downstream analysis to transfer.
         case "$note_trimmed" in
             "did not match the criteria"*)
                 log "Sample $sra/$srr did not pass the selection criteria:"
@@ -334,7 +423,6 @@ move_output_to_storage() {
         esac
 
         # 2. Any other note + NO output directory
-        # e.g. LOG_FAILED_PROCESS with no outputs. Log it and mark processed.
         if [ -n "$note_trimmed" ] && [ ! -d "$sample_src" ]; then
             log "Sample $sra/$srr has summary note but no output directory:"
             log "  note      : $note_trimmed"
@@ -349,34 +437,33 @@ move_output_to_storage() {
         log "Handling finished sample: sra=$sra  srr=$srr"
 
         # If we still have no output directory and no note, this is a weird partial state.
-				# If the destination already exists, assume a prior successful transfer.
+        # If the destination already exists, assume a prior successful transfer.
         if [ ! -d "$sample_src" ]; then
-					if [ -d "$sample_dest" ]; then
-						log "Output dir missing but destination exists for $sra/$srr:"
-						log "  sample_src : $sample_src"
-						log "  sample_dest: $sample_dest"
-						log "Assuming prior successful transfer; marking as processed."
-						printf '%s\t%s\n' "$sra" "$srr" >> "$STATE_FILE"
-					else
-            log "Output directory missing for $sra/$srr: $sample_src"
-            log "Sample will not be marked as done; will retry next cycle."
-					fi
-          continue
+            if [ -d "$sample_dest" ]; then
+                log "Output dir missing but destination exists for $sra/$srr:"
+                log "  sample_src : $sample_src"
+                log "  sample_dest: $sample_dest"
+                log "Assuming prior successful transfer; marking as processed."
+                printf '%s\t%s\n' "$sra" "$srr" >> "$STATE_FILE"
+            else
+                log "Output directory missing for $sra/$srr: $sample_src"
+                log "Sample will not be marked as done; will retry next cycle."
+            fi
+            continue
         fi
 
-        # If there is a note *and* an output directory, we keep the outputs
-        # but mention the note for traceability.
+        # If there is a note and an output directory, keep outputs but log note
         if [ -n "$note_trimmed" ]; then
             log "Sample $sra/$srr has note in summary but also an output directory:"
             log "  note=$note_trimmed"
         fi
 
         # Transfer: rsync -a (copy) then rm -rf (remove source SRR dir) if rsync succeeds.
-				# Finally, try to remove the parent SRA dir if it is empty; ignore failures there.
+        # Finally, try to remove the parent SRA dir if it is empty; ignore failures there.
         transfer_cmd="mkdir -p \"$sample_dest\" \
-											&& rsync -a \"$sample_src\"/ \"$sample_dest\"/ \
-											&& rm -rf -- \"$sample_src\" \
-											&& { rmdir \"$sample_src_parent\" 2>/dev/null || true; }"
+                      && rsync -a \"$sample_src\"/ \"$sample_dest\"/ \
+                      && rm -rf -- \"$sample_src\" \
+                      && { rmdir \"$sample_src_parent\" 2>/dev/null || true; }"
 
         log "Submitting transfer job for $sra/$srr:"
         log "  from: $sample_src"
@@ -409,12 +496,37 @@ log "Starting Nextflow watcher."
 log "  Run dir : $RUN_DIR"
 log "  Dest dir: $DEST_DIR"
 log "  Interval: $INTERVAL_MINS minute(s) (= $SLEEP_SECONDS seconds)"
+log "  Drain   : $DRAIN_SECONDS second(s) once Nextflow finishes"
 log "  State   : $STATE_FILE"
 log "  Pending : $PENDING_FILE"
+
+drain_mode=0
 
 while :; do
     check_pending_jobs
     move_output_to_storage
+
+    if is_nextflow_finished; then
+        if [ "$drain_mode" -eq 0 ]; then
+            drain_mode=1
+            log "Nextflow appears finished for RUN_DIR=$RUN_DIR."
+            log "Entering drain mode: will wait for all transfer jobs to finish, then exit."
+        fi
+
+        pending="$(pending_jobs_count)"
+        unhandled="$(unhandled_samples_count)"
+
+        if [ "$pending" -eq 0 ] && [ "$unhandled" -eq 0 ]; then
+            log "Drain complete: no pending transfer jobs and no unhandled samples remain."
+            log "Exiting watcher."
+            exit 0
+        fi
+
+        log "Drain mode: pending_jobs=$pending, unhandled_samples=$unhandled; sleeping for $DRAIN_SECONDS second(s)."
+        sleep "$DRAIN_SECONDS"
+        continue
+    fi
+
     log "Cycle complete; sleeping for $INTERVAL_MINS minute(s)."
     sleep "$SLEEP_SECONDS"
 done
