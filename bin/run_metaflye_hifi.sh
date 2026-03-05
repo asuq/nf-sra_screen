@@ -60,18 +60,9 @@ while [[ $# -gt 0 ]]; do
         esac
       done
       ;;
-    --cpus)
-      cpus="$2"
-      shift 2
-      ;;
-    --attempt)
-      attempt="$2"
-      shift 2
-      ;;
-    --max-retries)
-      max_retries="$2"
-      shift 2
-      ;;
+    --cpus)        cpus="$2"; shift 2 ;;
+    --attempt)     attempt="$2"; shift 2 ;;
+    --max-retries) max_retries="$2"; shift 2 ;;
     *)
       echo "Unknown argument: $1" >&2
       exit 1
@@ -111,7 +102,7 @@ if ! (
   minimap2 -ax map-hifi -I 20G -t "${cpus}" assembly.fasta "${read_files[@]}" \
     | samtools sort --output-fmt BAM -@ "${cpus}" -o assembly.bam \
   && samtools index -c -o assembly.bam.csi -@ "${cpus}" assembly.bam
-); then
+  ); then
   fail "metaFlye (HiFi): mapping/indexing failed"
 fi
 
