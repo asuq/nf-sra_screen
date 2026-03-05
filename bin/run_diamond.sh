@@ -46,6 +46,7 @@ fail() {
 if ! diamond blastx --fast --query "$assembly" \
       --out "assembly_vs_uniprot.tsv" --db "$db" \
       --outfmt 6 qseqid staxids bitscore qseqid sseqid pident length mismatch gapopen qstart qend sstart send evalue bitscore \
-      --verbose --threads "$cpus" --evalue 1e-25 --max-target-seqs 5; then
+      --evalue 1e-25 --max-target-seqs 5 --strand 'plus' \
+      --verbose --threads "$cpus" --block-size 30 --tmpdir /dev/shm; then
   fail "Diamond: run failed"
 fi
