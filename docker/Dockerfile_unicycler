@@ -1,6 +1,6 @@
 FROM condaforge/mambaforge:24.9.2-0
 
-ARG CONDA_ENV_NAME='myloasm'
+ARG CONDA_ENV_NAME='metaspades'
 ENV CONDA_DIR=/opt/conda \
     MAMBA_NO_BANNER=1 \
     DEBIAN_FRONTEND=noninteractive \
@@ -10,9 +10,11 @@ WORKDIR /work
 
 RUN mamba create -y -n "${CONDA_ENV_NAME}" \
     -c bioconda -c conda-forge \
-    "myloasm==0.4.0" \
-    "minimap2==2.30" \
+    "unicycler==0.5.1" \
+    "fastp==1.0.1" \
+    "bowtie2=2.5.4" \
     "samtools==1.22.1" \
+    "python=3.11" \
     && mamba clean --all --yes
 
 CMD ["/bin/bash"]
