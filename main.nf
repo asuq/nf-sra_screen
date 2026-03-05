@@ -330,6 +330,42 @@ process METAFLYE_PACBIO {
     """
 }
 
+process METAFLYE_HIFI {
+    tag "${sra}:${srr}"
+    label 'assembly'
+    publishDir "${params.outdir}/${sra}/${srr}/",
+      mode: 'copy',
+      overwrite: true,
+      saveAs: { filename ->
+        filename in [
+          "assembly.fasta",
+          "assembly.gfa",
+          "flye.log",
+          "assembly.bam.csi",
+          "FAIL.note"
+        ] ? filename : null
+      }
+
+    input:
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path(reads)
+
+    output:
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("assembly.fasta"), optional: true, emit: assembly_fasta
+    tuple val(sra), val(srr), path("assembly.gfa"),                                                             optional: true, emit: assembly_graph
+    tuple val(sra), val(srr), path("flye.log"),                                                                 optional: true, emit: assembly_log
+    tuple val(sra), val(srr), path("assembly.bam"), path("assembly.bam.csi"),                                   optional: true, emit: assembly_bam
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("FAIL.note"),      optional: true, emit: note
+
+    script:
+    """
+    run_metaflye_hifi.sh \\
+      --cpus ${task.cpus} \\
+      --attempt ${task.attempt} \\
+      --max-retries ${params.max_retries} \\
+      --reads ${reads}
+    """
+}
+
 
 process MYLOASM {
     tag "${sra}:${srr}"
@@ -756,14 +792,16 @@ workflow ASSEMBLY {
     spades_asm     = METASPADES(short_ch)
     flyenano_asm   = METAFLYE_NANO(nanopore_ch)
     flyepacbio_asm = METAFLYE_PACBIO(pacbio_ch)
-    myloasm_asm    = MYLOASM(hifi_ch)
+    flyehifi_asm   = METAFLYE_HIFI(hifi_ch)
+    // myloasm_asm    = MYLOASM(hifi_ch)
 
     // Step 6: DIAMOND
     asm_fasta_ch = channel.empty()
                         .mix(spades_asm.assembly_fasta)
                         .mix(flyenano_asm.assembly_fasta)
                         .mix(flyepacbio_asm.assembly_fasta)
-                        .mix(myloasm_asm.assembly_fasta)
+                        .mix(flyehifi_asm.assembly_fasta)
+                        // .mix(myloasm_asm.assembly_fasta)
 
     diamond = DIAMOND(asm_fasta_ch, uniprot_db_ch)
 
@@ -772,7 +810,8 @@ workflow ASSEMBLY {
                   .mix(spades_asm.assembly_bam)
                   .mix(flyenano_asm.assembly_bam)
                   .mix(flyepacbio_asm.assembly_bam)
-                  .mix(myloasm_asm.assembly_bam)
+                  .mix(flyehifi_asm.assembly_bam)
+                  // .mix(myloasm_asm.assembly_bam)
 
     // Step 7: BlobTools
     // Key every stream by (sra,srr)
@@ -827,7 +866,8 @@ workflow ASSEMBLY {
                           .mix(spades_asm.note)
                           .mix(flyenano_asm.note)
                           .mix(flyepacbio_asm.note)
-                          .mix(myloasm_asm.note)
+                          .mix(flyehifi_asm.note)
+                          // .mix(myloasm_asm.note)
 
   emit:
     // For binning
