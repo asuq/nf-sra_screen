@@ -257,6 +257,48 @@ process METASPADES {
 }
 
 
+process UNICYCLER {
+    tag "${sra}:${srr}"
+    label 'assembly'
+    publishDir "${params.outdir}/${sra}/${srr}/",
+      mode: 'copy',
+      overwrite: true,
+      saveAs: { filename ->
+        filename in [
+          "assembly.fasta",
+          "assembly.gfa",
+          "spades.log",
+          "assembly.bam.csi",
+          "fastp.html",
+          "FAIL.note"
+        ] ? filename : null
+      }
+
+    input:
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path(reads)
+
+    output:
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("assembly.fasta"), optional: true, emit: assembly_fasta
+    tuple val(sra), val(srr), path("assembly.gfa"),                                                             optional: true, emit: assembly_graph
+    tuple val(sra), val(srr), path("spades.log"),                                                               optional: true, emit: assembly_log
+    tuple val(sra), val(srr), path("assembly.bam"), path("assembly.bam.csi"),                                   optional: true, emit: assembly_bam
+    tuple val(sra), val(srr), path("fastp.html"),                                                               optional: true, emit: fastp_html
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("FAIL.note"),      optional: true, emit: note
+
+    script:
+    """
+    # --reads should be the last argument and unquoted to capture all read files
+    run_unicycler.sh \\
+      --srr "${srr}" \\
+      --cpus ${task.cpus} \\
+      --memory-gb ${task.memory.toGiga()} \\
+      --attempt ${task.attempt} \\
+      --max-retries ${params.max_retries} \\
+      --reads ${reads}
+    """
+}
+
+
 process METAFLYE_NANO {
     tag "${sra}:${srr}"
     label 'assembly'
@@ -329,6 +371,7 @@ process METAFLYE_PACBIO {
       --reads ${reads}
     """
 }
+
 
 process METAFLYE_HIFI {
     tag "${sra}:${srr}"
@@ -789,7 +832,8 @@ workflow ASSEMBLY {
     pacbio_ch   = singlem_reads.filter { sra, srr, platform, model, strategy, assembler, reads -> assembler.equalsIgnoreCase('pacbio') }
     hifi_ch     = singlem_reads.filter { sra, srr, platform, model, strategy, assembler, reads -> assembler.equalsIgnoreCase('hifi') }
 
-    spades_asm     = METASPADES(short_ch)
+    // spades_asm     = METASPADES(short_ch)
+    unicycler_asm  = UNICYCLER(short_ch)
     flyenano_asm   = METAFLYE_NANO(nanopore_ch)
     flyepacbio_asm = METAFLYE_PACBIO(pacbio_ch)
     flyehifi_asm   = METAFLYE_HIFI(hifi_ch)
@@ -797,7 +841,8 @@ workflow ASSEMBLY {
 
     // Step 6: DIAMOND
     asm_fasta_ch = channel.empty()
-                        .mix(spades_asm.assembly_fasta)
+                        // .mix(spades_asm.assembly_fasta)
+                        .mix(unicycler_asm.assembly_fasta)
                         .mix(flyenano_asm.assembly_fasta)
                         .mix(flyepacbio_asm.assembly_fasta)
                         .mix(flyehifi_asm.assembly_fasta)
@@ -807,7 +852,8 @@ workflow ASSEMBLY {
 
     // BAMs for BlobTools and binning
     bam_src = channel.empty()
-                  .mix(spades_asm.assembly_bam)
+                  // .mix(spades_asm.assembly_bam)
+                  .mix(unicycler_asm.assembly_bam)
                   .mix(flyenano_asm.assembly_bam)
                   .mix(flyepacbio_asm.assembly_bam)
                   .mix(flyehifi_asm.assembly_bam)
@@ -863,7 +909,8 @@ workflow ASSEMBLY {
     }
 
     assembly_notes_ch = channel.empty()
-                          .mix(spades_asm.note)
+                          // .mix(spades_asm.note)
+                          .mix(unicycler_asm.note)
                           .mix(flyenano_asm.note)
                           .mix(flyepacbio_asm.note)
                           .mix(flyehifi_asm.note)
