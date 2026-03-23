@@ -576,49 +576,47 @@ workflow {
       .mix(failed_rows)
 
     APPEND_SUMMARY(summary_rows, outdir)
-}
+    workflow.onComplete = {
+      def outdirPath = file(params.outdir ?: './output').toAbsolutePath()
+      def summaryFile = outdirPath.resolve('summary.tsv')
+      def traceFile = file("${workflow.launchDir}/execution-reports/trace.tsv").toAbsolutePath()
+      def scriptFile = file("${workflow.projectDir}/bin/annotate_summary_from_trace.py").toAbsolutePath()
 
+      log.info "onComplete: summary.tsv -> ${summaryFile}"
+      log.info "onComplete: trace.tsv   -> ${traceFile}"
+      log.info "onComplete: annotator   -> ${scriptFile}"
 
-workflow.onComplete {
-    def outdirPath = file(params.outdir ?: './output').toAbsolutePath()
-    def summaryFile = outdirPath.resolve('summary.tsv')
-    def traceFile = file("${workflow.launchDir}/execution-reports/trace.tsv").toAbsolutePath()
-    def scriptFile = file("${workflow.projectDir}/bin/annotate_summary_from_trace.py").toAbsolutePath()
+      if (!summaryFile.exists()) {
+        log.warn "onComplete: ${summaryFile} not found; skipping scheduler annotation"
+        return
+      }
 
-    log.info "onComplete: summary.tsv -> ${summaryFile}"
-    log.info "onComplete: trace.tsv   -> ${traceFile}"
-    log.info "onComplete: annotator   -> ${scriptFile}"
+      if (!traceFile.exists()) {
+        log.warn "onComplete: ${traceFile} not found; skipping scheduler annotation"
+        return
+      }
 
-    if (!summaryFile.exists()) {
-      log.warn "onComplete: ${summaryFile} not found; skipping scheduler annotation"
-      return
-    }
+      def cmd = [
+        'python3',
+        scriptFile.toString(),
+        summaryFile.toString(),
+        traceFile.toString()
+      ]
 
-    if (!traceFile.exists()) {
-      log.warn "onComplete: ${traceFile} not found; skipping scheduler annotation"
-      return
-    }
+      log.info "onComplete: running ${cmd.join(' ')}"
 
-    def cmd = [
-      'python3',
-      scriptFile.toString(),
-      summaryFile.toString(),
-      traceFile.toString()
-    ]
+      def proc = new ProcessBuilder(cmd)
+        .directory(workflow.launchDir.toFile())
+        .redirectError(java.lang.ProcessBuilder.Redirect.INHERIT)
+        .redirectOutput(java.lang.ProcessBuilder.Redirect.INHERIT)
+        .start()
 
-    log.info "onComplete: running ${cmd.join(' ')}"
-
-    def proc = new ProcessBuilder(cmd)
-      .directory(workflow.launchDir.toFile())
-      .redirectError(java.lang.ProcessBuilder.Redirect.INHERIT)
-      .redirectOutput(java.lang.ProcessBuilder.Redirect.INHERIT)
-      .start()
-
-    int rc = proc.waitFor()
-    if (rc != 0) {
-      log.warn "onComplete: annotator script exited with code ${rc}"
-    }
-    else {
-      log.info "onComplete: summary.tsv successfully annotated with scheduler error information"
+      int rc = proc.waitFor()
+      if (rc != 0) {
+        log.warn "onComplete: annotator script exited with code ${rc}"
+      }
+      else {
+        log.info "onComplete: summary.tsv successfully annotated with scheduler error information"
+      }
     }
 }
