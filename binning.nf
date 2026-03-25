@@ -576,6 +576,7 @@ workflow {
       .mix(failed_rows)
 
     APPEND_SUMMARY(summary_rows, outdir)
+
     workflow.onComplete = {
       def outdirPath = file(params.outdir ?: './output').toAbsolutePath()
       def summaryFile = outdirPath.resolve('summary.tsv')
