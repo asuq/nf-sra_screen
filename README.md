@@ -63,6 +63,8 @@ You can run it in the following modes:
 > - `--binning` is only meaningful when assembly is enabled (i.e. when you do not set `--noassembly`). If you set both, `--binning` is ignored.
 > - If you omit `--taxa`, Sandpiper/SingleM and taxon‑specific extraction are skipped.
 
+There is also a standalone binning entrypoint, `binning.nf`, for cases where you already have `assembly.fasta` plus the original reads and only want the mapping + binning stage.
+
 
 ## Installation
 
@@ -95,6 +97,9 @@ All tools used by the pipeline are provided via containers defined in `nextflow.
   - `--gtdb_ncbi_map` Dir with NCBI -> GTDB crosswalk: `ncbi_vs_gtdb_bacteria.xlsx`,  `ncbi_vs_gtdb_archaea.xlsx`, `gtdb_r226.dic` from [GTDB download](https://data.gtdb.aau.ecogenomic.org/releases/release226/226.0/auxillary_files/)
   - `--singlem_db`    SingleM metapackage (e.g. `S5.4.0.GTDB_r226.metapackage_20250331.smpkg.zb`)
   - `--sandpiper_db`  (with `--sra` only) Sandpiper db with `sandpiper_sra.txt`, `sandpiper1.0.0.condensed.tsv`
+
+- Standalone binning (`binning.nf`)
+  - `--uniprot_db`    UniProt DIAMOND database (`.dmnd`) for SemiBin2
 
 > [!NOTE]
 > In screening‑only mode (`--noassembly`), `--uniprot_db` is not required because DIAMOND / BlobToolKit / binners are skipped.
@@ -185,6 +190,27 @@ realm,domain,superkingdom,kingdom,phylum,class,order,family,genus,species
 > - If you supply the taxon in GTDB style only (e.g. `p__`, `c__`, …), the pipeline runs SingleM/Sandpiper but skips taxon‑specific extraction
 
 
+### 4. Input: standalone binning sheet (`binning.nf --binning_tsv`)
+
+Use `binning.nf` when you already have an assembly and want to run mapping + binning without re-running `main.nf`.
+
+`binning.tsv`
+```tsv
+sample	read_type	reads	assembly_fasta
+A98	hifi	a98.fastq.gz	/path/to/A98/assembly.fasta
+B27	short	read_1.fastq.gz,read_2.fastq.gz	/path/to/B27/assembly.fasta
+```
+
+- `sample`: logical sample identifier. Internally, `sra = sample` and `srr = sample`.
+- `read_type`: must be one of `short`, `nanopore`, `pacbio`, or `hifi`.
+- `reads`: comma-separated FASTQ paths.
+  - `short` accepts one FASTQ (single-end) or two FASTQs (paired-end).
+  - `nanopore`, `pacbio`, and `hifi` accept one or more FASTQs.
+- `assembly_fasta`: path to the assembly to bin against.
+
+`binning.nf` skips screening, DIAMOND, BlobToolKit, and taxon extraction. It maps the supplied reads back to `assembly_fasta`, then runs MetaBAT2, SemiBin2, Rosella, DAS Tool, and writes a minimal `summary.tsv`.
+
+
 ## Usage
 ### Full example command
 ```bash
@@ -202,10 +228,20 @@ nextflow run asuq/nf-sra_screen \
   --outdir nf-sra_screen_results
 ```
 
+### Standalone binning example
+```bash
+nextflow run binning.nf \
+  -profile <docker/singularity/local/slurm/...> \
+  --binning_tsv binning.tsv \
+  --uniprot_db /path/to/uniprot.dmnd \
+  --outdir nf-sra_screen_binning
+```
+
 ### Key parameters
 - `-profile`         nextflow profile (see below)
 - `--sra`            CSV with column `sra` listing project accessions
 - `--fastq_tsv`      TSV with columns (`sample,read_type,reads`) listing sample reads
+- `--binning_tsv`    TSV with columns (`sample,read_type,reads,assembly_fasta`) for standalone `binning.nf`
 - `--taxdump`        Directory containing NCBI taxdump files; `jsonify_taxdump.py` will create `taxdump.json`
 - `--uniprot_db`     UniProt DIAMOND database (`.dmnd`) (Follow [blobtools tutorial](https://blobtoolkit.genomehubs.org/install/))
 - `--taxa`           (Optional) CSV with rank,taxa (NCBI or GTDB names). Use it if you want taxonomy screening
@@ -296,6 +332,7 @@ execution-reports/
 
 > [!NOTE]
 > In `--noassembly` mode, summary.tsv is still produced, but assembly/BlobToolKit/extraction/binning outputs are not.
+> When running `binning.nf`, only the per-sample `binning/` directories and the global `summary.tsv` are produced.
 
 </details>
 
