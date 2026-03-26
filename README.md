@@ -63,7 +63,7 @@ You can run it in the following modes:
 > - `--binning` is only meaningful when assembly is enabled (i.e. when you do not set `--noassembly`). If you set both, `--binning` is ignored.
 > - If you omit `--taxa`, Sandpiper/SingleM and taxon‑specific extraction are skipped.
 
-There is also a standalone binning entrypoint, `binning.nf`, for cases where you already have `assembly.fasta` plus the original reads and only want the mapping + binning stage.
+There is also a standalone binning entrypoint, `binning.nf`, for cases where you already have `assembly.fasta` and either the original reads or an SRR accession, and only want the mapping + binning stage.
 
 
 ## Installation
@@ -196,19 +196,22 @@ Use `binning.nf` when you already have an assembly and want to run mapping + bin
 
 `binning.tsv`
 ```tsv
-sample	read_type	reads	assembly_fasta
-A98	hifi	a98.fastq.gz	/path/to/A98/assembly.fasta
-B27	short	read_1.fastq.gz,read_2.fastq.gz	/path/to/B27/assembly.fasta
+sample	read_type	reads	srr	assembly_fasta
+A98	hifi	a98.fastq.gz		/path/to/A98/assembly.fasta
+B27	short	read_1.fastq.gz,read_2.fastq.gz		/path/to/B27/assembly.fasta
+C03			SRR12345678	/path/to/C03/assembly.fasta
 ```
 
-- `sample`: logical sample identifier. Internally, `sra = sample` and `srr = sample`.
-- `read_type`: must be one of `short`, `nanopore`, `pacbio`, or `hifi`.
-- `reads`: comma-separated FASTQ paths.
+- `sample`: logical sample identifier. Internally, `sra = sample`.
+- `read_type`: required for local-read rows; must be one of `short`, `nanopore`, `pacbio`, or `hifi`.
+- `reads`: comma-separated FASTQ paths for local-read rows.
   - `short` accepts one FASTQ (single-end) or two FASTQs (paired-end).
   - `nanopore`, `pacbio`, and `hifi` accept one or more FASTQs.
+- `srr`: optional SRR accession for download-backed rows. If set, raw reads are downloaded automatically and `read_type` is ignored.
 - `assembly_fasta`: path to the assembly to bin against.
+- Provide exactly one of `reads` or `srr` in each row.
 
-`binning.nf` skips screening, DIAMOND, BlobToolKit, and taxon extraction. It maps the supplied reads back to `assembly_fasta`, then runs MetaBAT2, SemiBin2, Rosella, DAS Tool, and writes a minimal `summary.tsv`.
+`binning.nf` skips screening, DIAMOND, BlobToolKit, and taxon extraction. It maps either the supplied local reads or downloaded SRR FASTQs back to `assembly_fasta`, then runs MetaBAT2, SemiBin2, Rosella, DAS Tool, and writes a minimal `summary.tsv`.
 
 
 ## Usage
@@ -241,7 +244,7 @@ nextflow run binning.nf \
 - `-profile`         nextflow profile (see below)
 - `--sra`            CSV with column `sra` listing project accessions
 - `--fastq_tsv`      TSV with columns (`sample,read_type,reads`) listing sample reads
-- `--binning_tsv`    TSV with columns (`sample,read_type,reads,assembly_fasta`) for standalone `binning.nf`
+- `--binning_tsv`    TSV for standalone `binning.nf`, using either local-read rows (`sample,read_type,reads,assembly_fasta`) or SRR rows (`sample,srr,assembly_fasta`)
 - `--taxdump`        Directory containing NCBI taxdump files; `jsonify_taxdump.py` will create `taxdump.json`
 - `--uniprot_db`     UniProt DIAMOND database (`.dmnd`) (Follow [blobtools tutorial](https://blobtoolkit.genomehubs.org/install/))
 - `--taxa`           (Optional) CSV with rank,taxa (NCBI or GTDB names). Use it if you want taxonomy screening
