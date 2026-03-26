@@ -61,6 +61,7 @@ test/*
 test/binning/*
 !test/binning/assembly.fasta
 !test/binning/binning.tsv
+!test/binning/binning_srr.tsv
 !test/binning/hifi.fastq
 !test/binning/short_R1.fastq
 !test/binning/short_R2.fastq

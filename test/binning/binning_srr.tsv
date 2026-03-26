@@ -1,0 +1,2 @@
+sample	read_type	reads	srr	assembly_fasta
+srr_sample			SRR000001	test/binning/assembly.fasta
