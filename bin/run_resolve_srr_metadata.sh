@@ -62,53 +62,33 @@ parse_args() {
   done
 }
 
-write_metadata_tsv() {
-  local metadata_tsv="${sample}.metadata.tsv"
-  local url="https://www.ebi.ac.uk/ena/portal/api/filereport"
-  local fields="run_accession,instrument_platform,instrument_model,library_source,library_strategy"
-
-  curl -fsSL \
-    --retry 3 \
-    --retry-delay 2 \
-    --connect-timeout 20 \
-    --max-time 60 \
-    "${url}?accession=${srr}&result=read_run&fields=${fields}&format=tsv" \
-    > "${metadata_tsv}"
-
-  if [[ ! -s "${metadata_tsv}" ]]; then
-    fail "Metadata: ENA returned no metadata for ${srr}"
+run_shared_metadata() {
+  if ! run_download_metadata.sh \
+      --sra "${srr}" \
+      --attempt "${attempt}" \
+      --max-retries "${max_retries}"
+  then
+    exit 1
   fi
 
-  local line_count
-  line_count="$(wc -l < "${metadata_tsv}")"
-  if [[ "${line_count}" -lt 2 ]]; then
-    fail "Metadata: ENA returned no run rows for ${srr}"
-  fi
-
-  local resolved_srr
-  resolved_srr="$(awk -F'\t' 'NR==2 {print $1}' "${metadata_tsv}")"
-  if [[ -z "${resolved_srr}" ]]; then
-    fail "Metadata: missing run_accession for ${srr}"
-  fi
-
-  if [[ "${resolved_srr}" != "${srr}" ]]; then
-    fail "Metadata: resolved run_accession '${resolved_srr}' does not match requested SRR '${srr}'"
+  if [[ -f FAIL.note ]]; then
+    exit 0
   fi
 }
 
 write_resolved_metadata() {
-  local filtered_csv="${sample}.filtered.csv"
-  local skipped_csv="${sample}.skipped.csv"
-
-  if ! filter_sra.sh "${sample}"; then
-    fail "Metadata: filter_sra.sh failed for ${srr}"
-  fi
+  local filtered_csv="${srr}.filtered.csv"
+  local skipped_csv="${srr}.skipped.csv"
+  local line=""
 
   if [[ -s "${filtered_csv}" ]] && [[ "$(wc -l < "${filtered_csv}")" -ge 2 ]]; then
-    awk -F',' 'NR==2 {print $3 "\t" $4 "\t" $6 "\t" $7}' "${filtered_csv}" > resolved.tsv
+    line="$(awk -F',' -v run="${srr}" 'NR > 1 && $2 == run {print $3 "\t" $4 "\t" $6 "\t" $7; exit}' "${filtered_csv}")"
+    if [[ -n "${line}" ]]; then
+      printf '%s\n' "${line}" > resolved.tsv
+    fi
 
     if [[ ! -s resolved.tsv ]]; then
-      fail "Metadata: failed to resolve platform and assembler for ${srr}"
+      fail "Metadata: failed to resolve platform and assembler for sample '${sample}' run '${srr}'"
     fi
 
     return 0
@@ -116,14 +96,14 @@ write_resolved_metadata() {
 
   local skip_reason=""
   if [[ -s "${skipped_csv}" ]] && [[ "$(wc -l < "${skipped_csv}")" -ge 2 ]]; then
-    skip_reason="$(awk -F',' 'NR==2 {print $7}' "${skipped_csv}")"
+    skip_reason="$(awk -F',' -v run="${srr}" 'NR > 1 && $2 == run {print $7; exit}' "${skipped_csv}")"
   fi
 
   if [[ -n "${skip_reason}" ]]; then
-    fail "Metadata: SRR ${srr} was filtered out (${skip_reason})"
+    fail "Metadata: sample '${sample}' run '${srr}' was filtered out (${skip_reason})"
   fi
 
-  fail "Metadata: no usable metadata remained for ${srr}"
+  fail "Metadata: no usable metadata remained for sample '${sample}' run '${srr}'"
 }
 
 main() {
@@ -134,7 +114,7 @@ main() {
     fail "Metadata: missing required arguments (--sample, --srr)"
   fi
 
-  write_metadata_tsv
+  run_shared_metadata
   write_resolved_metadata
 }
 
