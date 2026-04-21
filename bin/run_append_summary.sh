@@ -40,12 +40,13 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if [[ -z "${outdir}" || -z "${sra}" || -z "${srr}" || -z "${summary_csv}" ]]; then
+if [[ -z "${outdir}" || -z "${sra}" || -z "${summary_csv}" ]]; then
   echo "append_summary.sh: missing required parameters" >&2
   exit 1
 fi
 
 OUT_TSV="${outdir}/summary.tsv"
+LOCK_DIR="${OUT_TSV}.lockdir"
 mkdir -p "${outdir}"
 
 # counts = comma-joined n_identifiers in the order of rows in summary.csv
@@ -56,12 +57,23 @@ COUNTS="$(
 # note left blank for successful path
 LINE="${sra}\t${srr}\t${platform}\t${model}\t${strategy}\t${assembler}\t${COUNTS}\t${note}"
 
-{
-  flock 200
-  if [[ ! -s "${OUT_TSV}" ]]; then
-    printf 'sra\tsrr\tplatform\tmodel\tstrategy\tassembler\tcounts\tnote\n' > "${OUT_TSV}"
-  fi
-  printf '%b\n' "${LINE}" >> "${OUT_TSV}"
-} 200> "${OUT_TSV}.lock"
+lock_summary() {
+  while ! mkdir "${LOCK_DIR}" 2>/dev/null; do
+    sleep 0.1
+  done
+}
+
+unlock_summary() {
+  rmdir "${LOCK_DIR}" 2>/dev/null || true
+}
+
+trap unlock_summary EXIT
+
+lock_summary
+
+if [[ ! -s "${OUT_TSV}" ]]; then
+  printf 'sra\tsrr\tplatform\tmodel\tstrategy\tassembler\tcounts\tnote\n' > "${OUT_TSV}"
+fi
+printf '%b\n' "${LINE}" >> "${OUT_TSV}"
 
 ln -sf "${OUT_TSV}" .

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Usage:
-#   run_metaflye_nano.sh \
+#   run_metaflye_hifi.sh \
 #     --reads READS \
 #     --cpus N \
 #     --attempt A \
@@ -71,7 +71,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ ${#read_files[@]} -eq 0 ]]; then
-  echo "run_metaflye_nano.sh: missing --reads" >&2
+  echo "run_metaflye_hifi.sh: missing --reads" >&2
   exit 1
 fi
 
@@ -88,25 +88,25 @@ fail() {
   exit 0
 }
 
-# Run metaFlye (ONT)
-if ! flye --nano-raw "${read_files[@]}" \
+# Run metaFlye (HiFi)
+if ! flye --pacbio-hifi "${read_files[@]}" \
           --threads "${cpus}" \
           --scaffold \
           --out-dir '.' \
           --meta; then
-  fail "metaFlye (ONT): assembly failed"
+  fail "metaFlye (HiFi): assembly failed"
 fi
 
 # Map reads back with minimap2 + samtools
 if ! (
-  minimap2 -ax map-ont -I 20G -t "${cpus}" assembly.fasta "${read_files[@]}" \
-      | samtools sort --output-fmt BAM -@ "${cpus}" -o assembly.bam \
+  minimap2 -ax map-hifi -I 20G -t "${cpus}" assembly.fasta "${read_files[@]}" \
+    | samtools sort --output-fmt BAM -@ "${cpus}" -o assembly.bam \
   && samtools index -c -o assembly.bam.csi -@ "${cpus}" assembly.bam
   ); then
-  fail "metaFlye (ONT): mapping/indexing failed"
+  fail "metaFlye (HiFi): mapping/indexing failed"
 fi
 
 # Rename graph to standard name
 if ! mv -v assembly_graph.gfa assembly.gfa; then
-  fail "metaFlye (ONT): graph rename failed"
+  fail "metaFlye (HiFi): graph rename failed"
 fi

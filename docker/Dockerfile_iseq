@@ -8,12 +8,14 @@ ENV CONDA_DIR=/opt/conda \
 
 WORKDIR /work
 
-RUN apt-get update && apt-get install -y --no-install-recommends file \
-    && rm -rf /var/lib/apt/lists/*
-
-RUN mamba create -y -n "${CONDA_ENV_NAME}" \
-    -c bioconda -c conda-forge \
-    "iseq==1.9.8" \
+RUN mamba create -y -n "${CONDA_ENV_NAME}" -c conda-forge -c bioconda \
+      "iseq==1.9.8" \
+      "sra-tools==3.2.1" \
+      "aria2==1.37.0" \
+      "pigz==2.8" \
+      "pbzip2==1.1.13" \
+      "curl" \
+      "file" \
     && mamba clean --all --yes
 
 CMD ["/bin/bash"]
