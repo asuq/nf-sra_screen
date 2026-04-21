@@ -255,6 +255,13 @@ nextflow run binning.nf \
 - `--noassembly`     (Optional) Skip ASSEMBLY and BINNING; run PRE_SCREENING + SUMMARY only. If set, `--binning` is ignored
 - `--outdir`         Output directory (default: ./output)
 - `--max_retries`    Maximum number of retries per process (default: 3)
+- `--queue_short`    Optional scheduler queue for short jobs
+- `--queue_standard` Optional scheduler queue for standard jobs
+- `--queue_highmem`  Optional scheduler queue for high-memory retries
+- `--executor_queue_size` Optional executor queue size override for SLURM-style profiles
+- `--slurm_cluster_options` Optional extra SLURM cluster options appended to `process.clusterOptions`
+- `--singularity_cache_dir` Optional Singularity cache directory override
+- `--singularity_run_options` Optional Singularity runtime options override
 - `--help`           Print the pipeline help message and exit.
 
 ### Profiles
@@ -268,6 +275,9 @@ nextflow run binning.nf \
   - Large queue size (`queueSize=2000`) and increased resource caps.
 - `oist`
   - Includes `conf/oist.config` for OIST Deigo HPC settings.
+- `gwdg`
+  - Includes `conf/gwdg.config` for the GWDG SCC SLURM environment.
+  - Uses Singularity with SHM-first temporary storage and defaults all queue classes to `scc-cpu`.
 - `debug`
   - docker.enabled = true
   - `executor.queueSize = 1`
