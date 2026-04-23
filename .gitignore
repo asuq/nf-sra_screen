@@ -47,6 +47,7 @@ env/
 *.log
 *.out
 *.err
+.untracked/
 tmp/
 temp/
 
