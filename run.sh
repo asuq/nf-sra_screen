@@ -73,6 +73,7 @@ nextflow run asuq/nf-sra_screen \
   -profile <docker/singularity/local/slurm/...> \
   --sra sra.csv \
   --fastq_tsv fastq.tsv \
+  --assemblers auto \
   --taxdump /path/to/ncbi_taxdump_dir \
   --uniprot_db /path/to/uniprot.dmnd \
   --taxa taxa.csv \

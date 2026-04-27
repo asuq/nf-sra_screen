@@ -37,6 +37,8 @@ def helpMessage() {
     --help          Show this help message
     --noassembly    Skip ASSEMBLY/BINNING
     --binning       Also run BINNING after ASSEMBLY
+    --assemblers    Assembly tools: auto, all, or comma-separated tool names
+                    (default: auto; aliases: --assembler, spades, flye)
     --binners       Comma-separated binners (default: auto; allowed: auto,metabat,semibin,rosella,comebin,vamb,lorbin)
     --refiners      Comma-separated refiners (default: dastool; allowed: dastool,binette)
     --checkm2_db    CheckM2 DIAMOND database required with --refiners binette
@@ -249,6 +251,111 @@ def validatePhase0BinningOptions() {
 }
 
 
+/*
+ * Return the canonical assembler name for a user-provided tool token.
+ */
+def canonicalAssemblerName(name) {
+  def value = (name ?: '').toString().trim().toLowerCase()
+  def aliases = [
+    spades: 'metaspades',
+    flye: 'metaflye'
+  ]
+  aliases.get(value, value)
+}
+
+
+/*
+ * Parse and validate the assembler selection CLI parameter.
+ */
+def selectedAssemblerTokens() {
+  def rawValue = params.assembler ?: params.assemblers ?: 'auto'
+  def rawTokens = rawValue.toString()
+    .split(/\s*,\s*/)
+    .collect { canonicalAssemblerName(it) }
+    .findAll { it }
+    .unique()
+
+  def tokens = rawTokens ?: ['auto']
+  def supported = ['metaspades', 'unicycler', 'metaflye', 'myloasm'] as Set
+  def keywords = ['auto', 'all'] as Set
+  def unsupported = tokens.findAll { !(it in supported) && !(it in keywords) }
+
+  if (unsupported) {
+    error "Unsupported assembler(s): ${unsupported.join(', ')}"
+  }
+  if ((tokens.contains('auto') || tokens.contains('all')) && tokens.size() > 1) {
+    error "--assemblers cannot combine auto/all with explicit assembler names"
+  }
+
+  tokens
+}
+
+
+/*
+ * Return all supported assemblers for a read type.
+ */
+def supportedAssemblersForReadType(readType) {
+  def supportedByReadType = [
+    short:    ['metaspades', 'unicycler'],
+    nanopore: ['metaflye'],
+    pacbio:   ['metaflye'],
+    hifi:     ['metaflye', 'myloasm']
+  ]
+  supportedByReadType[(readType ?: '').toString().toLowerCase()] ?: []
+}
+
+
+/*
+ * Return the default assembler for a read type when --assemblers auto is used.
+ */
+def defaultAssemblerForReadType(readType) {
+  def defaults = [
+    short:    'metaspades',
+    nanopore: 'metaflye',
+    pacbio:   'metaflye',
+    hifi:     'myloasm'
+  ]
+  defaults[(readType ?: '').toString().toLowerCase()]
+}
+
+
+/*
+ * Resolve the selected compatible assemblers for one read type.
+ */
+def assemblersForReadType(readType) {
+  def tokens = selectedAssemblerTokens()
+  def supported = supportedAssemblersForReadType(readType)
+
+  if (tokens == ['auto']) {
+    def defaultAssembler = defaultAssemblerForReadType(readType)
+    return defaultAssembler ? [defaultAssembler] : []
+  }
+  if (tokens == ['all']) {
+    return supported
+  }
+
+  tokens.findAll { it in supported }
+}
+
+
+/*
+ * Return true when selected outputs need per-assembler publish directories.
+ */
+def useAssemblerSubdirectories() {
+  def tokens = selectedAssemblerTokens()
+  tokens == ['all'] || tokens.size() > 1
+}
+
+
+/*
+ * Return the publish directory for assembler-specific outputs.
+ */
+def assemblerPublishDir(sra, srr, assembler) {
+  def base = "${params.outdir}/${sra}/${srr}"
+  useAssemblerSubdirectories() ? "${base}/${assembler}" : base
+}
+
+
 //-- Processes -----------------------------------------------------------------
 
 process VALIDATE_TAXA {
@@ -285,9 +392,9 @@ process DOWNLOAD_SRA_METADATA {
     val sra
 
     output:
-    tuple val(sra), path("${sra}.filtered.csv"),                                    optional: true, emit: filtered_sra
-    tuple val(sra), path("${sra}.skipped.csv"),                                     optional: true, emit: skipped_sra
-    tuple val(sra), val(''), val(''), val(''), val(''), val(''), path("FAIL.note"), optional: true, emit: note
+    tuple val(sra), path("${sra}.filtered.csv"),                                             optional: true, emit: filtered_sra
+    tuple val(sra), path("${sra}.skipped.csv"),                                              optional: true, emit: skipped_sra
+    tuple val(sra), val(''), val(''), val(''), val(''), val(''), val(''), path("FAIL.note"), optional: true, emit: note
 
     script:
     """
@@ -304,13 +411,13 @@ process SANDPIPER {
     publishDir "${params.outdir}/${sra}/${srr}/", mode: 'copy', overwrite: true
 
     input:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler)
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type)
     path valid_taxa
     path sandpiper_db
 
     output:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("sandpiper_decision.txt"),    emit: decision
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("FAIL.note"), optional: true, emit: note
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), path("sandpiper_decision.txt"),            emit: decision
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(''), path("FAIL.note"), optional: true, emit: note
     tuple val(sra), val(srr), path("sandpiper_report.txt"),                                                optional: true, emit: sandpiper_report
     tuple val(sra), val(srr), path("sandpiper_output.tsv"),                                                optional: true, emit: sandpiper_summary
 
@@ -336,18 +443,18 @@ process DOWNLOAD_SRR {
       }
 
     input:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), val(sandpiper)
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(sandpiper)
 
     output:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), val(sandpiper), path("*.f*q*"), path("assembler.txt"), optional: true, emit: reads
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("FAIL.note"),                                     optional: true, emit: note
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(sandpiper), path("*.f*q*"), path("assembler.txt"), optional: true, emit: reads
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(''), path("FAIL.note"),                            optional: true, emit: note
 
     script:
     """
     run_download_srr.sh \\
       --srr "${srr}" \\
       --platform "${platform}" \\
-      --assembler "${assembler}" \\
+      --read-type "${read_type}" \\
       --cpus ${task.cpus} \\
       --attempt ${task.attempt} \\
       --max-retries ${params.max_retries}
@@ -368,13 +475,13 @@ process SINGLEM {
       }
 
     input:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), val(sandpiper), path(reads)
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(sandpiper), path(reads)
     path valid_taxa
     path singlem_db
 
     output:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("reads_ok/*.f*q*"), optional: true, emit: reads
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("FAIL.note"),       optional: true, emit: note
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), path("reads_ok/*.f*q*"),          optional: true, emit: reads
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(''), path("FAIL.note"),       optional: true, emit: note
     tuple val(sra), val(srr), path("singlem_taxonomic_profile*"),                                                optional: true, emit: singlem_summary
     tuple val(sra), val(srr), path("singlem_output.tsv"),                                                        optional: true, emit: singlem_phyla_check
 
@@ -394,9 +501,9 @@ process SINGLEM {
 
 
 process METASPADES {
-    tag "${sra}:${srr}"
+    tag "${sra}:${srr}:${assembler}"
     label 'assembly'
-    publishDir "${params.outdir}/${sra}/${srr}/",
+    publishDir { assemblerPublishDir(sra, srr, assembler) },
       mode: 'copy',
       overwrite: true,
       saveAs: { filename ->
@@ -411,15 +518,15 @@ process METASPADES {
       }
 
     input:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path(reads)
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler), path(reads)
 
     output:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("assembly.fasta"), optional: true, emit: assembly_fasta
-    tuple val(sra), val(srr), path("assembly.gfa"),                                                             optional: true, emit: assembly_graph
-    tuple val(sra), val(srr), path("spades.log"),                                                               optional: true, emit: assembly_log
-    tuple val(sra), val(srr), path("assembly.bam"), path("assembly.bam.csi"),                                   optional: true, emit: assembly_bam
-    tuple val(sra), val(srr), path("fastp.html"),                                                               optional: true, emit: fastp_html
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("FAIL.note"),      optional: true, emit: note
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler), path("assembly.fasta"), optional: true, emit: assembly_fasta
+    tuple val(sra), val(srr), val(read_type), val(assembler), path("assembly.gfa"),                                            optional: true, emit: assembly_graph
+    tuple val(sra), val(srr), val(read_type), val(assembler), path("spades.log"),                                              optional: true, emit: assembly_log
+    tuple val(sra), val(srr), val(read_type), val(assembler), path("assembly.bam"), path("assembly.bam.csi"),                  optional: true, emit: assembly_bam
+    tuple val(sra), val(srr), val(read_type), val(assembler), path("fastp.html"),                                              optional: true, emit: fastp_html
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler), path("FAIL.note"),     optional: true, emit: note
 
     script:
     """
@@ -436,9 +543,9 @@ process METASPADES {
 
 
 process UNICYCLER {
-    tag "${sra}:${srr}"
+    tag "${sra}:${srr}:${assembler}"
     label 'assembly'
-    publishDir "${params.outdir}/${sra}/${srr}/",
+    publishDir { assemblerPublishDir(sra, srr, assembler) },
       mode: 'copy',
       overwrite: true,
       saveAs: { filename ->
@@ -453,15 +560,15 @@ process UNICYCLER {
       }
 
     input:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path(reads)
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler), path(reads)
 
     output:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("assembly.fasta"), optional: true, emit: assembly_fasta
-    tuple val(sra), val(srr), path("assembly.gfa"),                                                             optional: true, emit: assembly_graph
-    tuple val(sra), val(srr), path("spades.log"),                                                               optional: true, emit: assembly_log
-    tuple val(sra), val(srr), path("assembly.bam"), path("assembly.bam.csi"),                                   optional: true, emit: assembly_bam
-    tuple val(sra), val(srr), path("fastp.html"),                                                               optional: true, emit: fastp_html
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("FAIL.note"),      optional: true, emit: note
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler), path("assembly.fasta"), optional: true, emit: assembly_fasta
+    tuple val(sra), val(srr), val(read_type), val(assembler), path("assembly.gfa"),                                            optional: true, emit: assembly_graph
+    tuple val(sra), val(srr), val(read_type), val(assembler), path("spades.log"),                                              optional: true, emit: assembly_log
+    tuple val(sra), val(srr), val(read_type), val(assembler), path("assembly.bam"), path("assembly.bam.csi"),                  optional: true, emit: assembly_bam
+    tuple val(sra), val(srr), val(read_type), val(assembler), path("fastp.html"),                                              optional: true, emit: fastp_html
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler), path("FAIL.note"),     optional: true, emit: note
 
     script:
     """
@@ -478,9 +585,9 @@ process UNICYCLER {
 
 
 process METAFLYE_NANO {
-    tag "${sra}:${srr}"
+    tag "${sra}:${srr}:${assembler}"
     label 'assembly'
-    publishDir "${params.outdir}/${sra}/${srr}/",
+    publishDir { assemblerPublishDir(sra, srr, assembler) },
       mode: 'copy',
       overwrite: true,
       saveAs: { filename ->
@@ -494,14 +601,14 @@ process METAFLYE_NANO {
       }
 
     input:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path(reads)
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler), path(reads)
 
     output:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("assembly.fasta"), optional: true, emit: assembly_fasta
-    tuple val(sra), val(srr), path("assembly.gfa"),                                                             optional: true, emit: assembly_graph
-    tuple val(sra), val(srr), path("flye.log"),                                                                 optional: true, emit: assembly_log
-    tuple val(sra), val(srr), path("assembly.bam"), path("assembly.bam.csi"),                                   optional: true, emit: assembly_bam
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("FAIL.note"),      optional: true, emit: note
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler), path("assembly.fasta"), optional: true, emit: assembly_fasta
+    tuple val(sra), val(srr), val(read_type), val(assembler), path("assembly.gfa"),                                            optional: true, emit: assembly_graph
+    tuple val(sra), val(srr), val(read_type), val(assembler), path("flye.log"),                                                optional: true, emit: assembly_log
+    tuple val(sra), val(srr), val(read_type), val(assembler), path("assembly.bam"), path("assembly.bam.csi"),                  optional: true, emit: assembly_bam
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler), path("FAIL.note"),     optional: true, emit: note
 
     script:
     """
@@ -515,9 +622,9 @@ process METAFLYE_NANO {
 
 
 process METAFLYE_PACBIO {
-    tag "${sra}:${srr}"
+    tag "${sra}:${srr}:${assembler}"
     label 'assembly'
-    publishDir "${params.outdir}/${sra}/${srr}/",
+    publishDir { assemblerPublishDir(sra, srr, assembler) },
       mode: 'copy',
       overwrite: true,
       saveAs: { filename ->
@@ -531,14 +638,14 @@ process METAFLYE_PACBIO {
       }
 
     input:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path(reads)
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler), path(reads)
 
     output:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("assembly.fasta"), optional: true, emit: assembly_fasta
-    tuple val(sra), val(srr), path("assembly.gfa"),                                                             optional: true, emit: assembly_graph
-    tuple val(sra), val(srr), path("flye.log"),                                                                 optional: true, emit: assembly_log
-    tuple val(sra), val(srr), path("assembly.bam"), path("assembly.bam.csi"),                                   optional: true, emit: assembly_bam
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("FAIL.note"),      optional: true, emit: note
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler), path("assembly.fasta"), optional: true, emit: assembly_fasta
+    tuple val(sra), val(srr), val(read_type), val(assembler), path("assembly.gfa"),                                            optional: true, emit: assembly_graph
+    tuple val(sra), val(srr), val(read_type), val(assembler), path("flye.log"),                                                optional: true, emit: assembly_log
+    tuple val(sra), val(srr), val(read_type), val(assembler), path("assembly.bam"), path("assembly.bam.csi"),                  optional: true, emit: assembly_bam
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler), path("FAIL.note"),     optional: true, emit: note
 
     script:
     """
@@ -552,9 +659,9 @@ process METAFLYE_PACBIO {
 
 
 process METAFLYE_HIFI {
-    tag "${sra}:${srr}"
+    tag "${sra}:${srr}:${assembler}"
     label 'assembly'
-    publishDir "${params.outdir}/${sra}/${srr}/",
+    publishDir { assemblerPublishDir(sra, srr, assembler) },
       mode: 'copy',
       overwrite: true,
       saveAs: { filename ->
@@ -568,14 +675,14 @@ process METAFLYE_HIFI {
       }
 
     input:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path(reads)
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler), path(reads)
 
     output:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("assembly.fasta"), optional: true, emit: assembly_fasta
-    tuple val(sra), val(srr), path("assembly.gfa"),                                                             optional: true, emit: assembly_graph
-    tuple val(sra), val(srr), path("flye.log"),                                                                 optional: true, emit: assembly_log
-    tuple val(sra), val(srr), path("assembly.bam"), path("assembly.bam.csi"),                                   optional: true, emit: assembly_bam
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("FAIL.note"),      optional: true, emit: note
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler), path("assembly.fasta"), optional: true, emit: assembly_fasta
+    tuple val(sra), val(srr), val(read_type), val(assembler), path("assembly.gfa"),                                            optional: true, emit: assembly_graph
+    tuple val(sra), val(srr), val(read_type), val(assembler), path("flye.log"),                                                optional: true, emit: assembly_log
+    tuple val(sra), val(srr), val(read_type), val(assembler), path("assembly.bam"), path("assembly.bam.csi"),                  optional: true, emit: assembly_bam
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler), path("FAIL.note"),     optional: true, emit: note
 
     script:
     """
@@ -589,9 +696,9 @@ process METAFLYE_HIFI {
 
 
 process MYLOASM {
-    tag "${sra}:${srr}"
+    tag "${sra}:${srr}:${assembler}"
     label 'assembly'
-    publishDir "${params.outdir}/${sra}/${srr}/",
+    publishDir { assemblerPublishDir(sra, srr, assembler) },
       mode: 'copy',
       overwrite: true,
       saveAs: { filename ->
@@ -604,14 +711,14 @@ process MYLOASM {
       }
 
     input:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path(reads)
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler), path(reads)
 
     output:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("assembly.fasta"), optional: true, emit: assembly_fasta
-    tuple val(sra), val(srr), path("assembly.gfa"),                                                             optional: true, emit: assembly_graph
-    tuple val(sra), val(srr), path("myloasm_*.log"),                                                            optional: true, emit: assembly_log
-    tuple val(sra), val(srr), path("assembly.bam"), path("assembly.bam.csi"),                                   optional: true, emit: assembly_bam
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("FAIL.note"),      optional: true, emit: note
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler), path("assembly.fasta"), optional: true, emit: assembly_fasta
+    tuple val(sra), val(srr), val(read_type), val(assembler), path("assembly.gfa"),                                            optional: true, emit: assembly_graph
+    tuple val(sra), val(srr), val(read_type), val(assembler), path("myloasm_*.log"),                                           optional: true, emit: assembly_log
+    tuple val(sra), val(srr), val(read_type), val(assembler), path("assembly.bam"), path("assembly.bam.csi"),                  optional: true, emit: assembly_bam
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler), path("FAIL.note"),     optional: true, emit: note
 
     script:
     """
@@ -625,16 +732,16 @@ process MYLOASM {
 
 
 process DIAMOND {
-    tag "${sra}:${srr}"
-    publishDir "${params.outdir}/${sra}/${srr}/", mode: 'copy', overwrite: true
+    tag "${sra}:${srr}:${assembler}"
+    publishDir { assemblerPublishDir(sra, srr, assembler) }, mode: 'copy', overwrite: true
 
     input:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path(assembly_fasta)
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler), path(assembly_fasta)
     path uniprot_db
 
     output:
-    tuple val(sra), val(srr), path("assembly_vs_uniprot.tsv"),                                             optional: true, emit: blast
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("FAIL.note"), optional: true, emit: note
+    tuple val(sra), val(srr), val(read_type), val(assembler), path("assembly_vs_uniprot.tsv"),                                     optional: true, emit: blast
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler), path("FAIL.note"), optional: true, emit: note
 
     script:
     """
@@ -649,17 +756,17 @@ process DIAMOND {
 
 
 process BLOBTOOLS {
-    tag "${sra}:${srr}"
-    publishDir "${params.outdir}/${sra}/${srr}/", mode: 'copy', overwrite: true
+    tag "${sra}:${srr}:${assembler}"
+    publishDir { assemblerPublishDir(sra, srr, assembler) }, mode: 'copy', overwrite: true
 
     input:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path(assembly_fasta), path(blast), path(assembly_bam), path(assembly_csi)
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler), path(assembly_fasta), path(blast), path(assembly_bam), path(assembly_csi)
     path taxdump
 
     output:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path(assembly_fasta), path("blobtools.csv"), optional: true, emit: blobtable
-    tuple val(sra), val(srr), path("blobtools*.svg"),                                                                                optional: true, emit: blobplots
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("FAIL.note"),                           optional: true, emit: note
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler), path(assembly_fasta), path("blobtools.csv"), optional: true, emit: blobtable
+    tuple val(sra), val(srr), val(read_type), val(assembler), path("blobtools*.svg"),                                                               optional: true, emit: blobplots
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler), path("FAIL.note"),                         optional: true, emit: note
 
     script:
     """
@@ -677,19 +784,19 @@ process BLOBTOOLS {
 
 
 process EXTRACT_TAXA {
-    tag "${sra}:${srr}"
-    publishDir "${params.outdir}/${sra}/${srr}/", mode: 'copy', overwrite: true
+    tag "${sra}:${srr}:${assembler}"
+    publishDir { assemblerPublishDir(sra, srr, assembler) }, mode: 'copy', overwrite: true
 
     input:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path(assembly_fasta), path(blobtable)
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler), path(assembly_fasta), path(blobtable)
     path valid_taxa
     path taxdump
 
     output:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("summary.csv"), optional: true, emit: summary
-    tuple val(sra), val(srr), path("*.ids.csv"),                                                             optional: true, emit: extracted_ids
-    tuple val(sra), val(srr), path("*.fasta"),                                                               optional: true, emit: extracted_fasta
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("FAIL.note"),   optional: true, emit: note
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler), path("summary.csv"), optional: true, emit: summary
+    tuple val(sra), val(srr), val(read_type), val(assembler), path("*.ids.csv"),                                            optional: true, emit: extracted_ids
+    tuple val(sra), val(srr), val(read_type), val(assembler), path("*.fasta"),                                              optional: true, emit: extracted_fasta
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler), path("FAIL.note"),  optional: true, emit: note
 
     script:
     """
@@ -705,17 +812,17 @@ process EXTRACT_TAXA {
 
 
 process METABAT {
-    tag "${sra}:${srr}"
+    tag "${sra}:${srr}:${assembler}"
     label 'binning'
-    publishDir "${params.outdir}/${sra}/${srr}/binning",
+    publishDir { "${assemblerPublishDir(sra, srr, assembler)}/binning" },
       mode: 'copy',
       overwrite: true
 
     input:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path(assembly_fasta), path(assembly_bam), path(assembly_csi)
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler), path(assembly_fasta), path(assembly_bam), path(assembly_csi)
 
     output:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler),
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler),
           val("metabat"), path("metabat"), path("metabat.contig2bin.tsv"), path("metabat.note"),             emit: result
 
     script:
@@ -731,17 +838,17 @@ process METABAT {
 
 
 process COMEBIN {
-    tag "${sra}:${srr}"
+    tag "${sra}:${srr}:${assembler}"
     label 'binning'
-    publishDir "${params.outdir}/${sra}/${srr}/binning",
+    publishDir { "${assemblerPublishDir(sra, srr, assembler)}/binning" },
       mode: 'copy',
       overwrite: true
 
     input:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path(assembly_fasta), path(assembly_bam), path(assembly_csi)
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler), path(assembly_fasta), path(assembly_bam), path(assembly_csi)
 
     output:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler),
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler),
           val("comebin"), path("comebin"), path("comebin.contig2bin.tsv"), path("comebin.note"),             emit: result
 
     script:
@@ -757,17 +864,17 @@ process COMEBIN {
 
 
 process COMEBIN_GPU {
-    tag "${sra}:${srr}"
+    tag "${sra}:${srr}:${assembler}"
     label 'gpu'
-    publishDir "${params.outdir}/${sra}/${srr}/binning",
+    publishDir { "${assemblerPublishDir(sra, srr, assembler)}/binning" },
       mode: 'copy',
       overwrite: true
 
     input:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path(assembly_fasta), path(assembly_bam), path(assembly_csi)
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler), path(assembly_fasta), path(assembly_bam), path(assembly_csi)
 
     output:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler),
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler),
           val("comebin"), path("comebin"), path("comebin.contig2bin.tsv"), path("comebin.note"),             emit: result
 
     script:
@@ -784,17 +891,17 @@ process COMEBIN_GPU {
 
 
 process VAMB {
-    tag "${sra}:${srr}"
+    tag "${sra}:${srr}:${assembler}"
     label 'binning'
-    publishDir "${params.outdir}/${sra}/${srr}/binning",
+    publishDir { "${assemblerPublishDir(sra, srr, assembler)}/binning" },
       mode: 'copy',
       overwrite: true
 
     input:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path(assembly_fasta), path(assembly_bam), path(assembly_csi)
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler), path(assembly_fasta), path(assembly_bam), path(assembly_csi)
 
     output:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler),
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler),
           val("vamb"), path("vamb"), path("vamb.contig2bin.tsv"), path("vamb.note"),                         emit: result
 
     script:
@@ -810,17 +917,17 @@ process VAMB {
 
 
 process VAMB_GPU {
-    tag "${sra}:${srr}"
+    tag "${sra}:${srr}:${assembler}"
     label 'gpu'
-    publishDir "${params.outdir}/${sra}/${srr}/binning",
+    publishDir { "${assemblerPublishDir(sra, srr, assembler)}/binning" },
       mode: 'copy',
       overwrite: true
 
     input:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path(assembly_fasta), path(assembly_bam), path(assembly_csi)
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler), path(assembly_fasta), path(assembly_bam), path(assembly_csi)
 
     output:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler),
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler),
           val("vamb"), path("vamb"), path("vamb.contig2bin.tsv"), path("vamb.note"),                         emit: result
 
     script:
@@ -838,17 +945,17 @@ process VAMB_GPU {
 
 
 process LORBIN {
-    tag "${sra}:${srr}"
+    tag "${sra}:${srr}:${assembler}"
     label 'binning'
-    publishDir "${params.outdir}/${sra}/${srr}/binning",
+    publishDir { "${assemblerPublishDir(sra, srr, assembler)}/binning" },
       mode: 'copy',
       overwrite: true
 
     input:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path(assembly_fasta), path(assembly_bam), path(assembly_csi)
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler), path(assembly_fasta), path(assembly_bam), path(assembly_csi)
 
     output:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler),
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler),
           val("lorbin"), path("lorbin"), path("lorbin.contig2bin.tsv"), path("lorbin.note"),                  emit: result
 
     script:
@@ -864,17 +971,17 @@ process LORBIN {
 
 
 process LORBIN_GPU {
-    tag "${sra}:${srr}"
+    tag "${sra}:${srr}:${assembler}"
     label 'gpu'
-    publishDir "${params.outdir}/${sra}/${srr}/binning",
+    publishDir { "${assemblerPublishDir(sra, srr, assembler)}/binning" },
       mode: 'copy',
       overwrite: true
 
     input:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path(assembly_fasta), path(assembly_bam), path(assembly_csi)
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler), path(assembly_fasta), path(assembly_bam), path(assembly_csi)
 
     output:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler),
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler),
           val("lorbin"), path("lorbin"), path("lorbin.contig2bin.tsv"), path("lorbin.note"),                  emit: result
 
     script:
@@ -891,18 +998,18 @@ process LORBIN_GPU {
 
 
 process SEMIBIN {
-    tag "${sra}:${srr}"
+    tag "${sra}:${srr}:${assembler}"
     label 'binning'
-    publishDir "${params.outdir}/${sra}/${srr}/binning",
+    publishDir { "${assemblerPublishDir(sra, srr, assembler)}/binning" },
       mode: 'copy',
       overwrite: true
 
     input:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path(assembly_fasta), path(assembly_bam), path(assembly_csi)
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler), path(assembly_fasta), path(assembly_bam), path(assembly_csi)
     path uniprot_db
 
     output:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler),
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler),
           val("semibin"), path("semibin"), path("semibin.contig2bin.tsv"), path("semibin.note"),             emit: result
 
     script:
@@ -911,7 +1018,7 @@ process SEMIBIN {
       --assembly "${assembly_fasta}" \\
       --bam "${assembly_bam}" \\
       --diamond-db "${uniprot_db}" \\
-      --read-type "${assembler}" \\
+      --read-type "${read_type}" \\
       --environment "${params.semibin_environment}" \\
       --cpus ${task.cpus} \\
       --attempt ${task.attempt} \\
@@ -921,17 +1028,17 @@ process SEMIBIN {
 
 
 process ROSELLA {
-    tag "${sra}:${srr}"
+    tag "${sra}:${srr}:${assembler}"
     label 'binning'
-    publishDir "${params.outdir}/${sra}/${srr}/binning",
+    publishDir { "${assemblerPublishDir(sra, srr, assembler)}/binning" },
       mode: 'copy',
       overwrite: true
 
     input:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path(assembly_fasta), path(assembly_bam), path(assembly_csi)
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler), path(assembly_fasta), path(assembly_bam), path(assembly_csi)
 
     output:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler),
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler),
           val("rosella"), path("rosella"), path("rosella.contig2bin.tsv"), path("rosella.note"),             emit: result
 
     script:
@@ -947,19 +1054,19 @@ process ROSELLA {
 
 
 process DASTOOL {
-    tag "${sra}:${srr}"
-    publishDir "${params.outdir}/${sra}/${srr}/binning",
+    tag "${sra}:${srr}:${assembler}"
+    publishDir { "${assemblerPublishDir(sra, srr, assembler)}/binning" },
       mode: 'copy',
       overwrite: true
 
     input:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler),
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler),
           path(assembly_fasta),
           path(contig2bin_maps)
 
     output:
-    tuple val(sra), val(srr), path("dastool"),                                                                emit: bins
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("dastool.note"), emit: note
+    tuple val(sra), val(srr), val(read_type), val(assembler), path("dastool"),                                               emit: bins
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler), path("dastool.note"), emit: note
 
     script:
     def mapArg = contig2bin_maps.collect { it.toString() }.join(',')
@@ -975,20 +1082,20 @@ process DASTOOL {
 
 
 process BINETTE {
-    tag "${sra}:${srr}"
-    publishDir "${params.outdir}/${sra}/${srr}/binning",
+    tag "${sra}:${srr}:${assembler}"
+    publishDir { "${assemblerPublishDir(sra, srr, assembler)}/binning" },
       mode: 'copy',
       overwrite: true
 
     input:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler),
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler),
           path(assembly_fasta),
           path(contig2bin_maps)
     path checkm2_db
 
     output:
-    tuple val(sra), val(srr), path("binette"),                                                                emit: bins
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("binette.note"), emit: note
+    tuple val(sra), val(srr), val(read_type), val(assembler), path("binette"),                                               emit: bins
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler), path("binette.note"), emit: note
 
     script:
     def mapArg = contig2bin_maps.collect { it.toString() }.join(',')
@@ -1005,13 +1112,13 @@ process BINETTE {
 
 
 process CREATE_EMPTY_SUMMARY {
-  tag "${sra}"
+  tag "${sra}:${srr}:${read_type}:${assembler}"
 
   input:
-  tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), val(note)
+  tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler), val(note)
 
   output:
-  tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("empty_summary.csv"), val(note), emit: skipped_rows
+  tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler), path("empty_summary.csv"), val(note), emit: skipped_rows
 
   script:
   """
@@ -1020,11 +1127,27 @@ process CREATE_EMPTY_SUMMARY {
 }
 
 
+process CREATE_ASSEMBLER_SELECTION_NOTE {
+  tag "${sra}:${srr}:${read_type}"
+
+  input:
+  tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler), val(note)
+
+  output:
+  tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler), path("FAIL.note"), emit: note
+
+  script:
+  """
+  printf '%s\n' "${note}" > FAIL.note
+  """
+}
+
+
 process APPEND_SUMMARY {
-    tag "${sra}:${srr}"
+    tag "${sra}:${srr}:${read_type}:${assembler}"
 
     input:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path(summary_csv), val(note)
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler), path(summary_csv), val(note)
     val outdir
 
     output:
@@ -1039,6 +1162,7 @@ process APPEND_SUMMARY {
       --platform "${platform}" \\
       --model "${model}" \\
       --strategy "${strategy}" \\
+      --read-type "${read_type}" \\
       --assembler "${assembler}" \\
       --summary-csv "${summary_csv}" \\
       --note "${note}"
@@ -1075,8 +1199,8 @@ workflow PRE_SCREENING {
                   def platform  = (row.instrument_platform ?: '').trim()
                   def model     = (row.instrument_model ?: '').trim()
                   def strategy  = (row.library_strategy ?: '').trim()
-                  def assembler = (row.assembler ?: '').trim()
-                  [sra, srr, platform, model, strategy, assembler]
+                  def read_type = (row.read_type ?: row.assembler ?: '').trim()
+                  [sra, srr, platform, model, strategy, read_type]
               }
               .filter { it[1] }  // ensure SRR not empty
               .distinct()
@@ -1090,22 +1214,22 @@ workflow PRE_SCREENING {
       // SANDPIPER prescreening
       sandpiper = SANDPIPER(srr_ch, validated_taxa, sandpiper_db_ch)
       // decision: NEGATIVE / RUN_SINGLEM / PASS
-      sandpiper_decision_ch = sandpiper.decision.map { sra, srr, platform, model, strategy, assembler, dec_path ->
+      sandpiper_decision_ch = sandpiper.decision.map { sra, srr, platform, model, strategy, read_type, dec_path ->
         def decision = file(dec_path).text.trim()
-        tuple(sra, srr, platform, model, strategy, assembler, decision)
+        tuple(sra, srr, platform, model, strategy, read_type, decision)
       }
 
       srr_prescreened = sandpiper_decision_ch
-        .filter { sra, srr, platform, model, strategy, assembler, decision ->
+        .filter { sra, srr, platform, model, strategy, read_type, decision ->
           decision == 'PASS' || decision == 'RUN_SINGLEM'
         }
 
       // Download SRR reads
       download_srr = DOWNLOAD_SRR(srr_prescreened)
 
-      srr_reads = download_srr.reads.map { sra, srr, platform, model, strategy, asm, sandpiper_dec, reads, asm_txt ->
-        def fixedAsm = file(asm_txt)?.text?.trim() ?: asm
-        tuple(sra, srr, platform, model, strategy, fixedAsm, sandpiper_dec, reads)
+      srr_reads = download_srr.reads.map { sra, srr, platform, model, strategy, detected_read_type, sandpiper_dec, reads, asm_txt ->
+        def fixedReadType = file(asm_txt)?.text?.trim() ?: detected_read_type
+        tuple(sra, srr, platform, model, strategy, fixedReadType, sandpiper_dec, reads)
       }
 
       // SINGLEM prescreening
@@ -1119,17 +1243,17 @@ workflow PRE_SCREENING {
 
     else {
       // If no screening, set all decisions to PASS
-      srr_prescreened = srr_ch.map { sra, srr, platform, model, strategy, assembler ->
-        tuple(sra, srr, platform, model, strategy, assembler, 'PASS')
+      srr_prescreened = srr_ch.map { sra, srr, platform, model, strategy, read_type ->
+        tuple(sra, srr, platform, model, strategy, read_type, 'PASS')
       }
 
       // Download SRR reads
       download_srr = DOWNLOAD_SRR(srr_prescreened)
 
-      // normalise assembler, then drop sandpiper decision
-      singlem_reads_ch = download_srr.reads.map { sra, srr, platform, model, strategy, asm, sandpiper_dec, reads, asm_txt ->
-        def fixedAsm = file(asm_txt)?.text?.trim() ?: asm
-        tuple(sra, srr, platform, model, strategy, fixedAsm, reads)
+      // Normalise read type, then drop sandpiper decision.
+      singlem_reads_ch = download_srr.reads.map { sra, srr, platform, model, strategy, detected_read_type, sandpiper_dec, reads, asm_txt ->
+        def fixedReadType = file(asm_txt)?.text?.trim() ?: detected_read_type
+        tuple(sra, srr, platform, model, strategy, fixedReadType, reads)
       }
 
       sandpiper_note_ch    = channel.empty()
@@ -1161,43 +1285,73 @@ workflow ASSEMBLY {
     def doScreening = params.taxa != null
 
     // Step 5: assemble reads
-    short_ch    = singlem_reads.filter { sra, srr, platform, model, strategy, assembler, reads -> assembler.equalsIgnoreCase('short') }
-    nanopore_ch = singlem_reads.filter { sra, srr, platform, model, strategy, assembler, reads -> assembler.equalsIgnoreCase('nanopore') }
-    pacbio_ch   = singlem_reads.filter { sra, srr, platform, model, strategy, assembler, reads -> assembler.equalsIgnoreCase('pacbio') }
-    hifi_ch     = singlem_reads.filter { sra, srr, platform, model, strategy, assembler, reads -> assembler.equalsIgnoreCase('hifi') }
+    selected_reads = singlem_reads.flatMap { sra, srr, platform, model, strategy, read_type, reads ->
+      assemblersForReadType(read_type).collect { assembler ->
+        tuple(sra, srr, platform, model, strategy, read_type, assembler, reads)
+      }
+    }
 
-    // spades_asm     = METASPADES(short_ch)
-    unicycler_asm  = UNICYCLER(short_ch)
+    assembler_selection_errors = singlem_reads.flatMap { sra, srr, platform, model, strategy, read_type, reads ->
+      if (assemblersForReadType(read_type)) {
+        return []
+      }
+      def note = "no compatible assembler selected for read_type '${read_type}'"
+      [tuple(sra, srr, platform, model, strategy, read_type, '', note)]
+    }
+
+    assembler_selection_note = CREATE_ASSEMBLER_SELECTION_NOTE(assembler_selection_errors)
+
+    metaspades_ch = selected_reads.filter { sra, srr, platform, model, strategy, read_type, assembler, reads ->
+      read_type.equalsIgnoreCase('short') && assembler == 'metaspades'
+    }
+    unicycler_ch = selected_reads.filter { sra, srr, platform, model, strategy, read_type, assembler, reads ->
+      read_type.equalsIgnoreCase('short') && assembler == 'unicycler'
+    }
+    nanopore_ch = selected_reads.filter { sra, srr, platform, model, strategy, read_type, assembler, reads ->
+      read_type.equalsIgnoreCase('nanopore') && assembler == 'metaflye'
+    }
+    pacbio_ch = selected_reads.filter { sra, srr, platform, model, strategy, read_type, assembler, reads ->
+      read_type.equalsIgnoreCase('pacbio') && assembler == 'metaflye'
+    }
+    hifi_flye_ch = selected_reads.filter { sra, srr, platform, model, strategy, read_type, assembler, reads ->
+      read_type.equalsIgnoreCase('hifi') && assembler == 'metaflye'
+    }
+    hifi_myloasm_ch = selected_reads.filter { sra, srr, platform, model, strategy, read_type, assembler, reads ->
+      read_type.equalsIgnoreCase('hifi') && assembler == 'myloasm'
+    }
+
+    spades_asm     = METASPADES(metaspades_ch)
+    unicycler_asm  = UNICYCLER(unicycler_ch)
     flyenano_asm   = METAFLYE_NANO(nanopore_ch)
     flyepacbio_asm = METAFLYE_PACBIO(pacbio_ch)
-    flyehifi_asm   = METAFLYE_HIFI(hifi_ch)
-    // myloasm_asm    = MYLOASM(hifi_ch)
+    flyehifi_asm   = METAFLYE_HIFI(hifi_flye_ch)
+    myloasm_asm    = MYLOASM(hifi_myloasm_ch)
 
     // Step 6: DIAMOND
     asm_fasta_ch = channel.empty()
-                        // .mix(spades_asm.assembly_fasta)
+                        .mix(spades_asm.assembly_fasta)
                         .mix(unicycler_asm.assembly_fasta)
                         .mix(flyenano_asm.assembly_fasta)
                         .mix(flyepacbio_asm.assembly_fasta)
                         .mix(flyehifi_asm.assembly_fasta)
-                        // .mix(myloasm_asm.assembly_fasta)
+                        .mix(myloasm_asm.assembly_fasta)
 
     diamond = DIAMOND(asm_fasta_ch, uniprot_db_ch)
 
     // BAMs for BlobTools and binning
     bam_src = channel.empty()
-                  // .mix(spades_asm.assembly_bam)
+                  .mix(spades_asm.assembly_bam)
                   .mix(unicycler_asm.assembly_bam)
                   .mix(flyenano_asm.assembly_bam)
                   .mix(flyepacbio_asm.assembly_bam)
                   .mix(flyehifi_asm.assembly_bam)
-                  // .mix(myloasm_asm.assembly_bam)
+                  .mix(myloasm_asm.assembly_bam)
 
     // Step 7: BlobTools
-    // Key every stream by (sra,srr)
-    fasta_by = asm_fasta_ch.map  { sra, srr, platform, model, strategy, assembler, fasta -> tuple([sra,srr], [platform,model,strategy,assembler,fasta]) }
-    blast_by = diamond.blast.map { sra, srr, blast -> tuple([sra,srr], blast) }
-    bam_by   = bam_src.map       { sra, srr, bam, csi -> tuple([sra,srr], [bam,csi]) }
+    // Key every stream by sample, read type, and assembler tool.
+    fasta_by = asm_fasta_ch.map  { sra, srr, platform, model, strategy, read_type, assembler, fasta -> tuple([sra, srr, read_type, assembler], [platform, model, strategy, fasta]) }
+    blast_by = diamond.blast.map { sra, srr, read_type, assembler, blast -> tuple([sra, srr, read_type, assembler], blast) }
+    bam_by   = bam_src.map       { sra, srr, read_type, assembler, bam, csi -> tuple([sra, srr, read_type, assembler], [bam, csi]) }
 
     // Join (fasta * diamond) then * bam
     fasta_blast     = fasta_by.join(blast_by)
@@ -1205,10 +1359,10 @@ workflow ASSEMBLY {
 
     // Unkey + call BlobTools
     blobtools_in = fasta_blast_bam.map { key, fasta, blast, pair ->
-      def (sra, srr) = key
-      def (platform, model, strategy, assembler, assembly) = fasta
+      def (sra, srr, read_type, assembler) = key
+      def (platform, model, strategy, assembly) = fasta
       def (bam, csi) = pair
-      tuple(sra, srr, platform, model, strategy, assembler, assembly, blast, bam, csi)
+      tuple(sra, srr, platform, model, strategy, read_type, assembler, assembly, blast, bam, csi)
     }
 
     blobtools = BLOBTOOLS(blobtools_in, taxdump_ch)
@@ -1229,26 +1383,27 @@ workflow ASSEMBLY {
       // synthesize an empty per-sample summary.csv using CREATE_EMPTY_SUMMARY.
 
       no_taxa_success_meta = blobtools.blobtable
-        .map { sra, srr, platform, model, strategy, assembler, assembly_fasta, blobtable_csv ->
+        .map { sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, blobtable_csv ->
           // note field is empty string for successful runs
-          tuple(sra, srr, platform, model, strategy, assembler, '')
+          tuple(sra, srr, platform, model, strategy, read_type, assembler, '')
         }
       no_taxa_summary = CREATE_EMPTY_SUMMARY(no_taxa_success_meta).skipped_rows
 
-      taxa_summary_ch = no_taxa_summary.map { sra, srr, platform, model, strategy, assembler, summary_csv, note ->
-        tuple(sra, srr, platform, model, strategy, assembler, summary_csv)
+      taxa_summary_ch = no_taxa_summary.map { sra, srr, platform, model, strategy, read_type, assembler, summary_csv, note ->
+        tuple(sra, srr, platform, model, strategy, read_type, assembler, summary_csv)
       }
 
       taxa_note_ch    = channel.empty()
     }
 
     assembly_notes_ch = channel.empty()
-                          // .mix(spades_asm.note)
+                          .mix(assembler_selection_note.note)
+                          .mix(spades_asm.note)
                           .mix(unicycler_asm.note)
                           .mix(flyenano_asm.note)
                           .mix(flyepacbio_asm.note)
                           .mix(flyehifi_asm.note)
-                          // .mix(myloasm_asm.note)
+                          .mix(myloasm_asm.note)
 
   emit:
     // For binning
@@ -1272,20 +1427,22 @@ workflow BINNING {
 
   main:
     // Build binning_input from blobtable + BAM
-    // blobtable_ch: (sra, srr, platform, model, strategy, assembler, assembly_fasta, blobtable)
-    // assembly_bam_ch: (sra, srr, bam, csi)
-    bam_by = assembly_bam_ch.map { sra, srr, bam, csi -> tuple([sra, srr], [bam, csi]) }
-    binning_base_by = blobtable_ch.map { sra, srr, platform, model, strategy, assembler, assembly_fasta, blobtable ->
-      tuple([sra, srr], [platform, model, strategy, assembler, assembly_fasta])
+    // blobtable_ch: (sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, blobtable)
+    // assembly_bam_ch: (sra, srr, read_type, assembler, bam, csi)
+    bam_by = assembly_bam_ch.map { sra, srr, read_type, assembler, bam, csi ->
+      tuple([sra, srr, read_type, assembler], [bam, csi])
+    }
+    binning_base_by = blobtable_ch.map { sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, blobtable ->
+      tuple([sra, srr, read_type, assembler], [platform, model, strategy, assembly_fasta])
     }
     binning_join = binning_base_by.join(bam_by)
 
-    // binning_input: (sra, srr, platform, model, strategy, assembler, assembly_fasta, bam, csi)
+    // binning_input: (sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, bam, csi)
     binning_input = binning_join.map { key, meta, bam_idx ->
-      def (sra, srr) = key
-      def (platform, model, strategy, assembler, assembly_fasta) = meta
+      def (sra, srr, read_type, assembler) = key
+      def (platform, model, strategy, assembly_fasta) = meta
       def (bam, csi) = bam_idx
-      tuple(sra, srr, platform, model, strategy, assembler, assembly_fasta, bam, csi)
+      tuple(sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, bam, csi)
     }
 
     def phase0Options = validatePhase0BinningOptions()
@@ -1301,62 +1458,62 @@ workflow BINNING {
     }
 
     planned_binning_input = binning_input
-      .map { sra, srr, platform, model, strategy, assembler, assembly_fasta, bam, csi ->
-        def sampleBinners = binnersForSample(phase0Options, sra, srr, assembler).join(',')
-        tuple(sra, srr, platform, model, strategy, assembler, assembly_fasta, bam, csi, sampleBinners)
+      .map { sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, bam, csi ->
+        def sampleBinners = binnersForSample(phase0Options, sra, srr, read_type).join(',')
+        tuple(sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, bam, csi, sampleBinners)
       }
 
     binner_plan_by_sample = planned_binning_input
-      .map { sra, srr, platform, model, strategy, assembler, assembly_fasta, bam, csi, sampleBinners ->
-        tuple([sra, srr], binnerCsvSize(sampleBinners))
+      .map { sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, bam, csi, sampleBinners ->
+        tuple([sra, srr, read_type, assembler], binnerCsvSize(sampleBinners))
       }
 
     metabat_input = planned_binning_input
-      .filter { sra, srr, platform, model, strategy, assembler, assembly_fasta, bam, csi, sampleBinners ->
+      .filter { sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, bam, csi, sampleBinners ->
         binnerCsvContains(sampleBinners, 'metabat')
       }
-      .map { sra, srr, platform, model, strategy, assembler, assembly_fasta, bam, csi, sampleBinners ->
-        tuple(sra, srr, platform, model, strategy, assembler, assembly_fasta, bam, csi)
+      .map { sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, bam, csi, sampleBinners ->
+        tuple(sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, bam, csi)
       }
 
     comebin_input = planned_binning_input
-      .filter { sra, srr, platform, model, strategy, assembler, assembly_fasta, bam, csi, sampleBinners ->
+      .filter { sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, bam, csi, sampleBinners ->
         binnerCsvContains(sampleBinners, 'comebin')
       }
-      .map { sra, srr, platform, model, strategy, assembler, assembly_fasta, bam, csi, sampleBinners ->
-        tuple(sra, srr, platform, model, strategy, assembler, assembly_fasta, bam, csi)
+      .map { sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, bam, csi, sampleBinners ->
+        tuple(sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, bam, csi)
       }
 
     vamb_input = planned_binning_input
-      .filter { sra, srr, platform, model, strategy, assembler, assembly_fasta, bam, csi, sampleBinners ->
+      .filter { sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, bam, csi, sampleBinners ->
         binnerCsvContains(sampleBinners, 'vamb')
       }
-      .map { sra, srr, platform, model, strategy, assembler, assembly_fasta, bam, csi, sampleBinners ->
-        tuple(sra, srr, platform, model, strategy, assembler, assembly_fasta, bam, csi)
+      .map { sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, bam, csi, sampleBinners ->
+        tuple(sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, bam, csi)
       }
 
     lorbin_input = planned_binning_input
-      .filter { sra, srr, platform, model, strategy, assembler, assembly_fasta, bam, csi, sampleBinners ->
+      .filter { sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, bam, csi, sampleBinners ->
         binnerCsvContains(sampleBinners, 'lorbin')
       }
-      .map { sra, srr, platform, model, strategy, assembler, assembly_fasta, bam, csi, sampleBinners ->
-        tuple(sra, srr, platform, model, strategy, assembler, assembly_fasta, bam, csi)
+      .map { sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, bam, csi, sampleBinners ->
+        tuple(sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, bam, csi)
       }
 
     semibin_input = planned_binning_input
-      .filter { sra, srr, platform, model, strategy, assembler, assembly_fasta, bam, csi, sampleBinners ->
+      .filter { sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, bam, csi, sampleBinners ->
         binnerCsvContains(sampleBinners, 'semibin')
       }
-      .map { sra, srr, platform, model, strategy, assembler, assembly_fasta, bam, csi, sampleBinners ->
-        tuple(sra, srr, platform, model, strategy, assembler, assembly_fasta, bam, csi)
+      .map { sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, bam, csi, sampleBinners ->
+        tuple(sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, bam, csi)
       }
 
     rosella_input = planned_binning_input
-      .filter { sra, srr, platform, model, strategy, assembler, assembly_fasta, bam, csi, sampleBinners ->
+      .filter { sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, bam, csi, sampleBinners ->
         binnerCsvContains(sampleBinners, 'rosella')
       }
-      .map { sra, srr, platform, model, strategy, assembler, assembly_fasta, bam, csi, sampleBinners ->
-        tuple(sra, srr, platform, model, strategy, assembler, assembly_fasta, bam, csi)
+      .map { sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, bam, csi, sampleBinners ->
+        tuple(sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, bam, csi)
       }
 
     metabat_results = channel.empty()
@@ -1408,13 +1565,13 @@ workflow BINNING {
       .mix(semibin_results)
       .mix(rosella_results)
 
-    dastool_base_by = binning_input.map { sra, srr, platform, model, strategy, assembler, assembly_fasta, bam, csi ->
-      tuple([sra, srr], [platform, model, strategy, assembler, assembly_fasta])
+    dastool_base_by = binning_input.map { sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, bam, csi ->
+      tuple([sra, srr, read_type, assembler], [platform, model, strategy, assembly_fasta])
     }
 
     binner_maps_by_sample = binner_results
-      .map { sra, srr, platform, model, strategy, assembler, tool, bin_dir, contig2bin, note_path ->
-        tuple([sra, srr], [tool, contig2bin])
+      .map { sra, srr, platform, model, strategy, read_type, assembler, tool, bin_dir, contig2bin, note_path ->
+        tuple([sra, srr, read_type, assembler], [tool, contig2bin])
       }
       .combine(binner_plan_by_sample, by: 0)
       .map { key, entry, expectedCount -> tuple(groupKey(key, expectedCount as int), entry) }
@@ -1424,11 +1581,11 @@ workflow BINNING {
     dastool_join = dastool_base_by.join(binner_maps_by_sample)
 
     dastool_in = dastool_join.map { key, meta, entries ->
-      def (sra, srr) = key
-      def (platform, model, strategy, assembler, assembly_fasta) = meta
+      def (sra, srr, read_type, assembler) = key
+      def (platform, model, strategy, assembly_fasta) = meta
       def contig2bin_maps = entries.collect { entry -> entry[1] }
       tuple(
-        sra, srr, platform, model, strategy, assembler, assembly_fasta,
+        sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta,
         contig2bin_maps
       )
     }
@@ -1436,21 +1593,21 @@ workflow BINNING {
 
     dastool_note_entries = channel.empty()
     if ('dastool' in selectedRefiners) {
-      dastool_note_entries = DASTOOL(dastool_in).note.map { sra, srr, platform, model, strategy, assembler, note_path ->
-        tuple(sra, srr, platform, model, strategy, assembler, 'dastool', note_path)
+      dastool_note_entries = DASTOOL(dastool_in).note.map { sra, srr, platform, model, strategy, read_type, assembler, note_path ->
+        tuple(sra, srr, platform, model, strategy, read_type, assembler, 'dastool', note_path)
       }
     }
 
     binette_note_entries = channel.empty()
     if ('binette' in selectedRefiners) {
       def checkm2_db_ch = Channel.value(file(params.checkm2_db, checkIfExists: true))
-      binette_note_entries = BINETTE(dastool_in, checkm2_db_ch).note.map { sra, srr, platform, model, strategy, assembler, note_path ->
-        tuple(sra, srr, platform, model, strategy, assembler, 'binette', note_path)
+      binette_note_entries = BINETTE(dastool_in, checkm2_db_ch).note.map { sra, srr, platform, model, strategy, read_type, assembler, note_path ->
+        tuple(sra, srr, platform, model, strategy, read_type, assembler, 'binette', note_path)
       }
     }
 
-    binner_note_entries = binner_results.map { sra, srr, platform, model, strategy, assembler, tool, bin_dir, contig2bin, note_path ->
-      tuple(sra, srr, platform, model, strategy, assembler, tool, note_path)
+    binner_note_entries = binner_results.map { sra, srr, platform, model, strategy, read_type, assembler, tool, bin_dir, contig2bin, note_path ->
+      tuple(sra, srr, platform, model, strategy, read_type, assembler, tool, note_path)
     }
 
     binning_note_entries = channel.empty()
@@ -1507,16 +1664,16 @@ workflow SUMMARY {
         def model     = (row.instrument_model    ?: '').trim()
         def strategy  = (row.library_strategy    ?: '').trim()
         def note      = "did not match the criteria: ${(row.skip_reason ?: '').trim()}"
-        // assembler is empty for skipped rows
-        tuple(sra, srr, platform, model, strategy, '', note)
+        // Read type and assembler are empty for skipped rows.
+        tuple(sra, srr, platform, model, strategy, '', '', note)
       }
       .filter { it[1] } // keep only rows with srr
 
 
     // 2) Base "successful" samples: anything with a taxa_summary (summary.csv)
     //    Note starts empty here; will add taxa/binning notes later.
-    succeeded_sra = taxa_summary.map { sra, srr, platform, model, strategy, assembler, summary_csv ->
-      tuple(sra, srr, platform, model, strategy, assembler, summary_csv, '')
+    succeeded_sra = taxa_summary.map { sra, srr, platform, model, strategy, read_type, assembler, summary_csv ->
+      tuple(sra, srr, platform, model, strategy, read_type, assembler, summary_csv, '')
     }
 
 
@@ -1530,16 +1687,16 @@ workflow SUMMARY {
       // - note_path from taxa_note
       def N_TAXA_ITEMS = 2
 
-      succ_keyed = succeeded_sra.map { sra, srr, platform, model, strategy, assembler, summary_csv, base_note ->
+      succ_keyed = succeeded_sra.map { sra, srr, platform, model, strategy, read_type, assembler, summary_csv, base_note ->
         def keyMap = [sra: sra, srr: srr, platform: platform,
-                      model: model, strategy: strategy, assembler: assembler]
+                      model: model, strategy: strategy, read_type: read_type, assembler: assembler]
         def key = groupKey(keyMap, N_TAXA_ITEMS)
         tuple(key, [summary_csv, base_note])
       }
 
-      taxa_keyed = taxa_note.map { sra, srr, platform, model, strategy, assembler, note_path ->
+      taxa_keyed = taxa_note.map { sra, srr, platform, model, strategy, read_type, assembler, note_path ->
         def keyMap = [sra: sra, srr: srr, platform: platform,
-                      model: model, strategy: strategy, assembler: assembler]
+                      model: model, strategy: strategy, read_type: read_type, assembler: assembler]
         def key = groupKey(keyMap, N_TAXA_ITEMS)
         tuple(key, note_path)
       }
@@ -1549,12 +1706,12 @@ workflow SUMMARY {
         .mix(taxa_keyed)
         .groupTuple()
 
-      // Unpack to: (sra, srr, platform, model, strategy, assembler, summary_csv, base_note, taxa_text)
+      // Unpack to: (sra, srr, platform, model, strategy, read_type, assembler, summary_csv, base_note, taxa_text)
       succ_and_taxa_annot = succ_and_taxa
         .map { key, values ->
           def m = (Map) key.target
-          def (sra, srr, platform, model, strategy, assembler) =
-            [m.sra, m.srr, m.platform, m.model, m.strategy, m.assembler]
+          def (sra, srr, platform, model, strategy, read_type, assembler) =
+            [m.sra, m.srr, m.platform, m.model, m.strategy, m.read_type, m.assembler]
 
           // [summary_csv, base_note]
           def summaryEntry = values.find { it instanceof List && it.size() == 2 }
@@ -1572,14 +1729,14 @@ workflow SUMMARY {
             taxa_text = file(taxa_note_file as String).text.trim()
           }
 
-          tuple(sra, srr, platform, model, strategy, assembler, summary_csv, base_note, taxa_text)
+          tuple(sra, srr, platform, model, strategy, read_type, assembler, summary_csv, base_note, taxa_text)
         }
         .filter { it != null }
 
       // Split EXTRACT_TAXA outcomes into "success" vs "fatal"
       def softPattern = 'skipping extraction because taxa list contains only GTDB-style taxa'
 
-      def taxa_branches = succ_and_taxa_annot.branch { sra, srr, platform, model, strategy, assembler, summary_csv, base_note, taxa_text ->
+      def taxa_branches = succ_and_taxa_annot.branch { sra, srr, platform, model, strategy, read_type, assembler, summary_csv, base_note, taxa_text ->
         // Empty note or GTDB-only “soft skip” => success
         success: (!taxa_text || taxa_text.contains(softPattern))
         // Anything else => fatal
@@ -1591,22 +1748,22 @@ workflow SUMMARY {
 
       // Non-fatal EXTRACT_TAXA results remain as "successful" samples.
       // Append taxa_text (if any) to the note field.
-      succeeded_with_taxa = taxa_success.map { sra, srr, platform, model, strategy, assembler, summary_csv, base_note, taxa_text ->
+      succeeded_with_taxa = taxa_success.map { sra, srr, platform, model, strategy, read_type, assembler, summary_csv, base_note, taxa_text ->
         def final_note = base_note
         if( taxa_text ) {
           final_note = final_note ? "${final_note}; ${taxa_text}" : taxa_text
         }
-        tuple(sra, srr, platform, model, strategy, assembler, summary_csv, final_note)
+        tuple(sra, srr, platform, model, strategy, read_type, assembler, summary_csv, final_note)
       }
 
       // Fatal EXTRACT_TAXA outcomes become "errors" that will go through
       // CREATE_EMPTY_SUMMARY, similar to other fatal notes.
-      taxa_fatal_errors = taxa_fatal.map { sra, srr, platform, model, strategy, assembler, summary_csv, base_note, taxa_text ->
+      taxa_fatal_errors = taxa_fatal.map { sra, srr, platform, model, strategy, read_type, assembler, summary_csv, base_note, taxa_text ->
         def note_text = base_note
         if( taxa_text ) {
           note_text = note_text ? "${note_text}; ${taxa_text}" : taxa_text
         }
-        tuple(sra, srr, platform, model, strategy, assembler, note_text)
+        tuple(sra, srr, platform, model, strategy, read_type, assembler, note_text)
       }
     }
 
@@ -1616,18 +1773,18 @@ workflow SUMMARY {
 
     if( doBinning ) {
       binning_mix = binning_note_entries
-        .map { sra, srr, platform, model, strategy, assembler, tool, note_path ->
+        .map { sra, srr, platform, model, strategy, read_type, assembler, tool, note_path ->
           def key = [sra: sra, srr: srr, platform: platform, model: model,
-                     strategy: strategy, assembler: assembler]
+                     strategy: strategy, read_type: read_type, assembler: assembler]
           tuple(key, [tool, note_path])
         }
         .groupTuple()
 
-      // binning_agg: (sra, srr, platform, model, strategy, assembler, "tool1: msg; tool2: msg; ...")
+      // binning_agg: (sra, srr, platform, model, strategy, read_type, assembler, "tool1: msg; tool2: msg; ...")
       binning_agg = binning_mix.map { key, items ->
         def m = (Map) key.target
-        def (sra, srr, platform, model, strategy, assembler) =
-          [m.sra, m.srr, m.platform, m.model, m.strategy, m.assembler]
+        def (sra, srr, platform, model, strategy, read_type, assembler) =
+          [m.sra, m.srr, m.platform, m.model, m.strategy, m.read_type, m.assembler]
 
         def note_texts = items.collect { entry ->
           def (tool, note_path) = entry
@@ -1636,7 +1793,7 @@ workflow SUMMARY {
         }.findAll { it }
 
         def joined = note_texts ? note_texts.join('; ') : ''
-        tuple(sra, srr, platform, model, strategy, assembler, joined)
+        tuple(sra, srr, platform, model, strategy, read_type, assembler, joined)
       }
     }
 
@@ -1647,16 +1804,16 @@ workflow SUMMARY {
     if( doBinning ) {
       def N_SUCCESS_ITEMS = 2
 
-      succ_keyed2 = succeeded_with_taxa.map { sra, srr, platform, model, strategy, assembler, summary_csv, base_note ->
+      succ_keyed2 = succeeded_with_taxa.map { sra, srr, platform, model, strategy, read_type, assembler, summary_csv, base_note ->
         def keyMap = [sra: sra, srr: srr, platform: platform,
-                      model: model, strategy: strategy, assembler: assembler]
+                      model: model, strategy: strategy, read_type: read_type, assembler: assembler]
         def key = groupKey(keyMap, N_SUCCESS_ITEMS)
         tuple(key, [summary_csv, base_note])
       }
 
-      binning_keyed = binning_agg.map { sra, srr, platform, model, strategy, assembler, binning_note ->
+      binning_keyed = binning_agg.map { sra, srr, platform, model, strategy, read_type, assembler, binning_note ->
         def keyMap = [sra: sra, srr: srr, platform: platform,
-                      model: model, strategy: strategy, assembler: assembler]
+                      model: model, strategy: strategy, read_type: read_type, assembler: assembler]
         def key = groupKey(keyMap, N_SUCCESS_ITEMS)
         tuple(key, binning_note)
       }
@@ -1669,8 +1826,8 @@ workflow SUMMARY {
       final_success = succ_and_bin
         .map { key, values ->
           def m = (Map) key.target
-          def (sra, srr, platform, model, strategy, assembler) =
-            [m.sra, m.srr, m.platform, m.model, m.strategy, m.assembler]
+          def (sra, srr, platform, model, strategy, read_type, assembler) =
+            [m.sra, m.srr, m.platform, m.model, m.strategy, m.read_type, m.assembler]
 
           def summaryEntry = values.find { it instanceof List && it.size() == 2 }
           if( !summaryEntry ) {
@@ -1691,7 +1848,7 @@ workflow SUMMARY {
             final_note = final_note ? "${final_note}; ${binning_note_text}" : binning_note_text
           }
 
-          tuple(sra, srr, platform, model, strategy, assembler, summary_csv, final_note)
+          tuple(sra, srr, platform, model, strategy, read_type, assembler, summary_csv, final_note)
         }
         .filter { it != null }
     }
@@ -1707,16 +1864,16 @@ workflow SUMMARY {
       .mix(assembly_notes)
       .mix(diamond_note)
       .mix(blobtools_note)
-      .map { sra, srr, platform, model, strategy, assembler, note_path ->
+      .map { sra, srr, platform, model, strategy, read_type, assembler, note_path ->
         def note = file(note_path).text.trim()
-        tuple(sra, srr, platform, model, strategy, assembler, note)
+        tuple(sra, srr, platform, model, strategy, read_type, assembler, note)
       }
       // Fatal EXTRACT_TAXA errors (inc. "run failed") are added here
       .mix(taxa_fatal_errors)
       // Plus skipped SRR rows
       .mix(skipped_srr)
 
-    // failed_sra: (sra, srr, platform, model, strategy, assembler, empty_summary.csv, note)
+    // failed_sra: (sra, srr, platform, model, strategy, read_type, assembler, empty_summary.csv, note)
     failed_sra = CREATE_EMPTY_SUMMARY(errors)
 
 
@@ -1753,6 +1910,9 @@ workflow {
     def doScreening = params.taxa != null
     def noAssembly = params.noassembly?.toString()?.toBoolean() ?: false
     def doAssembly = !noAssembly
+    if (doAssembly) {
+      selectedAssemblerTokens()
+    }
 
     // If noassembly, binning makes no sense
     def doBinning  = doAssembly && (params.binning == true)
@@ -1860,15 +2020,14 @@ workflow {
                           def platform  = "UNKNOWN"
                           def model     = read_type
                           def strategy  = "UNKNOWN"
-                          def assembler = read_type
 
-                          tuple(sra, srr, platform, model, strategy, assembler, read_files)
+                          tuple(sra, srr, platform, model, strategy, read_type, read_files)
                         }
                         .filter { it != null }
 
       if (doScreening) {
-        fastq_for_singlem_ch = fastq_ch.map { sra, srr, platform, model, strategy, assembler, reads ->
-          tuple(sra, srr, platform, model, strategy, assembler, "RUN_SINGLEM", reads)
+        fastq_for_singlem_ch = fastq_ch.map { sra, srr, platform, model, strategy, read_type, reads ->
+          tuple(sra, srr, platform, model, strategy, read_type, "RUN_SINGLEM", reads)
         }
 
         singlem_fastq = SINGLEM(fastq_for_singlem_ch, validated_taxa_ch, singlem_db_ch)
@@ -1903,16 +2062,16 @@ workflow {
 
     // Prepare empty summary for succeeded samples
     def prescreen_success_meta = singlem_reads_all
-      .map { sra, srr, platform, model, strategy, assembler, reads ->
-        tuple(sra, srr, platform, model, strategy, assembler, '')
+      .map { sra, srr, platform, model, strategy, read_type, reads ->
+        tuple(sra, srr, platform, model, strategy, read_type, '', '')
       }
       .distinct()
     def prescreen_empty = CREATE_EMPTY_SUMMARY(prescreen_success_meta).skipped_rows
 
     // Convert to the shape expected by SUMMARY's taxa_summary input:
-    // (sra, srr, platform, model, strategy, assembler, summary_csv)
-    taxa_summary_ch = prescreen_empty.map { sra, srr, platform, model, strategy, assembler, summary_csv, note ->
-      tuple(sra, srr, platform, model, strategy, assembler, summary_csv)
+    // (sra, srr, platform, model, strategy, read_type, assembler, summary_csv)
+    taxa_summary_ch = prescreen_empty.map { sra, srr, platform, model, strategy, read_type, assembler, summary_csv, note ->
+      tuple(sra, srr, platform, model, strategy, read_type, assembler, summary_csv)
     }
   }
   else {

@@ -88,7 +88,7 @@ write_resolved_metadata() {
     fi
 
     if [[ ! -s resolved.tsv ]]; then
-      fail "Metadata: failed to resolve platform and assembler for sample '${sample}' run '${srr}'"
+      fail "Metadata: failed to resolve platform and read type for sample '${sample}' run '${srr}'"
     fi
 
     return 0

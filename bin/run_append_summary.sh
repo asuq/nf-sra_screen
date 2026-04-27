@@ -7,6 +7,7 @@
 #       --platform PLATFORM \
 #       --model MODEL \
 #       --strategy STRATEGY \
+#       --read-type READ_TYPE \
 #       --assembler ASSEMBLER \
 #       --summary-csv summary.csv \
 #       --note NOTE
@@ -19,6 +20,7 @@ srr=""
 platform=""
 model=""
 strategy=""
+read_type=""
 assembler=""
 summary_csv=""
 note=""
@@ -31,6 +33,7 @@ while [[ $# -gt 0 ]]; do
     --platform)    platform="$2"; shift 2 ;;
     --model)       model="$2"; shift 2 ;;
     --strategy)    strategy="$2"; shift 2 ;;
+    --read-type)   read_type="$2"; shift 2 ;;
     --assembler)   assembler="$2"; shift 2 ;;
     --summary-csv) summary_csv="$2"; shift 2 ;;
     --note)        note="$2"; shift 2 ;;
@@ -55,7 +58,7 @@ COUNTS="$(
 )"
 
 # note left blank for successful path
-LINE="${sra}\t${srr}\t${platform}\t${model}\t${strategy}\t${assembler}\t${COUNTS}\t${note}"
+LINE="${sra}\t${srr}\t${platform}\t${model}\t${strategy}\t${read_type}\t${assembler}\t${COUNTS}\t${note}"
 
 lock_summary() {
   while ! mkdir "${LOCK_DIR}" 2>/dev/null; do
@@ -72,7 +75,7 @@ trap unlock_summary EXIT
 lock_summary
 
 if [[ ! -s "${OUT_TSV}" ]]; then
-  printf 'sra\tsrr\tplatform\tmodel\tstrategy\tassembler\tcounts\tnote\n' > "${OUT_TSV}"
+  printf 'sra\tsrr\tplatform\tmodel\tstrategy\tread_type\tassembler\tcounts\tnote\n' > "${OUT_TSV}"
 fi
 printf '%b\n' "${LINE}" >> "${OUT_TSV}"
 

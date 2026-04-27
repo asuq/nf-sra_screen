@@ -38,6 +38,8 @@ def helpMessage() {
     reads           Comma-separated FASTQ paths
     srr             Optional SRR accession to download raw reads
     assembly_fasta  Path to assembly FASTA
+
+  Summary rows use read_type for the read class and assembler=provided.
   """.stripIndent()
 }
 
@@ -286,7 +288,8 @@ def normaliseBinningRow(row) {
     platform: 'UNKNOWN',
     model: 'UNKNOWN',
     strategy: 'UNKNOWN',
-    assembler: readTypeRaw,
+    read_type: readTypeRaw,
+    assembler: 'provided',
     assembly_fasta: assemblyFasta,
     reads: readFiles
   ]
@@ -307,12 +310,12 @@ def parseResolvedMetadata(sra, srr, resolvedTsv) {
     error "Invalid resolved metadata for sample '${sra}' run '${srr}'"
   }
 
-  def (platform, model, strategy, assembler) = fields
-  if (!platform || !model || !strategy || !assembler) {
+  def (platform, model, strategy, readType) = fields
+  if (!platform || !model || !strategy || !readType) {
     error "Incomplete resolved metadata for sample '${sra}' run '${srr}'"
   }
 
-  tuple(sra, srr, platform, model, strategy, assembler)
+  tuple(sra, srr, platform, model, strategy, readType)
 }
 
 
@@ -324,7 +327,7 @@ process RESOLVE_SRR_METADATA {
 
     output:
     tuple val(sra), val(srr), path("resolved.tsv"), path(assembly_fasta), optional: true, emit: resolved
-    tuple val(sra), val(srr), val('UNKNOWN'), val('UNKNOWN'), val('UNKNOWN'), val('UNKNOWN'), path("FAIL.note"), optional: true, emit: note
+    tuple val(sra), val(srr), val('UNKNOWN'), val('UNKNOWN'), val('UNKNOWN'), val('UNKNOWN'), val('provided'), path("FAIL.note"), optional: true, emit: note
 
     script:
     def resolveScript = file("${workflow.projectDir}/bin/run_resolve_srr_metadata.sh").toAbsolutePath()
@@ -353,18 +356,18 @@ process DOWNLOAD_SRR {
       }
 
     input:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path(assembly_fasta)
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler), path(assembly_fasta)
 
     output:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path(assembly_fasta), path("*.f*q*"), path("assembler.txt"), optional: true, emit: reads
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("FAIL.note"), optional: true, emit: note
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler), path(assembly_fasta), path("*.f*q*"), path("assembler.txt"), optional: true, emit: reads
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler), path("FAIL.note"), optional: true, emit: note
 
     script:
     """
     run_download_srr.sh \\
       --srr "${srr}" \\
       --platform "${platform}" \\
-      --assembler "${assembler}" \\
+      --read-type "${read_type}" \\
       --cpus ${task.cpus} \\
       --attempt ${task.attempt} \\
       --max-retries ${params.max_retries}
@@ -373,7 +376,7 @@ process DOWNLOAD_SRR {
     stub:
     """
     : > "${srr}_1.fastq.gz"
-    printf '%s\n' "${assembler}" > assembler.txt
+    printf '%s\n' "${read_type}" > assembler.txt
     """
 }
 
@@ -383,11 +386,11 @@ process MAP_SHORT {
     label 'binning'
 
     input:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path(assembly_fasta), path(reads)
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler), path(assembly_fasta), path(reads)
 
     output:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("assembly.bam"), path("assembly.bam.csi"), optional: true, emit: mapped
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("FAIL.note"), optional: true, emit: note
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler), path("assembly.bam"), path("assembly.bam.csi"), optional: true, emit: mapped
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler), path("FAIL.note"), optional: true, emit: note
 
     script:
     def mapScript = file("${workflow.projectDir}/bin/run_map_to_assembly.sh").toAbsolutePath()
@@ -414,11 +417,11 @@ process MAP_NANO {
     label 'binning'
 
     input:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path(assembly_fasta), path(reads)
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler), path(assembly_fasta), path(reads)
 
     output:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("assembly.bam"), path("assembly.bam.csi"), optional: true, emit: mapped
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("FAIL.note"), optional: true, emit: note
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler), path("assembly.bam"), path("assembly.bam.csi"), optional: true, emit: mapped
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler), path("FAIL.note"), optional: true, emit: note
 
     script:
     def mapScript = file("${workflow.projectDir}/bin/run_map_to_assembly.sh").toAbsolutePath()
@@ -445,11 +448,11 @@ process MAP_PACBIO {
     label 'binning'
 
     input:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path(assembly_fasta), path(reads)
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler), path(assembly_fasta), path(reads)
 
     output:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("assembly.bam"), path("assembly.bam.csi"), optional: true, emit: mapped
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("FAIL.note"), optional: true, emit: note
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler), path("assembly.bam"), path("assembly.bam.csi"), optional: true, emit: mapped
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler), path("FAIL.note"), optional: true, emit: note
 
     script:
     def mapScript = file("${workflow.projectDir}/bin/run_map_to_assembly.sh").toAbsolutePath()
@@ -476,11 +479,11 @@ process MAP_HIFI {
     label 'binning'
 
     input:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path(assembly_fasta), path(reads)
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler), path(assembly_fasta), path(reads)
 
     output:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("assembly.bam"), path("assembly.bam.csi"), optional: true, emit: mapped
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("FAIL.note"), optional: true, emit: note
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler), path("assembly.bam"), path("assembly.bam.csi"), optional: true, emit: mapped
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler), path("FAIL.note"), optional: true, emit: note
 
     script:
     def mapScript = file("${workflow.projectDir}/bin/run_map_to_assembly.sh").toAbsolutePath()
@@ -510,10 +513,10 @@ process METABAT {
       overwrite: true
 
     input:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path(assembly_fasta), path(assembly_bam), path(assembly_csi)
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler), path(assembly_fasta), path(assembly_bam), path(assembly_csi)
 
     output:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler),
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler),
           val("metabat"), path("metabat"), path("metabat.contig2bin.tsv"), path("metabat.note"),               emit: result
 
     script:
@@ -544,10 +547,10 @@ process COMEBIN {
       overwrite: true
 
     input:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path(assembly_fasta), path(assembly_bam), path(assembly_csi)
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler), path(assembly_fasta), path(assembly_bam), path(assembly_csi)
 
     output:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler),
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler),
           val("comebin"), path("comebin"), path("comebin.contig2bin.tsv"), path("comebin.note"),             emit: result
 
     script:
@@ -578,10 +581,10 @@ process COMEBIN_GPU {
       overwrite: true
 
     input:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path(assembly_fasta), path(assembly_bam), path(assembly_csi)
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler), path(assembly_fasta), path(assembly_bam), path(assembly_csi)
 
     output:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler),
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler),
           val("comebin"), path("comebin"), path("comebin.contig2bin.tsv"), path("comebin.note"),             emit: result
 
     script:
@@ -613,10 +616,10 @@ process VAMB {
       overwrite: true
 
     input:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path(assembly_fasta), path(assembly_bam), path(assembly_csi)
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler), path(assembly_fasta), path(assembly_bam), path(assembly_csi)
 
     output:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler),
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler),
           val("vamb"), path("vamb"), path("vamb.contig2bin.tsv"), path("vamb.note"),                         emit: result
 
     script:
@@ -647,10 +650,10 @@ process VAMB_GPU {
       overwrite: true
 
     input:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path(assembly_fasta), path(assembly_bam), path(assembly_csi)
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler), path(assembly_fasta), path(assembly_bam), path(assembly_csi)
 
     output:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler),
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler),
           val("vamb"), path("vamb"), path("vamb.contig2bin.tsv"), path("vamb.note"),                         emit: result
 
     script:
@@ -683,10 +686,10 @@ process LORBIN {
       overwrite: true
 
     input:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path(assembly_fasta), path(assembly_bam), path(assembly_csi)
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler), path(assembly_fasta), path(assembly_bam), path(assembly_csi)
 
     output:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler),
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler),
           val("lorbin"), path("lorbin"), path("lorbin.contig2bin.tsv"), path("lorbin.note"),                  emit: result
 
     script:
@@ -717,10 +720,10 @@ process LORBIN_GPU {
       overwrite: true
 
     input:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path(assembly_fasta), path(assembly_bam), path(assembly_csi)
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler), path(assembly_fasta), path(assembly_bam), path(assembly_csi)
 
     output:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler),
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler),
           val("lorbin"), path("lorbin"), path("lorbin.contig2bin.tsv"), path("lorbin.note"),                  emit: result
 
     script:
@@ -752,11 +755,11 @@ process SEMIBIN {
       overwrite: true
 
     input:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path(assembly_fasta), path(assembly_bam), path(assembly_csi)
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler), path(assembly_fasta), path(assembly_bam), path(assembly_csi)
     path uniprot_db
 
     output:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler),
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler),
           val("semibin"), path("semibin"), path("semibin.contig2bin.tsv"), path("semibin.note"),               emit: result
 
     script:
@@ -766,7 +769,7 @@ process SEMIBIN {
       --assembly "${assembly_fasta}" \\
       --bam "${assembly_bam}" \\
       --diamond-db "${uniprot_db}" \\
-      --read-type "${assembler}" \\
+      --read-type "${read_type}" \\
       --environment "${params.semibin_environment}" \\
       --cpus ${task.cpus} \\
       --attempt ${task.attempt} \\
@@ -791,10 +794,10 @@ process ROSELLA {
       overwrite: true
 
     input:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path(assembly_fasta), path(assembly_bam), path(assembly_csi)
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler), path(assembly_fasta), path(assembly_bam), path(assembly_csi)
 
     output:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler),
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler),
           val("rosella"), path("rosella"), path("rosella.contig2bin.tsv"), path("rosella.note"),               emit: result
 
     script:
@@ -824,13 +827,13 @@ process DASTOOL {
       overwrite: true
 
     input:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler),
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler),
           path(assembly_fasta),
           path(contig2bin_maps)
 
     output:
-    tuple val(sra), val(srr), path("dastool"),                                                                  emit: bins
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("dastool.note"), emit: note
+    tuple val(sra), val(srr), val(read_type), val(assembler), path("dastool"),                                                 emit: bins
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler), path("dastool.note"), emit: note
 
     script:
     def mapArg = contig2bin_maps.collect { it.toString() }.join(',')
@@ -859,14 +862,14 @@ process BINETTE {
       overwrite: true
 
     input:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler),
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler),
           path(assembly_fasta),
           path(contig2bin_maps)
     path checkm2_db
 
     output:
-    tuple val(sra), val(srr), path("binette"),                                                                  emit: bins
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("binette.note"), emit: note
+    tuple val(sra), val(srr), val(read_type), val(assembler), path("binette"),                                                 emit: bins
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler), path("binette.note"), emit: note
 
     script:
     def mapArg = contig2bin_maps.collect { it.toString() }.join(',')
@@ -894,10 +897,10 @@ process CREATE_EMPTY_SUMMARY {
     tag "${sra}:${srr}"
 
     input:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), val(note)
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler), val(note)
 
     output:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("empty_summary.csv"), val(note), emit: skipped_rows
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler), path("empty_summary.csv"), val(note), emit: skipped_rows
 
     script:
     """
@@ -910,10 +913,10 @@ process CREATE_EMPTY_FAILURE_SUMMARY {
     tag "${sra}:${srr}"
 
     input:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), val(note)
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler), val(note)
 
     output:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("empty_summary.csv"), val(note), emit: skipped_rows
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler), path("empty_summary.csv"), val(note), emit: skipped_rows
 
     script:
     """
@@ -926,7 +929,7 @@ process APPEND_SUMMARY {
     tag "${sra}:${srr}"
 
     input:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path(summary_csv), val(note)
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler), path(summary_csv), val(note)
     val outdir
 
     output:
@@ -942,6 +945,7 @@ process APPEND_SUMMARY {
       --platform "${platform}" \\
       --model "${model}" \\
       --strategy "${strategy}" \\
+      --read-type "${read_type}" \\
       --assembler "${assembler}" \\
       --summary-csv "${summary_csv}" \\
       --note "${note}"
@@ -987,6 +991,7 @@ workflow {
           row.platform,
           row.model,
           row.strategy,
+          row.read_type,
           row.assembler,
           row.assembly_fasta,
           row.reads
@@ -1009,14 +1014,15 @@ workflow {
         resolved[3],
         resolved[4],
         resolved[5],
+        'provided',
         assembly_fasta
       )
     }
 
     def downloaded_srr = DOWNLOAD_SRR(resolved_srr_rows)
-    def downloaded_rows = downloaded_srr.reads.map { sra, srr, platform, model, strategy, assembler, assembly_fasta, reads, asm_txt ->
-      def fixedAsm = file(asm_txt).text.trim() ?: assembler
-      tuple(sra, srr, platform, model, strategy, fixedAsm, assembly_fasta, reads)
+    def downloaded_rows = downloaded_srr.reads.map { sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, reads, asm_txt ->
+      def fixedReadType = file(asm_txt).text.trim() ?: read_type
+      tuple(sra, srr, platform, model, strategy, fixedReadType, assembler, assembly_fasta, reads)
     }
 
     def mapping_rows = channel.empty()
@@ -1024,20 +1030,20 @@ workflow {
       .mix(downloaded_rows)
 
     def short_ch = mapping_rows
-      .filter { _sra, _srr, _platform, _model, _strategy, assembler, _assembly_fasta, _reads ->
-        assembler.equalsIgnoreCase('short')
+      .filter { _sra, _srr, _platform, _model, _strategy, read_type, _assembler, _assembly_fasta, _reads ->
+        read_type.equalsIgnoreCase('short')
       }
     def nano_ch = mapping_rows
-      .filter { _sra, _srr, _platform, _model, _strategy, assembler, _assembly_fasta, _reads ->
-        assembler.equalsIgnoreCase('nanopore')
+      .filter { _sra, _srr, _platform, _model, _strategy, read_type, _assembler, _assembly_fasta, _reads ->
+        read_type.equalsIgnoreCase('nanopore')
       }
     def pacbio_ch = mapping_rows
-      .filter { _sra, _srr, _platform, _model, _strategy, assembler, _assembly_fasta, _reads ->
-        assembler.equalsIgnoreCase('pacbio')
+      .filter { _sra, _srr, _platform, _model, _strategy, read_type, _assembler, _assembly_fasta, _reads ->
+        read_type.equalsIgnoreCase('pacbio')
       }
     def hifi_ch = mapping_rows
-      .filter { _sra, _srr, _platform, _model, _strategy, assembler, _assembly_fasta, _reads ->
-        assembler.equalsIgnoreCase('hifi')
+      .filter { _sra, _srr, _platform, _model, _strategy, read_type, _assembler, _assembly_fasta, _reads ->
+        read_type.equalsIgnoreCase('hifi')
       }
 
     def short_mapping = MAP_SHORT(short_ch)
@@ -1051,21 +1057,21 @@ workflow {
       .mix(pacbio_mapping.mapped)
       .mix(hifi_mapping.mapped)
 
-    def assembly_by_sample = mapping_rows.map { sra, srr, platform, model, strategy, assembler, assembly_fasta, _reads ->
-      tuple([sra, srr], [platform, model, strategy, assembler, assembly_fasta])
+    def assembly_by_sample = mapping_rows.map { sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, _reads ->
+      tuple([sra, srr, read_type, assembler], [platform, model, strategy, assembly_fasta])
     }
 
-    def mapped_bams_by_sample = mapped_bams.map { sra, srr, _platform, _model, _strategy, _assembler, assembly_bam, assembly_csi ->
-      tuple([sra, srr], [assembly_bam, assembly_csi])
+    def mapped_bams_by_sample = mapped_bams.map { sra, srr, _platform, _model, _strategy, read_type, assembler, assembly_bam, assembly_csi ->
+      tuple([sra, srr, read_type, assembler], [assembly_bam, assembly_csi])
     }
 
     def mapped_all = assembly_by_sample
       .join(mapped_bams_by_sample)
       .map { key, meta, bam_idx ->
-        def (sra, srr) = key
-        def (platform, model, strategy, assembler, assembly_fasta) = meta
+        def (sra, srr, read_type, assembler) = key
+        def (platform, model, strategy, assembly_fasta) = meta
         def (assembly_bam, assembly_csi) = bam_idx
-        tuple(sra, srr, platform, model, strategy, assembler, assembly_fasta, assembly_bam, assembly_csi)
+        tuple(sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, assembly_bam, assembly_csi)
       }
 
     def failure_note_ch = channel.empty()
@@ -1077,62 +1083,62 @@ workflow {
       .mix(hifi_mapping.note)
 
     def planned_binning_input = mapped_all
-      .map { sra, srr, platform, model, strategy, assembler, assembly_fasta, assembly_bam, assembly_csi ->
-        def sampleBinners = binnersForSample(phase0Options, sra, srr, assembler).join(',')
-        tuple(sra, srr, platform, model, strategy, assembler, assembly_fasta, assembly_bam, assembly_csi, sampleBinners)
+      .map { sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, assembly_bam, assembly_csi ->
+        def sampleBinners = binnersForSample(phase0Options, sra, srr, read_type).join(',')
+        tuple(sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, assembly_bam, assembly_csi, sampleBinners)
       }
 
     def binner_plan_by_sample = planned_binning_input
-      .map { sra, srr, platform, model, strategy, assembler, assembly_fasta, assembly_bam, assembly_csi, sampleBinners ->
-        tuple([sra, srr], binnerCsvSize(sampleBinners))
+      .map { sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, assembly_bam, assembly_csi, sampleBinners ->
+        tuple([sra, srr, read_type, assembler], binnerCsvSize(sampleBinners))
       }
 
     def metabat_input = planned_binning_input
-      .filter { sra, srr, platform, model, strategy, assembler, assembly_fasta, assembly_bam, assembly_csi, sampleBinners ->
+      .filter { sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, assembly_bam, assembly_csi, sampleBinners ->
         binnerCsvContains(sampleBinners, 'metabat')
       }
-      .map { sra, srr, platform, model, strategy, assembler, assembly_fasta, assembly_bam, assembly_csi, sampleBinners ->
-        tuple(sra, srr, platform, model, strategy, assembler, assembly_fasta, assembly_bam, assembly_csi)
+      .map { sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, assembly_bam, assembly_csi, sampleBinners ->
+        tuple(sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, assembly_bam, assembly_csi)
       }
 
     def comebin_input = planned_binning_input
-      .filter { sra, srr, platform, model, strategy, assembler, assembly_fasta, assembly_bam, assembly_csi, sampleBinners ->
+      .filter { sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, assembly_bam, assembly_csi, sampleBinners ->
         binnerCsvContains(sampleBinners, 'comebin')
       }
-      .map { sra, srr, platform, model, strategy, assembler, assembly_fasta, assembly_bam, assembly_csi, sampleBinners ->
-        tuple(sra, srr, platform, model, strategy, assembler, assembly_fasta, assembly_bam, assembly_csi)
+      .map { sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, assembly_bam, assembly_csi, sampleBinners ->
+        tuple(sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, assembly_bam, assembly_csi)
       }
 
     def vamb_input = planned_binning_input
-      .filter { sra, srr, platform, model, strategy, assembler, assembly_fasta, assembly_bam, assembly_csi, sampleBinners ->
+      .filter { sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, assembly_bam, assembly_csi, sampleBinners ->
         binnerCsvContains(sampleBinners, 'vamb')
       }
-      .map { sra, srr, platform, model, strategy, assembler, assembly_fasta, assembly_bam, assembly_csi, sampleBinners ->
-        tuple(sra, srr, platform, model, strategy, assembler, assembly_fasta, assembly_bam, assembly_csi)
+      .map { sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, assembly_bam, assembly_csi, sampleBinners ->
+        tuple(sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, assembly_bam, assembly_csi)
       }
 
     def lorbin_input = planned_binning_input
-      .filter { sra, srr, platform, model, strategy, assembler, assembly_fasta, assembly_bam, assembly_csi, sampleBinners ->
+      .filter { sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, assembly_bam, assembly_csi, sampleBinners ->
         binnerCsvContains(sampleBinners, 'lorbin')
       }
-      .map { sra, srr, platform, model, strategy, assembler, assembly_fasta, assembly_bam, assembly_csi, sampleBinners ->
-        tuple(sra, srr, platform, model, strategy, assembler, assembly_fasta, assembly_bam, assembly_csi)
+      .map { sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, assembly_bam, assembly_csi, sampleBinners ->
+        tuple(sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, assembly_bam, assembly_csi)
       }
 
     def semibin_input = planned_binning_input
-      .filter { sra, srr, platform, model, strategy, assembler, assembly_fasta, assembly_bam, assembly_csi, sampleBinners ->
+      .filter { sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, assembly_bam, assembly_csi, sampleBinners ->
         binnerCsvContains(sampleBinners, 'semibin')
       }
-      .map { sra, srr, platform, model, strategy, assembler, assembly_fasta, assembly_bam, assembly_csi, sampleBinners ->
-        tuple(sra, srr, platform, model, strategy, assembler, assembly_fasta, assembly_bam, assembly_csi)
+      .map { sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, assembly_bam, assembly_csi, sampleBinners ->
+        tuple(sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, assembly_bam, assembly_csi)
       }
 
     def rosella_input = planned_binning_input
-      .filter { sra, srr, platform, model, strategy, assembler, assembly_fasta, assembly_bam, assembly_csi, sampleBinners ->
+      .filter { sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, assembly_bam, assembly_csi, sampleBinners ->
         binnerCsvContains(sampleBinners, 'rosella')
       }
-      .map { sra, srr, platform, model, strategy, assembler, assembly_fasta, assembly_bam, assembly_csi, sampleBinners ->
-        tuple(sra, srr, platform, model, strategy, assembler, assembly_fasta, assembly_bam, assembly_csi)
+      .map { sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, assembly_bam, assembly_csi, sampleBinners ->
+        tuple(sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, assembly_bam, assembly_csi)
       }
 
     def metabat_results = channel.empty()
@@ -1184,13 +1190,13 @@ workflow {
       .mix(semibin_results)
       .mix(rosella_results)
 
-    def dastool_base_by = mapped_all.map { sra, srr, platform, model, strategy, assembler, assembly_fasta, _bam, _csi ->
-      tuple([sra, srr], [platform, model, strategy, assembler, assembly_fasta])
+    def dastool_base_by = mapped_all.map { sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, _bam, _csi ->
+      tuple([sra, srr, read_type, assembler], [platform, model, strategy, assembly_fasta])
     }
 
     def binner_maps_by_sample = binner_results
-      .map { sra, srr, platform, model, strategy, assembler, tool, bin_dir, contig2bin, note_path ->
-        tuple([sra, srr], [tool, contig2bin])
+      .map { sra, srr, platform, model, strategy, read_type, assembler, tool, bin_dir, contig2bin, note_path ->
+        tuple([sra, srr, read_type, assembler], [tool, contig2bin])
       }
       .combine(binner_plan_by_sample, by: 0)
       .map { key, entry, expectedCount -> tuple(groupKey(key, expectedCount as int), entry) }
@@ -1200,55 +1206,55 @@ workflow {
     def dastool_join = dastool_base_by.join(binner_maps_by_sample)
 
     def dastool_in = dastool_join.map { key, meta, entries ->
-      def (sra, srr) = key
-      def (platform, model, strategy, assembler, assembly_fasta) = meta
+      def (sra, srr, read_type, assembler) = key
+      def (platform, model, strategy, assembly_fasta) = meta
       def contig2bin_maps = entries.collect { entry -> entry[1] }
       tuple(
-        sra, srr, platform, model, strategy, assembler, assembly_fasta,
+        sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta,
         contig2bin_maps
       )
     }
 
     def dastool_note_entries = channel.empty()
     if ('dastool' in selectedRefiners) {
-      dastool_note_entries = DASTOOL(dastool_in).note.map { sra, srr, platform, model, strategy, assembler, note_path ->
-        tuple(sra, srr, platform, model, strategy, assembler, 'dastool', note_path)
+      dastool_note_entries = DASTOOL(dastool_in).note.map { sra, srr, platform, model, strategy, read_type, assembler, note_path ->
+        tuple(sra, srr, platform, model, strategy, read_type, assembler, 'dastool', note_path)
       }
     }
 
     def binette_note_entries = channel.empty()
     if ('binette' in selectedRefiners) {
       def checkm2_db_ch = Channel.value(file(params.checkm2_db, checkIfExists: true))
-      binette_note_entries = BINETTE(dastool_in, checkm2_db_ch).note.map { sra, srr, platform, model, strategy, assembler, note_path ->
-        tuple(sra, srr, platform, model, strategy, assembler, 'binette', note_path)
+      binette_note_entries = BINETTE(dastool_in, checkm2_db_ch).note.map { sra, srr, platform, model, strategy, read_type, assembler, note_path ->
+        tuple(sra, srr, platform, model, strategy, read_type, assembler, 'binette', note_path)
       }
     }
 
     def success_meta = mapped_all
-      .map { sra, srr, platform, model, strategy, assembler, _assembly_fasta, _bam, _csi ->
-        tuple(sra, srr, platform, model, strategy, assembler, '')
+      .map { sra, srr, platform, model, strategy, read_type, assembler, _assembly_fasta, _bam, _csi ->
+        tuple(sra, srr, platform, model, strategy, read_type, assembler, '')
       }
       .distinct()
 
     def empty_summary = CREATE_EMPTY_SUMMARY(success_meta).skipped_rows
-    def succeeded_rows = empty_summary.map { sra, srr, platform, model, strategy, assembler, summary_csv, _note ->
-      tuple(sra, srr, platform, model, strategy, assembler, summary_csv, '')
+    def succeeded_rows = empty_summary.map { sra, srr, platform, model, strategy, read_type, assembler, summary_csv, _note ->
+      tuple(sra, srr, platform, model, strategy, read_type, assembler, summary_csv, '')
     }
 
-    def binner_note_entries = binner_results.map { sra, srr, platform, model, strategy, assembler, tool, bin_dir, contig2bin, note_path ->
-      tuple(sra, srr, platform, model, strategy, assembler, tool, note_path)
+    def binner_note_entries = binner_results.map { sra, srr, platform, model, strategy, read_type, assembler, tool, bin_dir, contig2bin, note_path ->
+      tuple(sra, srr, platform, model, strategy, read_type, assembler, tool, note_path)
     }
 
     def binning_notes = channel.empty()
       .mix(binner_note_entries)
       .mix(dastool_note_entries)
       .mix(binette_note_entries)
-      .map { sra, srr, platform, model, strategy, assembler, tool, note_path ->
-        tuple([sra, srr, platform, model, strategy, assembler], [tool, note_path])
+      .map { sra, srr, platform, model, strategy, read_type, assembler, tool, note_path ->
+        tuple([sra, srr, platform, model, strategy, read_type, assembler], [tool, note_path])
       }
       .groupTuple()
       .map { key, items ->
-        def (sra, srr, platform, model, strategy, assembler) = key
+        def (sra, srr, platform, model, strategy, read_type, assembler) = key
         def noteText = items
           .sort { left, right -> left[0] <=> right[0] }
           .collect { entry ->
@@ -1258,18 +1264,18 @@ workflow {
           }
           .findAll { it }
           .join('; ')
-        tuple(sra, srr, platform, model, strategy, assembler, noteText)
+        tuple(sra, srr, platform, model, strategy, read_type, assembler, noteText)
       }
 
     def final_success = succeeded_rows
-      .map { sra, srr, platform, model, strategy, assembler, summary_csv, note ->
-        tuple([sra, srr, platform, model, strategy, assembler], [summary_csv, note])
+      .map { sra, srr, platform, model, strategy, read_type, assembler, summary_csv, note ->
+        tuple([sra, srr, platform, model, strategy, read_type, assembler], [summary_csv, note])
       }
-      .join(binning_notes.map { sra, srr, platform, model, strategy, assembler, note ->
-        tuple([sra, srr, platform, model, strategy, assembler], note)
+      .join(binning_notes.map { sra, srr, platform, model, strategy, read_type, assembler, note ->
+        tuple([sra, srr, platform, model, strategy, read_type, assembler], note)
       })
       .map { key, summary_entry, binning_note ->
-        def (sra, srr, platform, model, strategy, assembler) = key
+        def (sra, srr, platform, model, strategy, read_type, assembler) = key
         def summary_csv = summary_entry[0]
         def base_note = summary_entry[1] ?: ''
         def extra_note = (binning_note ?: '').trim()
@@ -1277,12 +1283,12 @@ workflow {
         if (extra_note) {
           final_note = final_note ? "${final_note}; ${extra_note}" : extra_note
         }
-        tuple(sra, srr, platform, model, strategy, assembler, summary_csv, final_note)
+        tuple(sra, srr, platform, model, strategy, read_type, assembler, summary_csv, final_note)
       }
 
-    def mapping_errors = failure_note_ch.map { sra, srr, platform, model, strategy, assembler, note_path ->
+    def mapping_errors = failure_note_ch.map { sra, srr, platform, model, strategy, read_type, assembler, note_path ->
       def note = file(note_path).text.trim()
-      tuple(sra, srr, platform, model, strategy, assembler, note)
+      tuple(sra, srr, platform, model, strategy, read_type, assembler, note)
     }
 
     def failed_rows = CREATE_EMPTY_FAILURE_SUMMARY(mapping_errors)

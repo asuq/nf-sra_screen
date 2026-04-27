@@ -37,6 +37,7 @@ the pipeline will:
    - **metaSPAdes** for short reads
    - **metaFlye** for ONT and PacBio CLR
    - **myloasm** for PacBio HiFi
+   - optional multi-assembler selection with `--assemblers`
 4. (Assembly mode) Annotate contigs with DIAMOND against UniProt and summarise with BlobToolKit.
 5. (Optional, with `--taxa`) Extract contigs matching user‑specified taxa into per‑taxon FASTA and ID lists.
 6. (Optional, with `--binning`) Run compatible metagenome binners (MetaBAT2, SemiBin, Rosella, COMEBin, VAMB, and HiFi-only LorBin) and refine them with DAS Tool and/or Binette.
@@ -159,7 +160,8 @@ srr = sample
 platform = UNKNOWN
 model = read_type
 strategy = UNKNOWN
-assembler = read_type
+read_type = read_type
+assembler = selected assembly tool
 ```
 
 SingleM is run in place of Sandpiper for these samples.
@@ -220,6 +222,7 @@ C03			SRR12345678	/path/to/C03/assembly.fasta
 nextflow run asuq/nf-sra_screen \
   -profile <docker/singularity/local/slurm/...> \
   --binning \
+  --assemblers auto \
   --sra sra.csv \
   --fastq_tsv fastq.tsv \
   --taxdump /path/to/ncbi_taxdump_dir \
@@ -248,6 +251,8 @@ nextflow run binning.nf \
 - `--taxdump`        Directory containing NCBI taxdump files; `jsonify_taxdump.py` will create `taxdump.json`
 - `--uniprot_db`     UniProt DIAMOND database (`.dmnd`) (Follow [blobtools tutorial](https://blobtoolkit.genomehubs.org/install/))
 - `--taxa`           (Optional) CSV with rank,taxa (NCBI or GTDB names). Use it if you want taxonomy screening
+- `--assemblers`     (Optional) Assembly tools: `auto`, `all`, or comma-separated names. Default `auto` uses `metaspades` for short reads, `metaflye` for Nanopore/PacBio CLR, and `myloasm` for HiFi. Supported tools are `metaspades`, `unicycler`, `metaflye`, and `myloasm`; aliases `spades` and `flye` are accepted.
+- `--assembler`      Alias for `--assemblers`.
 - `--gtdb_ncbi_map`  (Required with `--taxa`) Directory with ncbi_vs_gtdb_bacteria.xlsx and ncbi_vs_gtdb_archaea.xlsx. For taxonomy screening
 - `--sandpiper_db`   (Required with `--taxa` and `--sra`) Directory with Sandpiper summary tables. For taxonomy screening
 - `--singlem_db`     (Required with `--taxa`) SingleM metapackage (e.g. S5.4.0.GTDB_r226.metapackage_20250331.smpkg.zb) For taxonomy screening
@@ -369,6 +374,7 @@ execution-reports/
 
 > [!NOTE]
 > In `--noassembly` mode, summary.tsv is still produced, but assembly/BlobToolKit/extraction/binning outputs are not.
+> When multiple assemblers are selected, assembler-specific outputs are written under `<sra>/<srr>/<assembler>/` and `summary.tsv` keeps separate rows with `read_type` and `assembler`.
 > When running `binning.nf`, only the per-sample `binning/` directories and the global `summary.tsv` are produced.
 
 </details>

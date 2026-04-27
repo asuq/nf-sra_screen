@@ -7,7 +7,7 @@
 #   ACCESSION.skipped.csv   # skipped SRRs with reason
 #
 # Columns (filtered):
-#   accession,run_accession,instrument_platform,instrument_model,library_source,library_strategy,assembler
+#   accession,run_accession,instrument_platform,instrument_model,library_source,library_strategy,read_type
 #
 # Columns (skipped):
 #   accession,run_accession,instrument_platform,instrument_model,library_source,library_strategy,skip_reason
@@ -39,7 +39,7 @@ SOURCES='^(GENOMIC|GENOMIC SINGLE CELL|METAGENOMIC|OTHER)$'
 STRATEGIES='^(WGS|WGA|WGX|WCS|POOLCLONE|CLONE|FINISHING|SYNTHETIC[_-]LONG[_-]READ|TARGETED[_-]CAPTURE|RAD[_-]SEQ|METAGENOMIC|GENOME|GENOMIC|GENOMIC SINGLE CELL|OTHER)$'
 
 # Always create headers
-printf "accession,run_accession,instrument_platform,instrument_model,library_source,library_strategy,assembler\n" > "$out_kept"
+printf "accession,run_accession,instrument_platform,instrument_model,library_source,library_strategy,read_type\n" > "$out_kept"
 printf "accession,run_accession,instrument_platform,instrument_model,library_source,library_strategy,skip_reason\n" > "$out_skip"
 
 header="$(head -n1 "$in")"
@@ -95,7 +95,7 @@ if [[ $header == Run,Center,ReleaseDate,FileType,FileName,FileSize,Download_path
     keep = (toupper(plat) ~ P) && (toupper(src) ~ S) && (toupper(strat) ~ T)
 
     if (keep){
-      # assembler decision with model-aware PacBio split
+      # read type decision with model-aware PacBio split
       lm2=tolower(model); gsub(/[[:space:]]+/, " ", lm2); lm2=trim(lm2)
       asm=""
       if (plat ~ /^(ILLUMINA|DNBSEQ|BGISEQ)$/) asm="short"

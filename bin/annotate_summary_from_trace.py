@@ -19,14 +19,14 @@ Behaviour
 - Only the last attempt of each Nextflow task is considered, using
   the largest numeric task_id for each `name`.
 - Existing rows in summary.tsv are annotated in-place (note column).
-- If a (sra, srr) has a failing last-attempt task in trace.tsv but no
+- If a (sra, srr, assembler) has a failing last-attempt task in trace.tsv but no
   row in summary.tsv, a new summary row is created using metadata from:
     <outdir>/metadata/<sra>/<sra>.filtered.csv
     <outdir>/metadata/<sra>/<sra>.skipped.csv
 
 The metadata CSVs are expected to have at least these headers:
     accession,run_accession,instrument_platform,instrument_model,
-    library_source,library_strategy,assembler
+    library_source,library_strategy,read_type
 """
 
 from __future__ import annotations
@@ -39,7 +39,13 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Iterable
 
-from tqdm import tqdm
+try:
+    from tqdm import tqdm
+except ImportError:
+
+    def tqdm(iterable, *args, **kwargs):
+        """Return the iterable unchanged when tqdm is unavailable."""
+        return iterable
 
 
 LOG = logging.getLogger("annotate_summary")
@@ -158,32 +164,38 @@ def classify_failure(
     return f"{process_name}: execution error (exit {exit_code})"
 
 
-def parse_tag_from_name(name: str | None) -> tuple[str | None, str | None]:
+def parse_tag_from_name(
+    name: str | None,
+) -> tuple[str | None, str | None, str | None]:
     """
-    Extract (sra, srr) from a task name string.
+    Extract (sra, srr, assembler) from a task name string.
 
     Expected format:
         'PROCESS_NAME (SRAX:SRR12345)'
+        'PROCESS_NAME (SRAX:SRR12345:metaspades)'
 
     Returns
     -------
-    (sra, srr) or (None, None) if parsing fails.
+    (sra, srr, assembler) or (None, None, None) if parsing fails.
     """
     if not name:
-        return None, None
+        return None, None, None
 
     stripped = name.strip()
     if "(" not in stripped or not stripped.endswith(")"):
-        return None, None
+        return None, None, None
 
     tag = stripped[stripped.rfind("(") + 1 : -1]  # content inside parentheses
     if ":" not in tag:
-        return None, None
+        return None, None, None
 
-    sra, srr = tag.split(":", 1)
-    sra = sra.strip()
-    srr = srr.strip()
-    return (sra or None), (srr or None)
+    parts = [part.strip() for part in tag.split(":")]
+    if len(parts) < 2:
+        return None, None, None
+
+    sra, srr = parts[0], parts[1]
+    assembler = parts[2] if len(parts) > 2 else None
+    return (sra or None), (srr or None), (assembler or None)
 
 
 # --------------------------------------------------------------------------- #
@@ -215,17 +227,18 @@ def load_summary(summary_path: Path) -> tuple[list[dict[str, str]], list[str]]:
 
 def build_index_by_key(
     rows: Iterable[dict[str, str]],
-) -> dict[tuple[str, str], int]:
+) -> dict[tuple[str, str, str], int]:
     """
-    Build an index mapping (sra, srr) -> row index.
+    Build an index mapping (sra, srr, assembler) -> row index.
 
     Missing values are treated as empty strings.
     """
-    index: dict[tuple[str, str], int] = {}
+    index: dict[tuple[str, str, str], int] = {}
     for i, row in enumerate(rows):
         sra = row.get("sra", "") or ""
         srr = row.get("srr", "") or ""
-        index[(sra, srr)] = i
+        assembler = row.get("assembler", "") or ""
+        index[(sra, srr, assembler)] = i
     return index
 
 
@@ -299,14 +312,14 @@ def last_attempt_records(trace_path: Path) -> list[dict[str, str]]:
 
 def collect_reasons_from_trace(
     trace_path: Path,
-) -> dict[tuple[str, str], list[str]]:
+) -> dict[tuple[str, str, str], list[str]]:
     """
-    Parse trace.tsv and return a mapping (sra, srr) -> list of messages.
+    Parse trace.tsv and return a mapping (sra, srr, assembler) -> messages.
 
     Only the last attempt (largest task_id) of each task is considered.
     """
     last_records = last_attempt_records(trace_path)
-    reasons: dict[tuple[str, str], list[str]] = defaultdict(list)
+    reasons: dict[tuple[str, str, str], list[str]] = defaultdict(list)
 
     for record in tqdm(
         last_records,
@@ -330,7 +343,7 @@ def collect_reasons_from_trace(
         except ValueError:
             exit_code = None
 
-        sra, srr = parse_tag_from_name(name)
+        sra, srr, assembler = parse_tag_from_name(name)
         if not sra or not srr:
             # e.g. VALIDATE_TAXA or untagged processes
             continue
@@ -339,10 +352,10 @@ def collect_reasons_from_trace(
         message = classify_failure(process_name, status, exit_code, native_id)
 
         if message:
-            reasons[(sra, srr)].append(message)
+            reasons[(sra, srr, assembler or "")].append(message)
 
     LOG.info(
-        "Collected scheduler reasons for %d (sra, srr) combinations",
+        "Collected scheduler reasons for %d (sra, srr, assembler) combinations",
         len(reasons),
     )
     return reasons
@@ -413,14 +426,14 @@ def load_metadata_for_sras(
 def annotate_summary(
     summary_rows: list[dict[str, str]],
     fieldnames: list[str],
-    reasons: dict[tuple[str, str], list[str]],
+    reasons: dict[tuple[str, str, str], list[str]],
     metadata_root: Path,
 ) -> None:
     """
-    Merge scheduler reasons into the 'note' column per (sra, srr).
+    Merge scheduler reasons into the 'note' column per summary key.
 
-    If a (sra, srr) is not present in summary_rows, a new row is created
-    using metadata from metadata_root (if available).
+    If a key is not present in summary_rows, a new row is created using
+    metadata from metadata_root (if available).
     """
     if not reasons:
         LOG.info("No scheduler failures to annotate; summary.tsv unchanged")
@@ -431,7 +444,7 @@ def annotate_summary(
 
     # Figure out which SRAs we need metadata for (only those missing from summary).
     missing_keys = [key for key in reasons if key not in index]
-    missing_sras: set[str] = {sra for sra, _ in missing_keys}
+    missing_sras: set[str] = {sra for sra, _, _ in missing_keys}
 
     metadata_index: dict[tuple[str, str], dict[str, str]] = {}
     if missing_sras:
@@ -439,16 +452,19 @@ def annotate_summary(
     else:
         LOG.info("No missing (sra, srr) in summary; metadata lookup not needed")
 
-    for (sra, srr), messages in reasons.items():
+    for (sra, srr, assembler), messages in reasons.items():
         unique_messages = sorted(set(messages))
         scheduler_note = "; ".join(unique_messages)
 
-        row_idx = index.get((sra, srr))
+        row_idx = index.get((sra, srr, assembler))
+        if row_idx is None and assembler:
+            row_idx = index.get((sra, srr, ""))
         if row_idx is None:
             LOG.info(
-                "No existing summary row for (%s, %s); creating a new one",
+                "No existing summary row for (%s, %s, %s); creating a new one",
                 sra,
                 srr,
+                assembler,
             )
             meta_row = metadata_index.get((sra, srr), {})
 
@@ -464,8 +480,12 @@ def annotate_summary(
                     new_row[field] = (meta_row.get("instrument_model") or "").strip()
                 elif field == "strategy":
                     new_row[field] = (meta_row.get("library_strategy") or "").strip()
+                elif field == "read_type":
+                    new_row[field] = (
+                        meta_row.get("read_type") or meta_row.get("assembler") or ""
+                    ).strip()
                 elif field == "assembler":
-                    new_row[field] = (meta_row.get("assembler") or "").strip()
+                    new_row[field] = assembler
                 elif field == "note":
                     new_row[field] = f"scheduler: {scheduler_note}"
                 else:
@@ -473,7 +493,7 @@ def annotate_summary(
                     new_row[field] = ""
 
             summary_rows.append(new_row)
-            index[(sra, srr)] = len(summary_rows) - 1
+            index[(sra, srr, assembler)] = len(summary_rows) - 1
             continue
 
         # Existing row: append scheduler information to note.
@@ -510,7 +530,7 @@ def run(summary_path: Path, trace_path: Path) -> int:
     if not metadata_root.exists():
         LOG.warning(
             "Metadata directory %s does not exist; new rows will be "
-            "created without platform/model/strategy/assembler fields",
+            "created without platform/model/strategy/read_type/assembler fields",
             metadata_root,
         )
 

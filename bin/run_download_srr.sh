@@ -3,7 +3,7 @@
 #   run_download_srr.sh \
 #     --srr SRR \
 #     --platform PLATFORM \
-#     --assembler ASM \
+#     --read-type READ_TYPE \
 #     --cpus N \
 #     --attempt A \
 #     --max-retries M
@@ -17,7 +17,7 @@ set -euo pipefail
 
 srr=""
 platform=""
-assembler=""
+read_type=""
 cpus=1
 attempt=0
 max_retries=1
@@ -26,7 +26,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --srr) srr="$2"; shift 2 ;;
     --platform) platform="$2"; shift 2 ;;
-    --assembler) assembler="$2"; shift 2 ;;
+    --assembler|--read-type) read_type="$2"; shift 2 ;;
     --cpus) cpus="$2"; shift 2 ;;
     --attempt) attempt="$2"; shift 2 ;;
     --max-retries) max_retries="$2"; shift 2 ;;
@@ -637,10 +637,10 @@ fi
 rm -f ./*.fastq ./*.fq ./*.sra ./*.sra.tmp 2>/dev/null || true
 rm -rf "./${srr}" 2>/dev/null || true
 
-# PacBio assembler check (only if platform is PACBIO_SMRT and assembler is missing/unknown)
-final_asm="${assembler}"
-if [[ "${platform}" == "PACBIO_SMRT" && ( -z "${assembler}" || "${assembler}" == "unknown" ) ]]; then
-  log "Checking PacBio reads to determine assembler"
+# PacBio read type check (only if platform is PACBIO_SMRT and read type is missing/unknown)
+final_asm="${read_type}"
+if [[ "${platform}" == "PACBIO_SMRT" && ( -z "${read_type}" || "${read_type}" == "unknown" ) ]]; then
+  log "Checking PacBio reads to determine read type"
   if zcat -f ./*.f*q* 2>/dev/null \
     | awk 'NR%4==1{ h=tolower($0); if (h ~ /\/ccs([[:space:]]|$)/) { found=1; exit } } END{ exit(!found) }'
   then
