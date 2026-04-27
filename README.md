@@ -251,17 +251,23 @@ nextflow run binning.nf \
 - `--gtdb_ncbi_map`  (Required with `--taxa`) Directory with ncbi_vs_gtdb_bacteria.xlsx and ncbi_vs_gtdb_archaea.xlsx. For taxonomy screening
 - `--sandpiper_db`   (Required with `--taxa` and `--sra`) Directory with Sandpiper summary tables. For taxonomy screening
 - `--singlem_db`     (Required with `--taxa`) SingleM metapackage (e.g. S5.4.0.GTDB_r226.metapackage_20250331.smpkg.zb) For taxonomy screening
-- `--binning`        (Optional) Run BINNING after ASSEMBLY (MetaBAT2 + SemiBin + Rosella + DAS Tool)
+- `--binning`        (Optional) Run BINNING after ASSEMBLY (MetaBAT2 + SemiBin + Rosella + DAS Tool by default)
+- `--binners`        Comma-separated Phase 0 binners (default: `metabat,semibin,rosella`; allowed: `metabat,semibin,rosella`)
+- `--refiners`       Comma-separated Phase 0 refiners (default: `dastool`; allowed: `dastool`)
+- `--gpu`            Reserved bare flag for future GPU mode. Phase 0 is CPU-only and fails early if `--gpu` is set
 - `--noassembly`     (Optional) Skip ASSEMBLY and BINNING; run PRE_SCREENING + SUMMARY only. If set, `--binning` is ignored
 - `--outdir`         Output directory (default: ./output)
 - `--max_retries`    Maximum number of retries per process (default: 3)
 - `--queue_short`    Optional scheduler queue for short jobs
 - `--queue_standard` Optional scheduler queue for standard jobs
 - `--queue_highmem`  Optional scheduler queue for high-memory retries
+- `--queue_gpu`      Reserved scheduler queue for future GPU jobs
 - `--executor_queue_size` Optional executor queue size override for SLURM-style profiles
 - `--slurm_cluster_options` Optional extra SLURM cluster options appended to `process.clusterOptions`
+- `--gpu_cluster_options` Reserved extra scheduler options for future GPU jobs
 - `--singularity_cache_dir` Optional Singularity cache directory override
 - `--singularity_run_options` Optional Singularity runtime options override
+- `--gpu_container_options` Reserved container runtime options for future GPU jobs
 - `--help`           Print the pipeline help message and exit.
 
 ### Profiles
@@ -330,6 +336,9 @@ nextflow run binning.nf \
       semibin/
       rosella/
       dastool/
+      metabat.contig2bin.tsv
+      semibin.contig2bin.tsv
+      rosella.contig2bin.tsv
       metabat.note                 # if failed
       semibin.note                 # if failed
       rosella.note                 # if failed

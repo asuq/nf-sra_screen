@@ -37,10 +37,12 @@ fi
 tmp_dir="tmp_metabat"
 final_dir="metabat"
 note_file="metabat.note"
+map_file="metabat.contig2bin.tsv"
 
-rm -rf "$tmp_dir" "$final_dir" "$note_file"
+rm -rf "$tmp_dir" "$final_dir" "$note_file" "$map_file"
 mkdir -p "$tmp_dir"
 : > "$note_file"
+: > "$map_file"
 
 
 fail() {
@@ -52,6 +54,7 @@ fail() {
   # Final attempt: record soft fail but still emit an empty metabat dir & note
   rm -rf "$final_dir"
   mkdir -p "$final_dir"
+  : > "$map_file"
   printf '%s\n' "$msg" > "$note_file"
   exit 0
 }
@@ -69,3 +72,15 @@ if ! metabat2 --inFile "$assembly" \
 fi
 
 mv "$tmp_dir" "$final_dir"
+
+shopt -s nullglob
+for f in "$final_dir"/*.fa; do
+  awk -v bin="${f##*/}" '
+    /^>/ {
+      sub(/^>/, "")
+      split($0, fields, /[[:space:]]+/)
+      print fields[1] "\t" bin
+    }
+  ' "$f" >> "$map_file"
+done
+shopt -u nullglob

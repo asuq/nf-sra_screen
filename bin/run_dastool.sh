@@ -3,11 +3,12 @@
 #
 # Args:
 #   --assembly     assembly fasta (required)
-#   --metabat-dir  MetaBAT bins directory (may be empty or non-existent)
-#   --comebin-dir  comebin bins directory (may be empty or non-existent)
-#   --semibin-dir  SemiBin bins directory (unused but kept for symmetry)
-#   --semibin-map  SemiBin contig_bins.tsv (contig-to-bin mapping)
-#   --rosella-dir  Rosella bins directory (may be empty or non-existent)
+#   --bin-maps     comma-separated contig-to-bin TSVs from selected binners
+#   --metabat-dir  legacy MetaBAT bins directory (may be empty or non-existent)
+#   --comebin-dir  legacy COMEBin bins directory (may be empty or non-existent)
+#   --semibin-dir  legacy SemiBin bins directory (unused but kept for symmetry)
+#   --semibin-map  legacy SemiBin contig_bins.tsv (contig-to-bin mapping)
+#   --rosella-dir  legacy Rosella bins directory (may be empty or non-existent)
 #   --cpus         threads to use
 #   --attempt      current attempt number (for Nextflow retries)
 #   --max-retries  maximum attempts before treating failures as soft and writing dastool.note
@@ -15,6 +16,7 @@
 set -euo pipefail
 
 assembly=""
+bin_maps=""
 metabat_dir=""
 comebin_dir=""
 semibin_dir=""
@@ -27,6 +29,7 @@ max_retries=1
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --assembly)    assembly="$2";    shift 2 ;;
+    --bin-maps)    bin_maps="$2";    shift 2 ;;
     --metabat-dir) metabat_dir="$2"; shift 2 ;;
     --comebin-dir) comebin_dir="$2"; shift 2 ;;
     --semibin-dir) semibin_dir="$2"; shift 2 ;;
@@ -79,53 +82,64 @@ semibin_tsv="${tmp_dir}/semibin_bins.tsv"
 : > "$rosella_tsv"
 : > "$semibin_tsv"
 
-# MetaBAT: .fa bins in $metabat_dir
-if [[ -n "$metabat_dir" && -d "$metabat_dir" ]]; then
-  for f in "$metabat_dir"/*.fa; do
-    [[ -e "$f" ]] || break
-    # contig_id<TAB>bin_filename
-    grep '^>' "$f" \
-      | cut -f1 \
-      | sed 's/^>//' \
-      | sed "s/\$/\t${f##*/} /" \
-      >> "$metabat_tsv"
-  done
-fi
-
-# COMEBin: .fa bins in $comebin_dir
-if [[ -n "$comebin_dir" && -d "$comebin_dir" ]]; then
-  for f in "$comebin_dir"/*.fa; do
-    [[ -e "$f" ]] || break
-    grep '^>' "$f" \
-      | sed "s/>.*/&\t${f##*/} /" \
-      | sed 's/^>//' \
-      >> "$comebin_tsv"
-  done
-fi
-
-# Rosella: rosella_*.fna bins in $rosella_dir
-if [[ -n "$rosella_dir" && -d "$rosella_dir" ]]; then
-  for f in "$rosella_dir"/rosella_*.fna; do
-    [[ -e "$f" ]] || break
-    grep '^>' "$f" \
-      | sed "s/>.*/&\t${f##*/} /" \
-      | sed 's/^>//' \
-      >> "$rosella_tsv"
-  done
-fi
-
-# SemiBin: contig_bins.tsv (header + 2 columns)
-if [[ -n "$semibin_map" && -f "$semibin_map" ]]; then
-  # Drop header and reuse as the contig2bin mapping
-  tail -n +2 "$semibin_map" >> "$semibin_tsv"
-fi
-
-# If no TSV has any content, we consider this a "no bins" situation.
 bins_list=()
-[[ -s "$metabat_tsv"  ]] && bins_list+=("$metabat_tsv")
-[[ -s "$comebin_tsv"  ]] && bins_list+=("$comebin_tsv")
-[[ -s "$rosella_tsv"  ]] && bins_list+=("$rosella_tsv")
-[[ -s "$semibin_tsv"  ]] && bins_list+=("$semibin_tsv")
+
+if [[ -n "$bin_maps" ]]; then
+  IFS=',' read -r -a provided_maps <<< "$bin_maps"
+  for map_file in "${provided_maps[@]}"; do
+    [[ -s "$map_file" ]] && bins_list+=("$map_file")
+  done
+else
+  # Legacy path kept so old calls still work while the workflow migrates to
+  # normalised binner maps.
+  if [[ -n "$metabat_dir" && -d "$metabat_dir" ]]; then
+    for f in "$metabat_dir"/*.fa; do
+      [[ -e "$f" ]] || break
+      awk -v bin="${f##*/}" '
+        /^>/ {
+          sub(/^>/, "")
+          split($0, fields, /[[:space:]]+/)
+          print fields[1] "\t" bin
+        }
+      ' "$f" >> "$metabat_tsv"
+    done
+  fi
+
+  if [[ -n "$comebin_dir" && -d "$comebin_dir" ]]; then
+    for f in "$comebin_dir"/*.fa; do
+      [[ -e "$f" ]] || break
+      awk -v bin="${f##*/}" '
+        /^>/ {
+          sub(/^>/, "")
+          split($0, fields, /[[:space:]]+/)
+          print fields[1] "\t" bin
+        }
+      ' "$f" >> "$comebin_tsv"
+    done
+  fi
+
+  if [[ -n "$rosella_dir" && -d "$rosella_dir" ]]; then
+    for f in "$rosella_dir"/rosella_*.fna; do
+      [[ -e "$f" ]] || break
+      awk -v bin="${f##*/}" '
+        /^>/ {
+          sub(/^>/, "")
+          split($0, fields, /[[:space:]]+/)
+          print fields[1] "\t" bin
+        }
+      ' "$f" >> "$rosella_tsv"
+    done
+  fi
+
+  if [[ -n "$semibin_map" && -f "$semibin_map" ]]; then
+    tail -n +2 "$semibin_map" >> "$semibin_tsv"
+  fi
+
+  [[ -s "$metabat_tsv"  ]] && bins_list+=("$metabat_tsv")
+  [[ -s "$comebin_tsv"  ]] && bins_list+=("$comebin_tsv")
+  [[ -s "$rosella_tsv"  ]] && bins_list+=("$rosella_tsv")
+  [[ -s "$semibin_tsv"  ]] && bins_list+=("$semibin_tsv")
+fi
 
 if (( ${#bins_list[@]} == 0 )); then
   msg="DASTool: no bins found for any tool"
@@ -134,7 +148,7 @@ if (( ${#bins_list[@]} == 0 )); then
   exit 0
 fi
 
-# Build comma‑separated list for DAS_Tool
+# Build comma-separated list for DAS_Tool
 bins_arg=$(IFS=,; echo "${bins_list[*]}")
 
 dastool_log="${tmp_dir}/dastool.log"
@@ -147,7 +161,7 @@ if ! DAS_Tool \
       --threads "$cpus" \
       >"$dastool_log" 2>&1; then
 
-  # Special case: no high-quality bins – not a real error for our pipeline
+  # Special case: no high-quality bins - not a real error for our pipeline
   if grep -q "No bins with bin-score >0.5 found" "$dastool_log"; then
     msg="DASTool: no high-quality bins (bin-score > 0.5)"
     echo "$msg" >&2

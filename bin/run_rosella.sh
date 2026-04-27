@@ -44,10 +44,12 @@ tmp_dir="tmp_rosella"
 final_dir="rosella"
 log_file="${tmp_dir}/rosella_recover.log"
 note_file="rosella.note"
+map_file="rosella.contig2bin.tsv"
 
-rm -rf "$tmp_dir" "$final_dir" "$note_file"
+rm -rf "$tmp_dir" "$final_dir" "$note_file" "$map_file"
 mkdir -p "$tmp_dir" "$final_dir"
 : > "$note_file"
+: > "$map_file"
 
 fail() {
   local msg="$1"
@@ -57,6 +59,7 @@ fail() {
   fi
   rm -rf "$final_dir"
   mkdir -p "$final_dir"
+  : > "$map_file"
   printf '%s\n' "$msg" > "$note_file"
   exit 0
 }
@@ -73,6 +76,7 @@ if ! rosella recover \
   if grep -q "attempt to divide by zero" "$log_file"; then
     echo "Rosella: no bins were generated" >&2
     mkdir -p "$final_dir"
+    : > "$map_file"
     exit 0
   fi
 
@@ -101,3 +105,14 @@ shopt -u nullglob
 if [[ "$has_bins" = false ]]; then
   echo "Rosella: no rosella_*.fna bins produced" >&2
 fi
+
+for f in "$final_dir"/rosella_*.fna; do
+  [[ -e "$f" ]] || break
+  awk -v bin="${f##*/}" '
+    /^>/ {
+      sub(/^>/, "")
+      split($0, fields, /[[:space:]]+/)
+      print fields[1] "\t" bin
+    }
+  ' "$f" >> "$map_file"
+done

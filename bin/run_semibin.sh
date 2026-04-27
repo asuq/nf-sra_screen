@@ -43,10 +43,12 @@ export DIAMONDDB="$diamond_db"
 tmp_dir="tmp_semibin"
 final_dir="semibin"
 note_file="semibin.note"
+map_file="semibin.contig2bin.tsv"
 
-rm -rf "$tmp_dir" "$final_dir" "$note_file"
+rm -rf "$tmp_dir" "$final_dir" "$note_file" "$map_file"
 mkdir -p "$tmp_dir" "$final_dir"
 : > "$note_file"
+: > "$map_file"
 
 fail() {
   local msg="$1"
@@ -57,6 +59,7 @@ fail() {
   rm -rf "$final_dir"
   mkdir -p "$final_dir"
   touch "$final_dir/contig_bins.tsv"
+  : > "$map_file"
   printf '%s\n' "$msg" > "$note_file"
   exit 0
 }
@@ -75,6 +78,7 @@ if [[ ! -f "${tmp_dir}/contig_bins.tsv" ]]; then
 fi
 
 cp "${tmp_dir}/contig_bins.tsv" "${final_dir}/contig_bins.tsv"
+tail -n +2 "${tmp_dir}/contig_bins.tsv" > "$map_file"
 
 shopt -s nullglob
 

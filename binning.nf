@@ -22,6 +22,9 @@ def helpMessage() {
 
   Optional parameters:
     --outdir        Output directory (default: ./output)
+    --binners       Comma-separated binners for Phase 0 (default: metabat,semibin,rosella)
+    --refiners      Comma-separated refiners for Phase 0 (default: dastool)
+    --gpu           Reserved for future GPU mode; not implemented in Phase 0
     --max_retries   Maximum number of retries for each process (default: 3)
     --help          Show this help message
 
@@ -32,6 +35,63 @@ def helpMessage() {
     srr             Optional SRR accession to download raw reads
     assembly_fasta  Path to assembly FASTA
   """.stripIndent()
+}
+
+
+/*
+ * Parse and validate a comma-separated Phase 0 tool selection.
+ */
+def parsePhase0ToolSelection(rawValue, defaultValue, allowedTools, plannedTools, paramName) {
+  def raw = rawValue == null ? defaultValue : rawValue.toString()
+  def selected = raw
+    .split(',')
+    .collect { it.trim().toLowerCase() }
+    .findAll { it }
+    .unique()
+
+  if (!selected) {
+    error "--${paramName} must include at least one tool"
+  }
+
+  def planned = selected.findAll { it in plannedTools }
+  if (planned) {
+    error "--${paramName} includes planned tool(s) not implemented yet in Phase 0: ${planned.join(', ')}"
+  }
+
+  def invalid = selected.findAll { !(it in allowedTools) }
+  if (invalid) {
+    error "--${paramName} includes unsupported Phase 0 tool(s): ${invalid.join(', ')}"
+  }
+
+  selected
+}
+
+
+/*
+ * Validate reserved Phase 0 binning syntax before workflow construction.
+ */
+def validatePhase0BinningOptions() {
+  if (params.gpu?.toString()?.toBoolean()) {
+    error "GPU mode is planned but not implemented yet in Phase 0"
+  }
+
+  def plannedTools = ['vamb', 'comebin', 'binette', 'lorbin'] as Set
+  def binners = parsePhase0ToolSelection(
+    params.binners,
+    'metabat,semibin,rosella',
+    ['metabat', 'semibin', 'rosella'] as Set,
+    plannedTools,
+    'binners'
+  )
+  def refiners = parsePhase0ToolSelection(
+    params.refiners,
+    'dastool',
+    ['dastool'] as Set,
+    plannedTools,
+    'refiners'
+  )
+
+  [binners: binners, refiners: refiners]
 }
 
 
@@ -335,8 +395,8 @@ process METABAT {
     tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path(assembly_fasta), path(assembly_bam), path(assembly_csi)
 
     output:
-    tuple val(sra), val(srr), path("metabat"),                                                                  emit: bins
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("metabat.note"), emit: note
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler),
+          val("metabat"), path("metabat"), path("metabat.contig2bin.tsv"), path("metabat.note"),               emit: result
 
     script:
     def metabatScript = file("${workflow.projectDir}/bin/run_metabat.sh").toAbsolutePath()
@@ -352,6 +412,7 @@ process METABAT {
     stub:
     """
     mkdir -p metabat
+    : > metabat.contig2bin.tsv
     : > metabat.note
     """
 }
@@ -369,8 +430,8 @@ process SEMIBIN {
     path uniprot_db
 
     output:
-    tuple val(sra), val(srr), path("semibin"), path("semibin/contig_bins.tsv"),                                 emit: bins
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("semibin.note"), emit: note
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler),
+          val("semibin"), path("semibin"), path("semibin.contig2bin.tsv"), path("semibin.note"),               emit: result
 
     script:
     def semibinScript = file("${workflow.projectDir}/bin/run_semibin.sh").toAbsolutePath()
@@ -388,6 +449,7 @@ process SEMIBIN {
     """
     mkdir -p semibin
     printf 'contig\tbin\n' > semibin/contig_bins.tsv
+    : > semibin.contig2bin.tsv
     : > semibin.note
     """
 }
@@ -404,8 +466,8 @@ process ROSELLA {
     tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path(assembly_fasta), path(assembly_bam), path(assembly_csi)
 
     output:
-    tuple val(sra), val(srr), path("rosella"),                                                                  emit: bins
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("rosella.note"), emit: note
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler),
+          val("rosella"), path("rosella"), path("rosella.contig2bin.tsv"), path("rosella.note"),               emit: result
 
     script:
     def rosellaScript = file("${workflow.projectDir}/bin/run_rosella.sh").toAbsolutePath()
@@ -421,6 +483,7 @@ process ROSELLA {
     stub:
     """
     mkdir -p rosella
+    : > rosella.contig2bin.tsv
     : > rosella.note
     """
 }
@@ -435,28 +498,19 @@ process DASTOOL {
     input:
     tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler),
           path(assembly_fasta),
-          path(metabat_dir),
-          path(semibin_dir),
-          path(semibin_contig_bins),
-          path(rosella_dir)
+          path(contig2bin_maps)
 
     output:
     tuple val(sra), val(srr), path("dastool"),                                                                  emit: bins
     tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("dastool.note"), emit: note
 
     script:
-    def metaDir = metabat_dir ?: ''
-    def semibinDir = semibin_dir ?: ''
-    def semibinMap = semibin_contig_bins ?: ''
-    def rosellaDir = rosella_dir ?: ''
+    def mapArg = contig2bin_maps.collect { it.toString() }.join(',')
     def dastoolScript = file("${workflow.projectDir}/bin/run_dastool.sh").toAbsolutePath()
     """
     ${dastoolScript} \\
       --assembly "${assembly_fasta}" \\
-      --metabat-dir "${metaDir}" \\
-      --semibin-dir "${semibinDir}" \\
-      --semibin-map "${semibinMap}" \\
-      --rosella-dir "${rosellaDir}" \\
+      --bin-maps "${mapArg}" \\
       --cpus ${task.cpus} \\
       --attempt ${task.attempt} \\
       --max-retries ${params.max_retries}
@@ -538,6 +592,10 @@ workflow {
     if (!params.binning_tsv || !params.uniprot_db) {
       missingParametersError()
     }
+
+    def phase0Options = validatePhase0BinningOptions()
+    def selectedBinners = phase0Options.binners
+    def selectedRefiners = phase0Options.refiners
 
     def outdir = file(params.outdir ?: './output').toAbsolutePath().toString()
     def uniprot_db_ch = channel.value(file(params.uniprot_db, checkIfExists: true))
@@ -627,40 +685,54 @@ workflow {
       .mix(pacbio_mapping.note)
       .mix(hifi_mapping.note)
 
-    def metabat_binning = METABAT(mapped_all)
-    def semibin_binning = SEMIBIN(mapped_all, uniprot_db_ch)
-    def rosella_binning = ROSELLA(mapped_all)
+    def metabat_results = channel.empty()
+    def semibin_results = channel.empty()
+    def rosella_results = channel.empty()
+
+    if ('metabat' in selectedBinners) {
+      metabat_results = METABAT(mapped_all).result
+    }
+    if ('semibin' in selectedBinners) {
+      semibin_results = SEMIBIN(mapped_all, uniprot_db_ch).result
+    }
+    if ('rosella' in selectedBinners) {
+      rosella_results = ROSELLA(mapped_all).result
+    }
+
+    def binner_results = channel.empty()
+      .mix(metabat_results)
+      .mix(semibin_results)
+      .mix(rosella_results)
 
     def dastool_base_by = mapped_all.map { sra, srr, platform, model, strategy, assembler, assembly_fasta, _bam, _csi ->
       tuple([sra, srr], [platform, model, strategy, assembler, assembly_fasta])
     }
 
-    def metabat_entries = metabat_binning.bins.map { sra, srr, metabat_dir ->
-      tuple([sra, srr], metabat_dir)
-    }
-    def semibin_entries = semibin_binning.bins.map { sra, srr, semibin_dir, semibin_bins ->
-      tuple([sra, srr], [semibin_dir, semibin_bins])
-    }
-    def rosella_entries = rosella_binning.bins.map { sra, srr, rosella_dir ->
-      tuple([sra, srr], rosella_dir)
-    }
+    def binner_maps_by_sample = binner_results
+      .map { sra, srr, platform, model, strategy, assembler, tool, bin_dir, contig2bin, note_path ->
+        tuple(groupKey([sra, srr], selectedBinners.size()), [tool, contig2bin])
+      }
+      .groupTuple()
+      .map { key, entries -> tuple(key.target, entries) }
 
-    def dastool_join = dastool_base_by
-      .join(metabat_entries)
-      .join(semibin_entries)
-      .join(rosella_entries)
+    def dastool_join = dastool_base_by.join(binner_maps_by_sample)
 
-    def dastool_in = dastool_join.map { key, meta, metabat_dir, semibin_pair, rosella_dir ->
+    def dastool_in = dastool_join.map { key, meta, entries ->
       def (sra, srr) = key
       def (platform, model, strategy, assembler, assembly_fasta) = meta
-      def (semibin_dir, semibin_bins) = semibin_pair
+      def contig2bin_maps = entries.collect { entry -> entry[1] }
       tuple(
         sra, srr, platform, model, strategy, assembler, assembly_fasta,
-        metabat_dir, semibin_dir, semibin_bins, rosella_dir
+        contig2bin_maps
       )
     }
 
-    def dastool_binning = DASTOOL(dastool_in)
+    def dastool_note_entries = channel.empty()
+    if ('dastool' in selectedRefiners) {
+      dastool_note_entries = DASTOOL(dastool_in).note.map { sra, srr, platform, model, strategy, assembler, note_path ->
+        tuple(sra, srr, platform, model, strategy, assembler, 'dastool', note_path)
+      }
+    }
 
     def success_meta = mapped_all
       .map { sra, srr, platform, model, strategy, assembler, _assembly_fasta, _bam, _csi ->
@@ -673,19 +745,16 @@ workflow {
       tuple(sra, srr, platform, model, strategy, assembler, summary_csv, '')
     }
 
+    def binner_note_entries = binner_results.map { sra, srr, platform, model, strategy, assembler, tool, bin_dir, contig2bin, note_path ->
+      tuple(sra, srr, platform, model, strategy, assembler, tool, note_path)
+    }
+
     def binning_notes = channel.empty()
-      .mix(metabat_binning.note.map { sra, srr, platform, model, strategy, assembler, note_path ->
-        tuple([sra, srr, platform, model, strategy, assembler], ['metabat', note_path])
-      })
-      .mix(semibin_binning.note.map { sra, srr, platform, model, strategy, assembler, note_path ->
-        tuple([sra, srr, platform, model, strategy, assembler], ['semibin', note_path])
-      })
-      .mix(rosella_binning.note.map { sra, srr, platform, model, strategy, assembler, note_path ->
-        tuple([sra, srr, platform, model, strategy, assembler], ['rosella', note_path])
-      })
-      .mix(dastool_binning.note.map { sra, srr, platform, model, strategy, assembler, note_path ->
-        tuple([sra, srr, platform, model, strategy, assembler], ['dastool', note_path])
-      })
+      .mix(binner_note_entries)
+      .mix(dastool_note_entries)
+      .map { sra, srr, platform, model, strategy, assembler, tool, note_path ->
+        tuple([sra, srr, platform, model, strategy, assembler], [tool, note_path])
+      }
       .groupTuple()
       .map { key, items ->
         def (sra, srr, platform, model, strategy, assembler) = key
