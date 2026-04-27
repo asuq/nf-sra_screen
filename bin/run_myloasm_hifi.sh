@@ -94,8 +94,10 @@ if ! myloasm "${read_files[@]}" -o . -t "${cpus}" --hifi; then
 fi
 
 # Rename outputs
-if ! mv -v assembly_primary.fa assembly.fasta \
-  && mv -v final_contig_graph.gfa assembly.gfa ; then
+if ! (
+  mv -v assembly_primary.fa assembly.fasta \
+  && mv -v final_contig_graph.gfa assembly.gfa
+  ); then
   fail "myloasm: graph rename failed"
 fi
 
