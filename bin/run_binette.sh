@@ -37,6 +37,25 @@ if [[ -z "$assembly" || -z "$checkm2_db" ]]; then
   exit 1
 fi
 
+resolve_checkm2_db() {
+  # Binette forwards this path to DIAMOND, which needs the database file.
+  local db_path="$1"
+  local default_db="${db_path}/uniref100.KO.1.dmnd"
+
+  if [[ -d "$db_path" ]]; then
+    if [[ -f "$default_db" ]]; then
+      printf '%s\n' "$default_db"
+      return 0
+    fi
+    echo "run_binette.sh: CheckM2 DB directory is missing uniref100.KO.1.dmnd: ${db_path}" >&2
+    exit 1
+  fi
+
+  printf '%s\n' "$db_path"
+}
+
+resolved_checkm2_db="$(resolve_checkm2_db "$checkm2_db")"
+
 tmp_dir="tmp_binette"
 final_dir="binette"
 note_file="binette.note"
@@ -76,7 +95,7 @@ fi
 if ! binette \
       --contig2bin_tables "${bins_list[@]}" \
       --contigs "$assembly" \
-      --checkm2_db "$checkm2_db" \
+      --checkm2_db "$resolved_checkm2_db" \
       --outdir "$tmp_dir" \
       --prefix binette \
       --threads "$cpus"; then
