@@ -1,0 +1,35 @@
+FROM condaforge/mambaforge:24.9.2-0
+
+ARG CONDA_ENV_NAME='lorbin'
+ARG LORBIN_REF='e35c65b3a97fe225b04dc0beaddb85fcc4a1af7c'
+
+ENV CONDA_DIR=/opt/conda \
+    MAMBA_NO_BANNER=1 \
+    DEBIAN_FRONTEND=noninteractive \
+    PATH=$CONDA_DIR/envs/$CONDA_ENV_NAME/bin:$PATH
+
+WORKDIR /work
+
+RUN mamba create -y -n "${CONDA_ENV_NAME}" \
+    -c pytorch -c conda-forge -c bioconda \
+    "python=3.10" \
+    "biopython=1.81" \
+    "hmmer=3.1b2" \
+    "prodigal=2.6.3" \
+    "bedtools=2.26.0" \
+    "samtools=1.15.1" \
+    "pytorch=1.11.0" \
+    "cpuonly" \
+    "mkl<2024" \
+    "numpy=1.23.3" \
+    "pip=22.2.2" \
+    "git" \
+    && pip install --no-cache-dir \
+      "pandas==2.2.2" \
+      "scikit-learn==1.1.2" \
+      "scipy==1.13.1" \
+      "joblib==1.4.2" \
+      "git+https://github.com/LorMeBioAI/LorBin.git@${LORBIN_REF}" \
+    && mamba clean --all --yes
+
+CMD ["/bin/bash"]

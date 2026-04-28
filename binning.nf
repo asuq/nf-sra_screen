@@ -22,7 +22,7 @@ def helpMessage() {
 
   Optional parameters:
     --outdir        Output directory (default: ./output)
-    --binners       Comma-separated CPU-only binners (default: metabat,semibin,rosella; allowed: metabat,semibin,rosella,comebin,vamb)
+    --binners       Comma-separated CPU-only binners (default: metabat,semibin,rosella; allowed: metabat,semibin,rosella,comebin,vamb,lorbin)
     --refiners      Comma-separated CPU-only refiners (default: dastool; allowed: dastool)
     --gpu           Reserved for future GPU mode; not implemented yet
     --max_retries   Maximum number of retries for each process (default: 3)
@@ -75,11 +75,11 @@ def validatePhase0BinningOptions() {
     error "GPU mode is planned but not implemented yet in Phase 0"
   }
 
-  def plannedTools = ['binette', 'lorbin'] as Set
+  def plannedTools = ['binette'] as Set
   def binners = parsePhase0ToolSelection(
     params.binners,
     'metabat,semibin,rosella',
-    ['metabat', 'semibin', 'rosella', 'comebin', 'vamb'] as Set,
+    ['metabat', 'semibin', 'rosella', 'comebin', 'vamb', 'lorbin'] as Set,
     plannedTools,
     'binners'
   )
@@ -486,6 +486,40 @@ process VAMB {
 }
 
 
+process LORBIN {
+    tag "${sra}:${srr}"
+    label 'binning'
+    publishDir "${params.outdir}/${sra}/${srr}/binning",
+      mode: 'copy',
+      overwrite: true
+
+    input:
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path(assembly_fasta), path(assembly_bam), path(assembly_csi)
+
+    output:
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler),
+          val("lorbin"), path("lorbin"), path("lorbin.contig2bin.tsv"), path("lorbin.note"),                  emit: result
+
+    script:
+    def lorbinScript = file("${workflow.projectDir}/bin/run_lorbin.sh").toAbsolutePath()
+    """
+    ${lorbinScript} \\
+      --assembly "${assembly_fasta}" \\
+      --bam "${assembly_bam}" \\
+      --cpus ${task.cpus} \\
+      --attempt ${task.attempt} \\
+      --max-retries ${params.max_retries}
+    """
+
+    stub:
+    """
+    mkdir -p lorbin
+    : > lorbin.contig2bin.tsv
+    : > lorbin.note
+    """
+}
+
+
 process SEMIBIN {
     tag "${sra}:${srr}"
     label 'binning'
@@ -756,6 +790,7 @@ workflow {
     def metabat_results = channel.empty()
     def comebin_results = channel.empty()
     def vamb_results = channel.empty()
+    def lorbin_results = channel.empty()
     def semibin_results = channel.empty()
     def rosella_results = channel.empty()
 
@@ -768,6 +803,9 @@ workflow {
     if ('vamb' in selectedBinners) {
       vamb_results = VAMB(mapped_all).result
     }
+    if ('lorbin' in selectedBinners) {
+      lorbin_results = LORBIN(mapped_all).result
+    }
     if ('semibin' in selectedBinners) {
       semibin_results = SEMIBIN(mapped_all, uniprot_db_ch).result
     }
@@ -779,6 +817,7 @@ workflow {
       .mix(metabat_results)
       .mix(comebin_results)
       .mix(vamb_results)
+      .mix(lorbin_results)
       .mix(semibin_results)
       .mix(rosella_results)
 
