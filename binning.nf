@@ -22,9 +22,9 @@ def helpMessage() {
 
   Optional parameters:
     --outdir        Output directory (default: ./output)
-    --binners       Comma-separated binners for Phase 0 (default: metabat,semibin,rosella)
-    --refiners      Comma-separated refiners for Phase 0 (default: dastool)
-    --gpu           Reserved for future GPU mode; not implemented in Phase 0
+    --binners       Comma-separated CPU-only binners (default: metabat,semibin,rosella; allowed: metabat,semibin,rosella,comebin)
+    --refiners      Comma-separated CPU-only refiners (default: dastool; allowed: dastool)
+    --gpu           Reserved for future GPU mode; not implemented yet
     --max_retries   Maximum number of retries for each process (default: 3)
     --help          Show this help message
 
@@ -39,7 +39,7 @@ def helpMessage() {
 
 
 /*
- * Parse and validate a comma-separated Phase 0 tool selection.
+ * Parse and validate a comma-separated binning tool selection.
  */
 def parsePhase0ToolSelection(rawValue, defaultValue, allowedTools, plannedTools, paramName) {
   def raw = rawValue == null ? defaultValue : rawValue.toString()
@@ -75,11 +75,11 @@ def validatePhase0BinningOptions() {
     error "GPU mode is planned but not implemented yet in Phase 0"
   }
 
-  def plannedTools = ['vamb', 'comebin', 'binette', 'lorbin'] as Set
+  def plannedTools = ['vamb', 'binette', 'lorbin'] as Set
   def binners = parsePhase0ToolSelection(
     params.binners,
     'metabat,semibin,rosella',
-    ['metabat', 'semibin', 'rosella'] as Set,
+    ['metabat', 'semibin', 'rosella', 'comebin'] as Set,
     plannedTools,
     'binners'
   )
@@ -418,6 +418,40 @@ process METABAT {
 }
 
 
+process COMEBIN {
+    tag "${sra}:${srr}"
+    label 'binning'
+    publishDir "${params.outdir}/${sra}/${srr}/binning",
+      mode: 'copy',
+      overwrite: true
+
+    input:
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path(assembly_fasta), path(assembly_bam), path(assembly_csi)
+
+    output:
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler),
+          val("comebin"), path("comebin"), path("comebin.contig2bin.tsv"), path("comebin.note"),             emit: result
+
+    script:
+    def comebinScript = file("${workflow.projectDir}/bin/run_comebin_nf.sh").toAbsolutePath()
+    """
+    ${comebinScript} \\
+      --assembly "${assembly_fasta}" \\
+      --bam "${assembly_bam}" \\
+      --cpus ${task.cpus} \\
+      --attempt ${task.attempt} \\
+      --max-retries ${params.max_retries}
+    """
+
+    stub:
+    """
+    mkdir -p comebin
+    : > comebin.contig2bin.tsv
+    : > comebin.note
+    """
+}
+
+
 process SEMIBIN {
     tag "${sra}:${srr}"
     label 'binning'
@@ -686,11 +720,15 @@ workflow {
       .mix(hifi_mapping.note)
 
     def metabat_results = channel.empty()
+    def comebin_results = channel.empty()
     def semibin_results = channel.empty()
     def rosella_results = channel.empty()
 
     if ('metabat' in selectedBinners) {
       metabat_results = METABAT(mapped_all).result
+    }
+    if ('comebin' in selectedBinners) {
+      comebin_results = COMEBIN(mapped_all).result
     }
     if ('semibin' in selectedBinners) {
       semibin_results = SEMIBIN(mapped_all, uniprot_db_ch).result
@@ -701,6 +739,7 @@ workflow {
 
     def binner_results = channel.empty()
       .mix(metabat_results)
+      .mix(comebin_results)
       .mix(semibin_results)
       .mix(rosella_results)
 
