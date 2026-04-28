@@ -37,7 +37,7 @@ def helpMessage() {
     --help          Show this help message
     --noassembly    Skip ASSEMBLY/BINNING
     --binning       Also run BINNING after ASSEMBLY
-    --binners       Comma-separated CPU-only binners (default: metabat,semibin,rosella; allowed: metabat,semibin,rosella,comebin)
+    --binners       Comma-separated CPU-only binners (default: metabat,semibin,rosella; allowed: metabat,semibin,rosella,comebin,vamb)
     --refiners      Comma-separated CPU-only refiners (default: dastool; allowed: dastool)
     --gpu           Reserved for future GPU mode; not implemented yet
     --outdir        Output directory (default: ./output)
@@ -111,11 +111,11 @@ def validatePhase0BinningOptions() {
     error "GPU mode is planned but not implemented yet in Phase 0"
   }
 
-  def plannedTools = ['vamb', 'binette', 'lorbin'] as Set
+  def plannedTools = ['binette', 'lorbin'] as Set
   def binners = parsePhase0ToolSelection(
     params.binners,
     'metabat,semibin,rosella',
-    ['metabat', 'semibin', 'rosella', 'comebin'] as Set,
+    ['metabat', 'semibin', 'rosella', 'comebin', 'vamb'] as Set,
     plannedTools,
     'binners'
   )
@@ -638,6 +638,32 @@ process COMEBIN {
 }
 
 
+process VAMB {
+    tag "${sra}:${srr}"
+    label 'binning'
+    publishDir "${params.outdir}/${sra}/${srr}/binning",
+      mode: 'copy',
+      overwrite: true
+
+    input:
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path(assembly_fasta), path(assembly_bam), path(assembly_csi)
+
+    output:
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler),
+          val("vamb"), path("vamb"), path("vamb.contig2bin.tsv"), path("vamb.note"),                         emit: result
+
+    script:
+    """
+    run_vamb.sh \\
+      --assembly "${assembly_fasta}" \\
+      --bam "${assembly_bam}" \\
+      --cpus ${task.cpus} \\
+      --attempt ${task.attempt} \\
+      --max-retries ${params.max_retries}
+    """
+}
+
+
 process SEMIBIN {
     tag "${sra}:${srr}"
     label 'binning'
@@ -1010,6 +1036,7 @@ workflow BINNING {
 
     metabat_results = channel.empty()
     comebin_results = channel.empty()
+    vamb_results = channel.empty()
     semibin_results = channel.empty()
     rosella_results = channel.empty()
 
@@ -1018,6 +1045,9 @@ workflow BINNING {
     }
     if ('comebin' in selectedBinners) {
       comebin_results = COMEBIN(binning_input).result
+    }
+    if ('vamb' in selectedBinners) {
+      vamb_results = VAMB(binning_input).result
     }
     if ('semibin' in selectedBinners) {
       semibin_results = SEMIBIN(binning_input, uniprot_db_ch).result
@@ -1029,6 +1059,7 @@ workflow BINNING {
     binner_results = channel.empty()
       .mix(metabat_results)
       .mix(comebin_results)
+      .mix(vamb_results)
       .mix(semibin_results)
       .mix(rosella_results)
 
