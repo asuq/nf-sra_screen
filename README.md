@@ -39,14 +39,14 @@ the pipeline will:
    - **myloasm** for PacBio HiFi
 4. (Assembly mode) Annotate contigs with DIAMOND against UniProt and summarise with BlobToolKit.
 5. (Optional, with `--taxa`) Extract contigs matching user‑specified taxa into per‑taxon FASTA and ID lists.
-6. (Optional, with `--binning`) Run multiple metagenome binners (MetaBAT2, SemiBin, Rosella, and optional COMEBin) and reconcile them with DAS Tool.
+6. (Optional, with `--binning`) Run multiple metagenome binners (MetaBAT2, SemiBin, Rosella, and optional COMEBin/VAMB) and reconcile them with DAS Tool.
 7. Collate a per‑sample `summary.tsv` with counts and failure/success notes, and post‑annotate it using scheduler info from the Nextflow `trace.tsv`.
 
 ### Pipeline modes
 The pipeline has four phases:
 - `PRE_SCREENING` – SRA metadata -> SRR selection -> optional Sandpiper/SingleM screening.
 - `ASSEMBLY` – Assembly, DIAMOND, BlobToolKit, optional taxon extraction.
-- `BINNING` – MetaBAT2, SemiBin, Rosella, optional COMEBin, DAS Tool, and binning note aggregation.
+- `BINNING` – MetaBAT2, SemiBin, Rosella, optional COMEBin/VAMB, DAS Tool, and binning note aggregation.
 - `SUMMARY` – merges all success and failure notes into the final global `summary.tsv`.
 
 You can run it in the following modes:
@@ -211,7 +211,7 @@ C03			SRR12345678	/path/to/C03/assembly.fasta
 - `assembly_fasta`: path to the assembly to bin against.
 - Provide exactly one of `reads` or `srr` in each row.
 
-`binning.nf` skips screening, DIAMOND, BlobToolKit, and taxon extraction. It maps either the supplied local reads or downloaded SRR FASTQs back to `assembly_fasta`, then runs the selected binners (MetaBAT2, SemiBin2, Rosella, and optional COMEBin), DAS Tool, and writes a minimal `summary.tsv`.
+`binning.nf` skips screening, DIAMOND, BlobToolKit, and taxon extraction. It maps either the supplied local reads or downloaded SRR FASTQs back to `assembly_fasta`, then runs the selected binners (MetaBAT2, SemiBin2, Rosella, and optional COMEBin/VAMB), DAS Tool, and writes a minimal `summary.tsv`.
 
 
 ## Usage
@@ -252,7 +252,7 @@ nextflow run binning.nf \
 - `--sandpiper_db`   (Required with `--taxa` and `--sra`) Directory with Sandpiper summary tables. For taxonomy screening
 - `--singlem_db`     (Required with `--taxa`) SingleM metapackage (e.g. S5.4.0.GTDB_r226.metapackage_20250331.smpkg.zb) For taxonomy screening
 - `--binning`        (Optional) Run BINNING after ASSEMBLY (MetaBAT2 + SemiBin + Rosella + DAS Tool by default)
-- `--binners`        Comma-separated CPU-only binners (default: `metabat,semibin,rosella`; allowed: `metabat,semibin,rosella,comebin`)
+- `--binners`        Comma-separated CPU-only binners (default: `metabat,semibin,rosella`; allowed: `metabat,semibin,rosella,comebin,vamb`)
 - `--refiners`       Comma-separated Phase 0 refiners (default: `dastool`; allowed: `dastool`)
 - `--gpu`            Reserved bare flag for future GPU mode. Phase 0 is CPU-only and fails early if `--gpu` is set
 - `--noassembly`     (Optional) Skip ASSEMBLY and BINNING; run PRE_SCREENING + SUMMARY only. If set, `--binning` is ignored
@@ -334,15 +334,18 @@ nextflow run binning.nf \
     binning/
       metabat/
       comebin/
+      vamb/
       semibin/
       rosella/
       dastool/
       metabat.contig2bin.tsv
       comebin.contig2bin.tsv
+      vamb.contig2bin.tsv
       semibin.contig2bin.tsv
       rosella.contig2bin.tsv
       metabat.note                 # if failed
       comebin.note                 # if failed
+      vamb.note                    # if failed
       semibin.note                 # if failed
       rosella.note                 # if failed
       dastool.note                 # if failed
@@ -546,6 +549,7 @@ To reuse this pattern:
 - samtools
 - MetaBAT2
 - COMEBin
+- VAMB
 - SemiBin
 - Rosella
 - DAS Tool
