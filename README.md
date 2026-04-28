@@ -253,7 +253,8 @@ nextflow run binning.nf \
 - `--singlem_db`     (Required with `--taxa`) SingleM metapackage (e.g. S5.4.0.GTDB_r226.metapackage_20250331.smpkg.zb) For taxonomy screening
 - `--binning`        (Optional) Run BINNING after ASSEMBLY (MetaBAT2 + SemiBin + Rosella + DAS Tool by default)
 - `--binners`        Comma-separated CPU-only binners (default: `metabat,semibin,rosella`; allowed: `metabat,semibin,rosella,comebin,vamb,lorbin`)
-- `--refiners`       Comma-separated Phase 0 refiners (default: `dastool`; allowed: `dastool`)
+- `--refiners`       Comma-separated CPU-only refiners (default: `dastool`; allowed: `dastool,binette`)
+- `--checkm2_db`     CheckM2 DIAMOND database required when `--refiners` includes `binette`
 - `--gpu`            Reserved bare flag for future GPU mode. Phase 0 is CPU-only and fails early if `--gpu` is set
 - `--noassembly`     (Optional) Skip ASSEMBLY and BINNING; run PRE_SCREENING + SUMMARY only. If set, `--binning` is ignored
 - `--outdir`         Output directory (default: ./output)
@@ -339,6 +340,7 @@ nextflow run binning.nf \
       semibin/
       rosella/
       dastool/
+      binette/
       metabat.contig2bin.tsv
       comebin.contig2bin.tsv
       vamb.contig2bin.tsv
@@ -352,6 +354,7 @@ nextflow run binning.nf \
       semibin.note                 # if failed
       rosella.note                 # if failed
       dastool.note                 # if failed
+      binette.note                 # if failed
 
   summary.tsv                      # global summary across all samples
 
@@ -557,6 +560,7 @@ To reuse this pattern:
 - SemiBin
 - Rosella
 - DAS Tool
+- Binette
 
 <!-- ## Citations -->
 
