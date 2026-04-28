@@ -564,6 +564,8 @@ To reuse this pattern:
 - DAS Tool
 - Binette
 
+GPU mode on GWDG uses patched CUDA-enabled images for SemiBin, COMEBin, VAMB, and LorBin. The default CPU path keeps the standard CPU containers.
+
 <!-- ## Citations -->
 
 <!-- TODO nf-core: Add citation for pipeline after first release. Uncomment lines below and update Zenodo doi and badge at the top of this file. -->
