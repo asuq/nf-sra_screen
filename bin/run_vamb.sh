@@ -7,6 +7,8 @@
 #   --cpus        threads to use
 #   --attempt     current attempt number (for Nextflow retries)
 #   --max-retries maximum attempts before treating failures as soft
+#   --cuda        pass VAMB's CUDA flag for model training and clustering
+#   --require-cuda fail before binning if PyTorch cannot see CUDA
 
 set -euo pipefail
 
@@ -15,6 +17,8 @@ bam=""
 cpus=1
 attempt=0
 max_retries=1
+use_cuda=false
+require_cuda=false
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -23,6 +27,8 @@ while [[ $# -gt 0 ]]; do
     --cpus) cpus="$2"; shift 2 ;;
     --attempt) attempt="$2"; shift 2 ;;
     --max-retries) max_retries="$2"; shift 2 ;;
+    --cuda) use_cuda=true; shift ;;
+    --require-cuda) require_cuda=true; shift ;;
     *)
       echo "run_vamb.sh: unknown argument: $1" >&2
       exit 1 ;;
@@ -58,6 +64,41 @@ fail() {
   exit 0
 }
 
+require_pytorch_cuda() {
+  python - <<'PY'
+"""Fail clearly unless PyTorch can access a CUDA device."""
+import importlib.util
+import sys
+
+
+def main() -> int:
+    """Check PyTorch CUDA visibility."""
+    if importlib.util.find_spec("torch") is None:
+        print("VAMB GPU mode requires PyTorch, but torch is not installed", file=sys.stderr)
+        return 1
+
+    import torch
+
+    if not torch.cuda.is_available():
+        print("VAMB GPU mode requested, but CUDA is not visible to PyTorch", file=sys.stderr)
+        return 1
+
+    print(
+        f"VAMB GPU preflight: CUDA visible to PyTorch "
+        f"(cuda={torch.version.cuda}, devices={torch.cuda.device_count()})",
+        file=sys.stderr,
+    )
+    return 0
+
+
+raise SystemExit(main())
+PY
+}
+
+if [[ "$require_cuda" == true ]]; then
+  require_pytorch_cuda || fail "VAMB: GPU mode requested but CUDA preflight failed"
+fi
+
 ln -s "$(realpath "$bam")" "${bam_dir}/$(basename "$bam")"
 if [[ -e "${bam}.bai" ]]; then
   ln -s "$(realpath "${bam}.bai")" "${bam_dir}/$(basename "${bam}.bai")"
@@ -66,12 +107,19 @@ if [[ -e "${bam}.csi" ]]; then
   ln -s "$(realpath "${bam}.csi")" "${bam_dir}/$(basename "${bam}.csi")"
 fi
 
-if ! vamb bin default \
-      --outdir "$tmp_dir" \
-      --fasta "$assembly" \
-      --bamdir "$bam_dir" \
-      --minfasta 1 \
-      -p "$cpus"; then
+vamb_args=(
+  vamb bin default
+  --outdir "$tmp_dir"
+  --fasta "$assembly"
+  --bamdir "$bam_dir"
+  --minfasta 1
+  -p "$cpus"
+)
+if [[ "$use_cuda" == true ]]; then
+  vamb_args+=(--cuda)
+fi
+
+if ! "${vamb_args[@]}"; then
   fail "VAMB: bin default failed"
 fi
 
