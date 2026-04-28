@@ -38,10 +38,12 @@ tmp_out="tmp_comebin"
 bam_dir="comebin_bam"
 final_dir="comebin"
 note_file="comebin.note"
+map_file="comebin.contig2bin.tsv"
 
-rm -rf "$tmp_out" "$final_dir" "$note_file" "$bam_dir"
+rm -rf "$tmp_out" "$final_dir" "$note_file" "$map_file" "$bam_dir"
 mkdir -p "$tmp_out" "$bam_dir"
 : > "$note_file"
+: > "$map_file"
 
 fail() {
   local msg="$1"
@@ -52,12 +54,13 @@ fail() {
   # Final attempt: record soft fail but still emit an empty comebin dir & note
   rm -rf "$final_dir"
   mkdir -p "$final_dir"
+  : > "$map_file"
   printf '%s\n' "$msg" > "$note_file"
   exit 0
 }
 
 # Symlink the BAM into a directory, as COMEBin expects a bam directory (-p)
-ln -s "../$(basename "$bam")" "${bam_dir}/$(basename "$bam")"
+ln -s "$(realpath "$bam")" "${bam_dir}/$(basename "$bam")"
 
 # Run COMEBin (CPU mode)
 if ! run_comebin.sh \
@@ -77,3 +80,16 @@ if [[ ! -d "$bins_src" ]]; then
 fi
 
 mv "$bins_src" "$final_dir"
+
+shopt -s nullglob
+for f in "$final_dir"/*; do
+  [[ -f "$f" ]] || continue
+  awk -v bin="${f##*/}" '
+    /^>/ {
+      sub(/^>/, "")
+      split($0, fields, /[[:space:]]+/)
+      print fields[1] "\t" bin
+    }
+  ' "$f" >> "$map_file"
+done
+shopt -u nullglob

@@ -37,9 +37,9 @@ def helpMessage() {
     --help          Show this help message
     --noassembly    Skip ASSEMBLY/BINNING
     --binning       Also run BINNING after ASSEMBLY
-    --binners       Comma-separated binners for Phase 0 (default: metabat,semibin,rosella)
-    --refiners      Comma-separated refiners for Phase 0 (default: dastool)
-    --gpu           Reserved for future GPU mode; not implemented in Phase 0
+    --binners       Comma-separated CPU-only binners (default: metabat,semibin,rosella; allowed: metabat,semibin,rosella,comebin)
+    --refiners      Comma-separated CPU-only refiners (default: dastool; allowed: dastool)
+    --gpu           Reserved for future GPU mode; not implemented yet
     --outdir        Output directory (default: ./output)
     --max_retries   Maximum number of retries for each process (default: 3)
   """.stripIndent()
@@ -104,18 +104,18 @@ def parsePhase0ToolSelection(rawValue, defaultValue, allowedTools, plannedTools,
 
 
 /*
- * Validate reserved Phase 0 binning syntax before workflow construction.
+ * Validate reserved binning syntax before workflow construction.
  */
 def validatePhase0BinningOptions() {
   if (params.gpu?.toString()?.toBoolean()) {
     error "GPU mode is planned but not implemented yet in Phase 0"
   }
 
-  def plannedTools = ['vamb', 'comebin', 'binette', 'lorbin'] as Set
+  def plannedTools = ['vamb', 'binette', 'lorbin'] as Set
   def binners = parsePhase0ToolSelection(
     params.binners,
     'metabat,semibin,rosella',
-    ['metabat', 'semibin', 'rosella'] as Set,
+    ['metabat', 'semibin', 'rosella', 'comebin'] as Set,
     plannedTools,
     'binners'
   )
@@ -612,30 +612,30 @@ process METABAT {
 }
 
 
-// process COMEBIN {
-//     tag "${sra}:${srr}"
-//     label 'binning'
-//     publishDir "${params.outdir}/${sra}/${srr}/binning",
-//       mode: 'copy',
-//       overwrite: true
+process COMEBIN {
+    tag "${sra}:${srr}"
+    label 'binning'
+    publishDir "${params.outdir}/${sra}/${srr}/binning",
+      mode: 'copy',
+      overwrite: true
 
-//     input:
-//     tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path(assembly_fasta), path(assembly_bam), path(assembly_csi)
+    input:
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path(assembly_fasta), path(assembly_bam), path(assembly_csi)
 
-//     output:
-//     tuple val(sra), val(srr), path("comebin"),                                                                emit: bins
-//     tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("comebin.note"), emit: note
+    output:
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler),
+          val("comebin"), path("comebin"), path("comebin.contig2bin.tsv"), path("comebin.note"),             emit: result
 
-//     script:
-//     """
-//     run_comebin_nf.sh \\
-//       --assembly "${assembly_fasta}" \\
-//       --bam "${assembly_bam}" \\
-//       --cpus ${task.cpus} \\
-//       --attempt ${task.attempt} \\
-//       --max-retries ${params.max_retries}
-//     """
-// }
+    script:
+    """
+    run_comebin_nf.sh \\
+      --assembly "${assembly_fasta}" \\
+      --bam "${assembly_bam}" \\
+      --cpus ${task.cpus} \\
+      --attempt ${task.attempt} \\
+      --max-retries ${params.max_retries}
+    """
+}
 
 
 process SEMIBIN {
@@ -1009,11 +1009,15 @@ workflow BINNING {
     def selectedRefiners = phase0Options.refiners
 
     metabat_results = channel.empty()
+    comebin_results = channel.empty()
     semibin_results = channel.empty()
     rosella_results = channel.empty()
 
     if ('metabat' in selectedBinners) {
       metabat_results = METABAT(binning_input).result
+    }
+    if ('comebin' in selectedBinners) {
+      comebin_results = COMEBIN(binning_input).result
     }
     if ('semibin' in selectedBinners) {
       semibin_results = SEMIBIN(binning_input, uniprot_db_ch).result
@@ -1024,6 +1028,7 @@ workflow BINNING {
 
     binner_results = channel.empty()
       .mix(metabat_results)
+      .mix(comebin_results)
       .mix(semibin_results)
       .mix(rosella_results)
 
