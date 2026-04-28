@@ -58,11 +58,44 @@ fail() {
 
 mkdir -p "$tmp_dir"
 
-if ! LorBin bin \
-      --output "$tmp_dir" \
-      --fasta "$assembly" \
-      --bam "$bam" \
-      --num_process "$cpus"; then
+if ! python - "$tmp_dir" "$assembly" "$bam" "$cpus" <<'PY'; then
+"""Run LorBin with numeric thread arguments restored."""
+import sys
+
+from lorbin import lorbin
+
+
+def parser_args_with_numeric_threads(original_parser_args):
+    """Return parsed LorBin arguments after casting numeric CLI values."""
+    args = original_parser_args()
+    args.num_process = int(args.num_process)
+    args.bin_length = int(args.bin_length)
+    args.akeep = float(args.akeep)
+    return args
+
+
+def patched_parser_args():
+    """Parse LorBin CLI arguments with numeric fields fixed."""
+    return parser_args_with_numeric_threads(original_parser_args)
+
+
+output, fasta, bam, cpus = sys.argv[1:5]
+original_parser_args = lorbin.parser_args
+lorbin.parser_args = patched_parser_args
+sys.argv = [
+    "LorBin",
+    "bin",
+    "--output",
+    output,
+    "--fasta",
+    fasta,
+    "--bam",
+    bam,
+    "--num_process",
+    str(int(cpus)),
+]
+lorbin.main()
+PY
   fail "LorBin: bin command failed"
 fi
 
