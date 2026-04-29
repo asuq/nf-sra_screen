@@ -109,6 +109,8 @@ def parser_args_with_numeric_threads(original_parser_args):
     args.num_process = int(args.num_process)
     args.bin_length = int(args.bin_length)
     args.akeep = float(args.akeep)
+    if not hasattr(args, "epoch"):
+        args.epoch = 300
     return args
 
 
