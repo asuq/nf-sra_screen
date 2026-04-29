@@ -20,7 +20,6 @@ bam=""
 cpus=1
 attempt=0
 max_retries=1
-has_bins=false 
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -64,6 +63,42 @@ fail() {
   exit 0
 }
 
+# Publish Rosella FASTA bins and rebuild the normalised contig-to-bin map.
+publish_rosella_bins() {
+  local has_bins=false
+
+  mkdir -p "${tmp_dir}/unbinned" "$final_dir"
+  : > "$map_file"
+
+  shopt -s nullglob
+
+  for f in "$tmp_dir"/*unbinned.fna; do
+    [[ -e "$f" ]] || break
+    mv "$f" "${tmp_dir}/unbinned/"
+  done
+
+  for f in "$tmp_dir"/rosella_*.fna; do
+    [[ -e "$f" ]] || break
+    has_bins=true
+    mv "$f" "$final_dir"/
+  done
+
+  for f in "$final_dir"/rosella_*.fna; do
+    [[ -e "$f" ]] || break
+    awk -v bin="${f##*/}" '
+      /^>/ {
+        sub(/^>/, "")
+        split($0, fields, /[[:space:]]+/)
+        print fields[1] "\t" bin
+      }
+    ' "$f" >> "$map_file"
+  done
+
+  shopt -u nullglob
+
+  [[ "$has_bins" = true ]]
+}
+
 
 if ! rosella recover \
         --assembly "$assembly" \
@@ -80,39 +115,20 @@ if ! rosella recover \
     exit 0
   fi
 
+  if grep -q "Found array with 0 feature(s)" "$log_file" && compgen -G "${tmp_dir}/rosella_*.fna" > /dev/null; then
+    msg="Rosella: refinement failed after bins were produced; using unrefined bins"
+    echo "$msg" >&2
+    if [[ "$attempt" -lt "$max_retries" ]]; then
+      exit 1
+    fi
+    publish_rosella_bins
+    printf '%s\n' "$msg" > "$note_file"
+    exit 0
+  fi
+
   fail "Rosella: recover failed"
 fi
 
-mkdir -p "${tmp_dir}/unbinned"
-
-shopt -s nullglob
-
-# Move unbinned sequences aside
-for f in "$tmp_dir"/*unbinned.fna; do
-  [[ -e "$f" ]] || break
-  mv "$f" "${tmp_dir}/unbinned/"
-done
-
-# Move bins if any
-for f in "$tmp_dir"/rosella_*.fna; do
-  [[ -e "$f" ]] || break
-  has_bins=true
-  mv "$f" "$final_dir"/
-done
-
-shopt -u nullglob
-
-if [[ "$has_bins" = false ]]; then
+if ! publish_rosella_bins; then
   echo "Rosella: no rosella_*.fna bins produced" >&2
 fi
-
-for f in "$final_dir"/rosella_*.fna; do
-  [[ -e "$f" ]] || break
-  awk -v bin="${f##*/}" '
-    /^>/ {
-      sub(/^>/, "")
-      split($0, fields, /[[:space:]]+/)
-      print fields[1] "\t" bin
-    }
-  ' "$f" >> "$map_file"
-done
