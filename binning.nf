@@ -310,7 +310,7 @@ process MAP_SHORT {
     tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path(assembly_fasta), path(reads)
 
     output:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("mapped_assembly.fasta"), path("assembly.bam"), path("assembly.bam.csi"), optional: true, emit: mapped
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("assembly.bam"), path("assembly.bam.csi"), optional: true, emit: mapped
     tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("FAIL.note"), optional: true, emit: note
 
     script:
@@ -323,14 +323,10 @@ process MAP_SHORT {
       --attempt ${task.attempt} \\
       --max-retries ${params.max_retries} \\
       --reads ${reads}
-    if [[ -f assembly.bam && -f assembly.bam.csi ]]; then
-      cp -L "${assembly_fasta}" mapped_assembly.fasta
-    fi
     """
 
     stub:
     """
-    : > mapped_assembly.fasta
     : > assembly.bam
     : > assembly.bam.csi
     """
@@ -345,7 +341,7 @@ process MAP_NANO {
     tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path(assembly_fasta), path(reads)
 
     output:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("mapped_assembly.fasta"), path("assembly.bam"), path("assembly.bam.csi"), optional: true, emit: mapped
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("assembly.bam"), path("assembly.bam.csi"), optional: true, emit: mapped
     tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("FAIL.note"), optional: true, emit: note
 
     script:
@@ -358,14 +354,10 @@ process MAP_NANO {
       --attempt ${task.attempt} \\
       --max-retries ${params.max_retries} \\
       --reads ${reads}
-    if [[ -f assembly.bam && -f assembly.bam.csi ]]; then
-      cp -L "${assembly_fasta}" mapped_assembly.fasta
-    fi
     """
 
     stub:
     """
-    : > mapped_assembly.fasta
     : > assembly.bam
     : > assembly.bam.csi
     """
@@ -380,7 +372,7 @@ process MAP_PACBIO {
     tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path(assembly_fasta), path(reads)
 
     output:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("mapped_assembly.fasta"), path("assembly.bam"), path("assembly.bam.csi"), optional: true, emit: mapped
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("assembly.bam"), path("assembly.bam.csi"), optional: true, emit: mapped
     tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("FAIL.note"), optional: true, emit: note
 
     script:
@@ -393,14 +385,10 @@ process MAP_PACBIO {
       --attempt ${task.attempt} \\
       --max-retries ${params.max_retries} \\
       --reads ${reads}
-    if [[ -f assembly.bam && -f assembly.bam.csi ]]; then
-      cp -L "${assembly_fasta}" mapped_assembly.fasta
-    fi
     """
 
     stub:
     """
-    : > mapped_assembly.fasta
     : > assembly.bam
     : > assembly.bam.csi
     """
@@ -415,7 +403,7 @@ process MAP_HIFI {
     tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path(assembly_fasta), path(reads)
 
     output:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("mapped_assembly.fasta"), path("assembly.bam"), path("assembly.bam.csi"), optional: true, emit: mapped
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("assembly.bam"), path("assembly.bam.csi"), optional: true, emit: mapped
     tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("FAIL.note"), optional: true, emit: note
 
     script:
@@ -428,14 +416,10 @@ process MAP_HIFI {
       --attempt ${task.attempt} \\
       --max-retries ${params.max_retries} \\
       --reads ${reads}
-    if [[ -f assembly.bam && -f assembly.bam.csi ]]; then
-      cp -L "${assembly_fasta}" mapped_assembly.fasta
-    fi
     """
 
     stub:
     """
-    : > mapped_assembly.fasta
     : > assembly.bam
     : > assembly.bam.csi
     """
@@ -985,11 +969,28 @@ workflow {
     def pacbio_mapping = MAP_PACBIO(pacbio_ch)
     def hifi_mapping = MAP_HIFI(hifi_ch)
 
-    def mapped_all = channel.empty()
+    def mapped_bams = channel.empty()
       .mix(short_mapping.mapped)
       .mix(nano_mapping.mapped)
       .mix(pacbio_mapping.mapped)
       .mix(hifi_mapping.mapped)
+
+    def assembly_by_sample = mapping_rows.map { sra, srr, platform, model, strategy, assembler, assembly_fasta, _reads ->
+      tuple([sra, srr], [platform, model, strategy, assembler, assembly_fasta])
+    }
+
+    def mapped_bams_by_sample = mapped_bams.map { sra, srr, _platform, _model, _strategy, _assembler, assembly_bam, assembly_csi ->
+      tuple([sra, srr], [assembly_bam, assembly_csi])
+    }
+
+    def mapped_all = assembly_by_sample
+      .join(mapped_bams_by_sample)
+      .map { key, meta, bam_idx ->
+        def (sra, srr) = key
+        def (platform, model, strategy, assembler, assembly_fasta) = meta
+        def (assembly_bam, assembly_csi) = bam_idx
+        tuple(sra, srr, platform, model, strategy, assembler, assembly_fasta, assembly_bam, assembly_csi)
+      }
 
     def failure_note_ch = channel.empty()
       .mix(resolved_srr.note)
