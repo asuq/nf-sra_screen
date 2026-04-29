@@ -85,6 +85,9 @@ else
 fi
 
 awk 'BEGIN { FS = OFS = "\t" }
+  tolower($1) == "clustername" && tolower($2) == "contigname" {
+    next
+  }
   NF >= 2 && $1 != "" && $2 != "" {
     print $2, $1
   }
