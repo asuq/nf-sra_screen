@@ -255,7 +255,8 @@ nextflow run binning.nf \
 - `--binners`        Comma-separated binners (default: `metabat,semibin,rosella`; allowed: `metabat,semibin,rosella,comebin,vamb,lorbin`)
 - `--refiners`       Comma-separated refiners (default: `dastool`; allowed: `dastool,binette`)
 - `--checkm2_db`     CheckM2 DIAMOND database required when `--refiners` includes `binette`
-- `--gpu`            Bare flag enabling GPU variants for SemiBin, COMEBin, VAMB, and LorBin; MetaBAT2 and Rosella stay CPU-only
+- `--semibin_environment` SemiBin2 pretrained environment (default: `global`)
+- `--gpu`            Bare flag enabling GPU variants for COMEBin, VAMB, and LorBin; MetaBAT2, SemiBin, and Rosella stay CPU-only
 - `--noassembly`     (Optional) Skip ASSEMBLY and BINNING; run PRE_SCREENING + SUMMARY only. If set, `--binning` is ignored
 - `--outdir`         Output directory (default: ./output)
 - `--max_retries`    Maximum number of retries per process (default: 3)
@@ -564,7 +565,7 @@ To reuse this pattern:
 - DAS Tool
 - Binette
 
-GPU mode on GWDG uses patched CUDA-enabled images for SemiBin, COMEBin, VAMB, and LorBin. The default CPU path keeps the standard CPU containers.
+GPU mode on GWDG uses patched CUDA-enabled images for COMEBin, VAMB, and LorBin. SemiBin uses its pretrained environment model on CPU.
 
 <!-- ## Citations -->
 

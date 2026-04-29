@@ -40,7 +40,8 @@ def helpMessage() {
     --binners       Comma-separated binners (default: metabat,semibin,rosella; allowed: metabat,semibin,rosella,comebin,vamb,lorbin)
     --refiners      Comma-separated refiners (default: dastool; allowed: dastool,binette)
     --checkm2_db    CheckM2 DIAMOND database required with --refiners binette
-    --gpu           Use GPU variants for SemiBin, COMEBin, VAMB, and LorBin
+    --semibin_environment  SemiBin2 pretrained environment (default: global)
+    --gpu           Use GPU variants for COMEBin, VAMB, and LorBin
     --gpu_type      GPU type for scheduler requests on GWDG (default: A100)
     --gpus          GPU count for scheduler requests on GWDG (default: 1)
     --outdir        Output directory (default: ./output)
@@ -107,6 +108,38 @@ def parsePhase0ToolSelection(rawValue, defaultValue, allowedTools, plannedTools,
 
 
 /*
+ * Validate the selected SemiBin2 pretrained environment.
+ */
+def validateSemibinEnvironment(rawValue) {
+  def selected = (rawValue ?: 'global').toString().trim().toLowerCase()
+  def allowed = [
+    'human_gut',
+    'dog_gut',
+    'ocean',
+    'soil',
+    'cat_gut',
+    'human_oral',
+    'mouse_gut',
+    'pig_gut',
+    'built_environment',
+    'wastewater',
+    'chicken_caecum',
+    'global'
+  ] as Set
+
+  if (!selected) {
+    error "--semibin_environment must not be empty"
+  }
+
+  if (!(selected in allowed)) {
+    error "--semibin_environment includes unsupported environment: ${selected}"
+  }
+
+  selected
+}
+
+
+/*
  * Validate reserved binning syntax before workflow construction.
  */
 def validatePhase0BinningOptions() {
@@ -131,7 +164,12 @@ def validatePhase0BinningOptions() {
     error "--checkm2_db is required when --refiners includes binette"
   }
 
-  [binners: binners, refiners: refiners, gpu: useGpu]
+  [
+    binners: binners,
+    refiners: refiners,
+    gpu: useGpu,
+    semibinEnvironment: validateSemibinEnvironment(params.semibin_environment)
+  ]
 }
 
 
@@ -797,38 +835,11 @@ process SEMIBIN {
       --assembly "${assembly_fasta}" \\
       --bam "${assembly_bam}" \\
       --diamond-db "${uniprot_db}" \\
+      --read-type "${assembler}" \\
+      --environment "${params.semibin_environment}" \\
       --cpus ${task.cpus} \\
       --attempt ${task.attempt} \\
       --max-retries ${params.max_retries}
-    """
-}
-
-
-process SEMIBIN_GPU {
-    tag "${sra}:${srr}"
-    label 'gpu'
-    publishDir "${params.outdir}/${sra}/${srr}/binning",
-      mode: 'copy',
-      overwrite: true
-
-    input:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path(assembly_fasta), path(assembly_bam), path(assembly_csi)
-    path uniprot_db
-
-    output:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler),
-          val("semibin"), path("semibin"), path("semibin.contig2bin.tsv"), path("semibin.note"),             emit: result
-
-    script:
-    """
-    run_semibin.sh \\
-      --assembly "${assembly_fasta}" \\
-      --bam "${assembly_bam}" \\
-      --diamond-db "${uniprot_db}" \\
-      --cpus ${task.cpus} \\
-      --attempt ${task.attempt} \\
-      --max-retries ${params.max_retries} \\
-      --require-cuda
     """
 }
 
@@ -1207,7 +1218,7 @@ workflow BINNING {
     def useGpu = phase0Options.gpu
 
     if (useGpu) {
-      def cpuOnlyBinners = selectedBinners.findAll { it in ['metabat', 'rosella'] }
+      def cpuOnlyBinners = selectedBinners.findAll { it in ['metabat', 'rosella', 'semibin'] }
       if (cpuOnlyBinners) {
         log.warn "GPU mode requested; CPU-only binner(s) will remain on CPU: ${cpuOnlyBinners.join(', ')}"
       }
@@ -1248,12 +1259,7 @@ workflow BINNING {
       }
     }
     if ('semibin' in selectedBinners) {
-      if (useGpu) {
-        semibin_results = SEMIBIN_GPU(binning_input, uniprot_db_ch).result
-      }
-      else {
-        semibin_results = SEMIBIN(binning_input, uniprot_db_ch).result
-      }
+      semibin_results = SEMIBIN(binning_input, uniprot_db_ch).result
     }
     if ('rosella' in selectedBinners) {
       rosella_results = ROSELLA(binning_input).result
