@@ -39,13 +39,7 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Iterable
 
-try:
-    from tqdm import tqdm
-except ImportError:
-
-    def tqdm(iterable: Iterable, *args: object, **kwargs: object) -> Iterable:
-        """Return the iterable unchanged when tqdm is unavailable."""
-        return iterable
+from tqdm import tqdm
 
 
 LOG = logging.getLogger("annotate_summary")
