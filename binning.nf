@@ -22,11 +22,11 @@ def helpMessage() {
 
   Optional parameters:
     --outdir        Output directory (default: ./output)
-    --binners       Comma-separated binners (default: metabat,semibin,rosella; allowed: metabat,semibin,rosella,comebin,vamb,lorbin)
+    --binners       Comma-separated binners (default: auto; allowed: auto,metabat,semibin,rosella,comebin,vamb,lorbin)
     --refiners      Comma-separated refiners (default: dastool; allowed: dastool,binette)
     --checkm2_db    CheckM2 DIAMOND database required with --refiners binette
     --semibin_environment  SemiBin2 pretrained environment (default: global)
-    --gpu           Use GPU variants for COMEBin, VAMB, and LorBin
+    --gpu           Use GPU variants for COMEBin, VAMB, and HiFi-only LorBin
     --gpu_type      GPU type for scheduler requests on GWDG (default: A100)
     --gpus          GPU count for scheduler requests on GWDG (default: 1)
     --max_retries   Maximum number of retries for each process (default: 3)
@@ -43,7 +43,88 @@ def helpMessage() {
 
 
 /*
+ * Return all implemented binners in their stable execution order.
+ */
+def allImplementedBinners() {
+  return ['metabat', 'semibin', 'rosella', 'comebin', 'vamb', 'lorbin']
+}
+
+
+/*
+ * Return the binners compatible with the supplied read type.
+ */
+def compatibleBinnersForReadType(readType) {
+  def binners = ['metabat', 'semibin', 'rosella', 'comebin', 'vamb']
+  if (readType?.toString()?.trim()?.equalsIgnoreCase('hifi')) {
+    binners = binners + ['lorbin']
+  }
+  return binners
+}
+
+
+/*
  * Parse and validate a comma-separated binning tool selection.
+ */
+def parseBinnerSelection(rawValue) {
+  def raw = rawValue == null ? 'auto' : rawValue.toString().trim().toLowerCase()
+  if (!raw) {
+    error "--binners must include at least one tool"
+  }
+
+  if (raw in ['auto', 'all-compatible']) {
+    return [mode: 'auto', tools: allImplementedBinners()]
+  }
+
+  return [
+    mode: 'explicit',
+    tools: parsePhase0ToolSelection(
+      raw,
+      'auto',
+      allImplementedBinners() as Set,
+      [] as Set,
+      'binners'
+    )
+  ]
+}
+
+
+/*
+ * Return the effective binners for one sample, or fail on invalid LorBin use.
+ */
+def binnersForSample(selection, sra, srr, readType) {
+  def readTypeLc = readType?.toString()?.trim()?.toLowerCase()
+  def mode = selection.mode ?: selection.binnerMode
+  def tools = selection.tools ?: selection.binners
+  def selected = mode == 'auto'
+    ? compatibleBinnersForReadType(readTypeLc)
+    : tools
+
+  if ('lorbin' in selected && readTypeLc != 'hifi') {
+    error "LorBin only supports hifi reads; sample ${sra}:${srr} has read_type ${readType}. Remove lorbin from --binners for this run."
+  }
+
+  return selected
+}
+
+
+/*
+ * Test whether a comma-separated binner list includes one tool.
+ */
+def binnerCsvContains(csv, tool) {
+  return csv.toString().split(',').collect { it.trim() }.contains(tool)
+}
+
+
+/*
+ * Count tools in a comma-separated binner list.
+ */
+def binnerCsvSize(csv) {
+  return csv.toString().split(',').collect { it.trim() }.findAll { it }.size()
+}
+
+
+/*
+ * Parse and validate a comma-separated tool selection.
  */
 def parsePhase0ToolSelection(rawValue, defaultValue, allowedTools, plannedTools, paramName) {
   def raw = rawValue == null ? defaultValue : rawValue.toString()
@@ -109,13 +190,7 @@ def validateSemibinEnvironment(rawValue) {
 def validatePhase0BinningOptions() {
   def useGpu = params.gpu?.toString()?.toBoolean() ?: false
   def plannedTools = [] as Set
-  def binners = parsePhase0ToolSelection(
-    params.binners,
-    'metabat,semibin,rosella',
-    ['metabat', 'semibin', 'rosella', 'comebin', 'vamb', 'lorbin'] as Set,
-    plannedTools,
-    'binners'
-  )
+  def binnerSelection = parseBinnerSelection(params.binners)
   def refiners = parsePhase0ToolSelection(
     params.refiners,
     'dastool',
@@ -129,7 +204,8 @@ def validatePhase0BinningOptions() {
   }
 
   [
-    binners: binners,
+    binners: binnerSelection.tools,
+    binnerMode: binnerSelection.mode,
     refiners: refiners,
     gpu: useGpu,
     semibinEnvironment: validateSemibinEnvironment(params.semibin_environment)
@@ -1000,6 +1076,65 @@ workflow {
       .mix(pacbio_mapping.note)
       .mix(hifi_mapping.note)
 
+    def planned_binning_input = mapped_all
+      .map { sra, srr, platform, model, strategy, assembler, assembly_fasta, assembly_bam, assembly_csi ->
+        def sampleBinners = binnersForSample(phase0Options, sra, srr, assembler).join(',')
+        tuple(sra, srr, platform, model, strategy, assembler, assembly_fasta, assembly_bam, assembly_csi, sampleBinners)
+      }
+
+    def binner_plan_by_sample = planned_binning_input
+      .map { sra, srr, platform, model, strategy, assembler, assembly_fasta, assembly_bam, assembly_csi, sampleBinners ->
+        tuple([sra, srr], binnerCsvSize(sampleBinners))
+      }
+
+    def metabat_input = planned_binning_input
+      .filter { sra, srr, platform, model, strategy, assembler, assembly_fasta, assembly_bam, assembly_csi, sampleBinners ->
+        binnerCsvContains(sampleBinners, 'metabat')
+      }
+      .map { sra, srr, platform, model, strategy, assembler, assembly_fasta, assembly_bam, assembly_csi, sampleBinners ->
+        tuple(sra, srr, platform, model, strategy, assembler, assembly_fasta, assembly_bam, assembly_csi)
+      }
+
+    def comebin_input = planned_binning_input
+      .filter { sra, srr, platform, model, strategy, assembler, assembly_fasta, assembly_bam, assembly_csi, sampleBinners ->
+        binnerCsvContains(sampleBinners, 'comebin')
+      }
+      .map { sra, srr, platform, model, strategy, assembler, assembly_fasta, assembly_bam, assembly_csi, sampleBinners ->
+        tuple(sra, srr, platform, model, strategy, assembler, assembly_fasta, assembly_bam, assembly_csi)
+      }
+
+    def vamb_input = planned_binning_input
+      .filter { sra, srr, platform, model, strategy, assembler, assembly_fasta, assembly_bam, assembly_csi, sampleBinners ->
+        binnerCsvContains(sampleBinners, 'vamb')
+      }
+      .map { sra, srr, platform, model, strategy, assembler, assembly_fasta, assembly_bam, assembly_csi, sampleBinners ->
+        tuple(sra, srr, platform, model, strategy, assembler, assembly_fasta, assembly_bam, assembly_csi)
+      }
+
+    def lorbin_input = planned_binning_input
+      .filter { sra, srr, platform, model, strategy, assembler, assembly_fasta, assembly_bam, assembly_csi, sampleBinners ->
+        binnerCsvContains(sampleBinners, 'lorbin')
+      }
+      .map { sra, srr, platform, model, strategy, assembler, assembly_fasta, assembly_bam, assembly_csi, sampleBinners ->
+        tuple(sra, srr, platform, model, strategy, assembler, assembly_fasta, assembly_bam, assembly_csi)
+      }
+
+    def semibin_input = planned_binning_input
+      .filter { sra, srr, platform, model, strategy, assembler, assembly_fasta, assembly_bam, assembly_csi, sampleBinners ->
+        binnerCsvContains(sampleBinners, 'semibin')
+      }
+      .map { sra, srr, platform, model, strategy, assembler, assembly_fasta, assembly_bam, assembly_csi, sampleBinners ->
+        tuple(sra, srr, platform, model, strategy, assembler, assembly_fasta, assembly_bam, assembly_csi)
+      }
+
+    def rosella_input = planned_binning_input
+      .filter { sra, srr, platform, model, strategy, assembler, assembly_fasta, assembly_bam, assembly_csi, sampleBinners ->
+        binnerCsvContains(sampleBinners, 'rosella')
+      }
+      .map { sra, srr, platform, model, strategy, assembler, assembly_fasta, assembly_bam, assembly_csi, sampleBinners ->
+        tuple(sra, srr, platform, model, strategy, assembler, assembly_fasta, assembly_bam, assembly_csi)
+      }
+
     def metabat_results = channel.empty()
     def comebin_results = channel.empty()
     def vamb_results = channel.empty()
@@ -1008,37 +1143,37 @@ workflow {
     def rosella_results = channel.empty()
 
     if ('metabat' in selectedBinners) {
-      metabat_results = METABAT(mapped_all).result
+      metabat_results = METABAT(metabat_input).result
     }
     if ('comebin' in selectedBinners) {
       if (useGpu) {
-        comebin_results = COMEBIN_GPU(mapped_all).result
+        comebin_results = COMEBIN_GPU(comebin_input).result
       }
       else {
-        comebin_results = COMEBIN(mapped_all).result
+        comebin_results = COMEBIN(comebin_input).result
       }
     }
     if ('vamb' in selectedBinners) {
       if (useGpu) {
-        vamb_results = VAMB_GPU(mapped_all).result
+        vamb_results = VAMB_GPU(vamb_input).result
       }
       else {
-        vamb_results = VAMB(mapped_all).result
+        vamb_results = VAMB(vamb_input).result
       }
     }
     if ('lorbin' in selectedBinners) {
       if (useGpu) {
-        lorbin_results = LORBIN_GPU(mapped_all).result
+        lorbin_results = LORBIN_GPU(lorbin_input).result
       }
       else {
-        lorbin_results = LORBIN(mapped_all).result
+        lorbin_results = LORBIN(lorbin_input).result
       }
     }
     if ('semibin' in selectedBinners) {
-      semibin_results = SEMIBIN(mapped_all, uniprot_db_ch).result
+      semibin_results = SEMIBIN(semibin_input, uniprot_db_ch).result
     }
     if ('rosella' in selectedBinners) {
-      rosella_results = ROSELLA(mapped_all).result
+      rosella_results = ROSELLA(rosella_input).result
     }
 
     def binner_results = channel.empty()
@@ -1055,8 +1190,10 @@ workflow {
 
     def binner_maps_by_sample = binner_results
       .map { sra, srr, platform, model, strategy, assembler, tool, bin_dir, contig2bin, note_path ->
-        tuple(groupKey([sra, srr], selectedBinners.size()), [tool, contig2bin])
+        tuple([sra, srr], [tool, contig2bin])
       }
+      .combine(binner_plan_by_sample, by: 0)
+      .map { key, entry, expectedCount -> tuple(groupKey(key, expectedCount as int), entry) }
       .groupTuple()
       .map { key, entries -> tuple(key.target, entries) }
 

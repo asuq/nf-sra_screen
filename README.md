@@ -39,14 +39,14 @@ the pipeline will:
    - **myloasm** for PacBio HiFi
 4. (Assembly mode) Annotate contigs with DIAMOND against UniProt and summarise with BlobToolKit.
 5. (Optional, with `--taxa`) Extract contigs matching user‑specified taxa into per‑taxon FASTA and ID lists.
-6. (Optional, with `--binning`) Run multiple metagenome binners (MetaBAT2, SemiBin, Rosella, and optional COMEBin/VAMB/LorBin) and refine them with DAS Tool and/or Binette.
+6. (Optional, with `--binning`) Run compatible metagenome binners (MetaBAT2, SemiBin, Rosella, COMEBin, VAMB, and HiFi-only LorBin) and refine them with DAS Tool and/or Binette.
 7. Collate a per‑sample `summary.tsv` with counts and failure/success notes, and post‑annotate it using scheduler info from the Nextflow `trace.tsv`.
 
 ### Pipeline modes
 The pipeline has four phases:
 - `PRE_SCREENING` – SRA metadata -> SRR selection -> optional Sandpiper/SingleM screening.
 - `ASSEMBLY` – Assembly, DIAMOND, BlobToolKit, optional taxon extraction.
-- `BINNING` – MetaBAT2, SemiBin, Rosella, optional COMEBin/VAMB/LorBin, DAS Tool/Binette, and binning note aggregation.
+- `BINNING` – MetaBAT2, SemiBin, Rosella, COMEBin, VAMB, HiFi-only LorBin, DAS Tool/Binette, and binning note aggregation.
 - `SUMMARY` – merges all success and failure notes into the final global `summary.tsv`.
 
 You can run it in the following modes:
@@ -211,7 +211,7 @@ C03			SRR12345678	/path/to/C03/assembly.fasta
 - `assembly_fasta`: path to the assembly to bin against.
 - Provide exactly one of `reads` or `srr` in each row.
 
-`binning.nf` skips screening, DIAMOND, BlobToolKit, and taxon extraction. It maps either the supplied local reads or downloaded SRR FASTQs back to `assembly_fasta`, then runs the selected binners (MetaBAT2, SemiBin2, Rosella, and optional COMEBin/VAMB/LorBin), selected refiners (DAS Tool and/or Binette), and writes a minimal `summary.tsv`.
+`binning.nf` skips screening, DIAMOND, BlobToolKit, and taxon extraction. It maps either the supplied local reads or downloaded SRR FASTQs back to `assembly_fasta`, then runs the selected compatible binners (MetaBAT2, SemiBin2, Rosella, COMEBin, VAMB, and HiFi-only LorBin), selected refiners (DAS Tool and/or Binette), and writes a minimal `summary.tsv`.
 
 
 ## Usage
@@ -252,11 +252,11 @@ nextflow run binning.nf \
 - `--sandpiper_db`   (Required with `--taxa` and `--sra`) Directory with Sandpiper summary tables. For taxonomy screening
 - `--singlem_db`     (Required with `--taxa`) SingleM metapackage (e.g. S5.4.0.GTDB_r226.metapackage_20250331.smpkg.zb) For taxonomy screening
 - `--binning`        (Optional) Run BINNING after ASSEMBLY (MetaBAT2 + SemiBin + Rosella + DAS Tool by default)
-- `--binners`        Comma-separated binners (default: `metabat,semibin,rosella`; allowed: `metabat,semibin,rosella,comebin,vamb,lorbin`)
+- `--binners`        Comma-separated binners (default: `auto`; allowed: `auto,metabat,semibin,rosella,comebin,vamb,lorbin`). `auto` runs all read-type-compatible binners; LorBin runs only for HiFi reads.
 - `--refiners`       Comma-separated refiners (default: `dastool`; allowed: `dastool,binette`)
 - `--checkm2_db`     CheckM2 DIAMOND database required when `--refiners` includes `binette`
 - `--semibin_environment` SemiBin2 pretrained environment (default: `global`)
-- `--gpu`            Bare flag enabling GPU variants for COMEBin, VAMB, and LorBin; MetaBAT2, SemiBin, and Rosella stay CPU-only
+- `--gpu`            Bare flag enabling GPU variants for COMEBin, VAMB, and HiFi-only LorBin; MetaBAT2, SemiBin, and Rosella stay CPU-only
 - `--noassembly`     (Optional) Skip ASSEMBLY and BINNING; run PRE_SCREENING + SUMMARY only. If set, `--binning` is ignored
 - `--outdir`         Output directory (default: ./output)
 - `--max_retries`    Maximum number of retries per process (default: 3)
@@ -565,7 +565,7 @@ To reuse this pattern:
 - DAS Tool
 - Binette
 
-GPU mode on GWDG uses patched CUDA-enabled images for COMEBin, VAMB, and LorBin. SemiBin uses its pretrained environment model on CPU.
+GPU mode on GWDG uses patched CUDA-enabled images for COMEBin, VAMB, and HiFi-only LorBin. SemiBin uses its pretrained environment model on CPU.
 
 <!-- ## Citations -->
 
