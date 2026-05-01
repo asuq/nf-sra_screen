@@ -67,20 +67,20 @@ def compatibleBinnersForReadType(readType) {
 /*
  * Parse and validate a comma-separated binning tool selection.
  */
-def parseBinnerSelection(rawValue) {
-  def raw = rawValue == null ? 'auto' : rawValue.toString().trim().toLowerCase()
-  if (!raw) {
+def parseBinnerSelection(raw_selection_value) {
+  def normalised_selection_text = raw_selection_value == null ? 'auto' : raw_selection_value.toString().trim().toLowerCase()
+  if (!normalised_selection_text) {
     error "--binners must include at least one tool"
   }
 
-  if (raw in ['auto', 'all-compatible']) {
+  if (normalised_selection_text in ['auto', 'all-compatible']) {
     return [mode: 'auto', tools: allImplementedBinners()]
   }
 
   return [
     mode: 'explicit',
-    tools: parsePhase0ToolSelection(
-      raw,
+    tools: parseToolSelection(
+      normalised_selection_text,
       'auto',
       allImplementedBinners() as Set,
       [] as Set,
@@ -97,69 +97,69 @@ def binnersForSample(selection, sra, srr, readType) {
   def readTypeLc = readType?.toString()?.trim()?.toLowerCase()
   def mode = selection.mode ?: selection.binnerMode
   def tools = selection.tools ?: selection.binners
-  def selected = mode == 'auto'
+  def selected_binners = mode == 'auto'
     ? compatibleBinnersForReadType(readTypeLc)
     : tools
 
-  if ('lorbin' in selected && readTypeLc != 'hifi') {
+  if ('lorbin' in selected_binners && readTypeLc != 'hifi') {
     error "LorBin only supports hifi reads; sample ${sra}:${srr} has read_type ${readType}. Remove lorbin from --binners for this run."
   }
 
-  return selected
+  return selected_binners
 }
 
 
 /*
  * Test whether a comma-separated binner list includes one tool.
  */
-def binnerCsvContains(csv, tool) {
-  return csv.toString().split(',').collect { it.trim() }.contains(tool)
+def binnerCsvContains(binner_csv, tool) {
+  return binner_csv.toString().split(',').collect { it.trim() }.contains(tool)
 }
 
 
 /*
  * Count tools in a comma-separated binner list.
  */
-def binnerCsvSize(csv) {
-  return csv.toString().split(',').collect { it.trim() }.findAll { it }.size()
+def binnerCsvSize(binner_csv) {
+  return binner_csv.toString().split(',').collect { it.trim() }.findAll { it }.size()
 }
 
 
 /*
  * Parse and validate a comma-separated tool selection.
  */
-def parsePhase0ToolSelection(rawValue, defaultValue, allowedTools, plannedTools, paramName) {
-  def raw = rawValue == null ? defaultValue : rawValue.toString()
-  def selected = raw
+def parseToolSelection(raw_selection_value, defaultValue, allowed_tools, planned_tools, parameter_name) {
+  def normalised_selection_text = raw_selection_value == null ? defaultValue : raw_selection_value.toString()
+  def selected_tools = normalised_selection_text
     .split(',')
     .collect { it.trim().toLowerCase() }
     .findAll { it }
     .unique()
 
-  if (!selected) {
-    error "--${paramName} must include at least one tool"
+  if (!selected_tools) {
+    error "--${parameter_name} must include at least one tool"
   }
 
-  def planned = selected.findAll { it in plannedTools }
-  if (planned) {
-    error "--${paramName} includes planned tool(s) not implemented yet: ${planned.join(', ')}"
+  def planned_but_unimplemented_tools = selected_tools.findAll { it in planned_tools }
+  if (planned_but_unimplemented_tools) {
+    error "--${parameter_name} includes planned tool(s) not implemented yet: ${planned_but_unimplemented_tools.join(', ')}"
   }
 
-  def invalid = selected.findAll { !(it in allowedTools) }
-  if (invalid) {
-    error "--${paramName} includes unsupported tool(s): ${invalid.join(', ')}"
+  def unsupported_tools = selected_tools.findAll { !(it in allowed_tools) }
+  if (unsupported_tools) {
+    error "--${parameter_name} includes unsupported tool(s): ${unsupported_tools.join(', ')}"
   }
 
-  selected
+  selected_tools
 }
 
 
 /*
  * Validate the selected SemiBin2 pretrained environment.
  */
-def validateSemibinEnvironment(rawValue) {
-  def selected = (rawValue ?: 'global').toString().trim().toLowerCase()
-  def allowed = [
+def validateSemibinEnvironment(raw_selection_value) {
+  def selected_environment = (raw_selection_value ?: 'global').toString().trim().toLowerCase()
+  def allowed_environments = [
     'human_gut',
     'dog_gut',
     'ocean',
@@ -174,30 +174,30 @@ def validateSemibinEnvironment(rawValue) {
     'global'
   ] as Set
 
-  if (!selected) {
+  if (!selected_environment) {
     error "--semibin_environment must not be empty"
   }
 
-  if (!(selected in allowed)) {
-    error "--semibin_environment includes unsupported environment: ${selected}"
+  if (!(selected_environment in allowed_environments)) {
+    error "--semibin_environment includes unsupported environment: ${selected_environment}"
   }
 
-  selected
+  selected_environment
 }
 
 
 /*
  * Validate binning syntax before workflow construction.
  */
-def validatePhase0BinningOptions() {
-  def useGpu = params.gpu?.toString()?.toBoolean() ?: false
-  def plannedTools = [] as Set
+def validateBinningOptions() {
+  def use_gpu_binners = params.gpu?.toString()?.toBoolean() ?: false
+  def planned_tools = [] as Set
   def binnerSelection = parseBinnerSelection(params.binners)
-  def refiners = parsePhase0ToolSelection(
+  def refiners = parseToolSelection(
     params.refiners,
     'dastool',
     ['dastool', 'binette'] as Set,
-    plannedTools,
+    planned_tools,
     'refiners'
   )
 
@@ -209,7 +209,7 @@ def validatePhase0BinningOptions() {
     binners: binnerSelection.tools,
     binnerMode: binnerSelection.mode,
     refiners: refiners,
-    gpu: useGpu,
+    gpu: use_gpu_binners,
     semibinEnvironment: validateSemibinEnvironment(params.semibin_environment)
   ]
 }
@@ -963,26 +963,26 @@ workflow {
       missingParametersError()
     }
 
-    def phase0Options = validatePhase0BinningOptions()
-    def selectedBinners = phase0Options.binners
-    def selectedRefiners = phase0Options.refiners
-    def useGpu = phase0Options.gpu
+    def binning_options = validateBinningOptions()
+    def selected_binners = binning_options.binners
+    def selected_refiners = binning_options.refiners
+    def use_gpu_binners = binning_options.gpu
 
-    if (useGpu) {
-      def cpuOnlyBinners = selectedBinners.findAll { it in ['metabat', 'rosella', 'semibin'] }
-      if (cpuOnlyBinners) {
-        log.warn "GPU mode requested; CPU-only binner(s) will remain on CPU: ${cpuOnlyBinners.join(', ')}"
+    if (use_gpu_binners) {
+      def cpu_only_binners = selected_binners.findAll { it in ['metabat', 'rosella', 'semibin'] }
+      if (cpu_only_binners) {
+        log.warn "GPU mode requested; CPU-only binner(s) will remain on CPU: ${cpu_only_binners.join(', ')}"
       }
     }
 
     def outdir = file(params.outdir ?: './output').toAbsolutePath().toString()
     def uniprot_db_ch = channel.value(file(params.uniprot_db, checkIfExists: true))
 
-    def binning_rows = channel.fromPath(params.binning_tsv, checkIfExists: true)
+    def binning_rows_channel = channel.fromPath(params.binning_tsv, checkIfExists: true)
       .splitCsv(header: true, sep: '\t', strip: true)
       .map { row -> normaliseBinningRow(row) }
 
-    def local_rows = binning_rows
+    def local_binning_rows_channel = binning_rows_channel
       .filter { row -> row.mode == 'local' }
       .map { row ->
         tuple(
@@ -998,14 +998,14 @@ workflow {
         )
       }
 
-    def srr_rows = binning_rows
+    def srr_binning_rows_channel = binning_rows_channel
       .filter { row -> row.mode == 'srr' }
       .map { row ->
         tuple(row.sra, row.srr, row.assembly_fasta)
       }
 
-    def resolved_srr = RESOLVE_SRR_METADATA(srr_rows)
-    def resolved_srr_rows = resolved_srr.resolved.map { sra, srr, resolved_tsv, assembly_fasta ->
+    def resolved_srr_out = RESOLVE_SRR_METADATA(srr_binning_rows_channel)
+    def resolved_srr_rows_channel = resolved_srr_out.resolved.map { sra, srr, resolved_tsv, assembly_fasta ->
       def resolved = parseResolvedMetadata(sra, srr, resolved_tsv)
       tuple(
         resolved[0],
@@ -1019,125 +1019,125 @@ workflow {
       )
     }
 
-    def downloaded_srr = DOWNLOAD_SRR(resolved_srr_rows)
-    def downloaded_rows = downloaded_srr.reads.map { sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, reads, asm_txt ->
+    def downloaded_srr_out = DOWNLOAD_SRR(resolved_srr_rows_channel)
+    def downloaded_binning_rows_channel = downloaded_srr_out.reads.map { sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, reads, asm_txt ->
       def fixedReadType = file(asm_txt).text.trim() ?: read_type
       tuple(sra, srr, platform, model, strategy, fixedReadType, assembler, assembly_fasta, reads)
     }
 
-    def mapping_rows = channel.empty()
-      .mix(local_rows)
-      .mix(downloaded_rows)
+    def mapping_input_rows_channel = channel.empty()
+      .mix(local_binning_rows_channel)
+      .mix(downloaded_binning_rows_channel)
 
-    def short_ch = mapping_rows
+    def short_mapping_rows_channel = mapping_input_rows_channel
       .filter { _sra, _srr, _platform, _model, _strategy, read_type, _assembler, _assembly_fasta, _reads ->
         read_type.equalsIgnoreCase('short')
       }
-    def nano_ch = mapping_rows
+    def nanopore_mapping_rows_channel = mapping_input_rows_channel
       .filter { _sra, _srr, _platform, _model, _strategy, read_type, _assembler, _assembly_fasta, _reads ->
         read_type.equalsIgnoreCase('nanopore')
       }
-    def pacbio_ch = mapping_rows
+    def pacbio_mapping_rows_channel = mapping_input_rows_channel
       .filter { _sra, _srr, _platform, _model, _strategy, read_type, _assembler, _assembly_fasta, _reads ->
         read_type.equalsIgnoreCase('pacbio')
       }
-    def hifi_ch = mapping_rows
+    def hifi_mapping_rows_channel = mapping_input_rows_channel
       .filter { _sra, _srr, _platform, _model, _strategy, read_type, _assembler, _assembly_fasta, _reads ->
         read_type.equalsIgnoreCase('hifi')
       }
 
-    def short_mapping = MAP_SHORT(short_ch)
-    def nano_mapping = MAP_NANO(nano_ch)
-    def pacbio_mapping = MAP_PACBIO(pacbio_ch)
-    def hifi_mapping = MAP_HIFI(hifi_ch)
+    def short_mapping_out = MAP_SHORT(short_mapping_rows_channel)
+    def nanopore_mapping_out = MAP_NANO(nanopore_mapping_rows_channel)
+    def pacbio_mapping_out = MAP_PACBIO(pacbio_mapping_rows_channel)
+    def hifi_mapping_out = MAP_HIFI(hifi_mapping_rows_channel)
 
-    def mapped_bams = channel.empty()
-      .mix(short_mapping.mapped)
-      .mix(nano_mapping.mapped)
-      .mix(pacbio_mapping.mapped)
-      .mix(hifi_mapping.mapped)
+    def mapped_bam_channel = channel.empty()
+      .mix(short_mapping_out.mapped)
+      .mix(nanopore_mapping_out.mapped)
+      .mix(pacbio_mapping_out.mapped)
+      .mix(hifi_mapping_out.mapped)
 
-    def assembly_by_sample = mapping_rows.map { sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, _reads ->
+    def assembly_fasta_by_sample_key = mapping_input_rows_channel.map { sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, _reads ->
       tuple([sra, srr, read_type, assembler], [platform, model, strategy, assembly_fasta])
     }
 
-    def mapped_bams_by_sample = mapped_bams.map { sra, srr, _platform, _model, _strategy, read_type, assembler, assembly_bam, assembly_csi ->
+    def mapped_bam_by_sample_key = mapped_bam_channel.map { sra, srr, _platform, _model, _strategy, read_type, assembler, assembly_bam, assembly_csi ->
       tuple([sra, srr, read_type, assembler], [assembly_bam, assembly_csi])
     }
 
-    def mapped_all = assembly_by_sample
-      .join(mapped_bams_by_sample)
-      .map { key, meta, bam_idx ->
-        def (sra, srr, read_type, assembler) = key
-        def (platform, model, strategy, assembly_fasta) = meta
-        def (assembly_bam, assembly_csi) = bam_idx
+    def mapped_assembly_rows_channel = assembly_fasta_by_sample_key
+      .join(mapped_bam_by_sample_key)
+      .map { sample_join_key, assembly_payload, bam_payload ->
+        def (sra, srr, read_type, assembler) = sample_join_key
+        def (platform, model, strategy, assembly_fasta) = assembly_payload
+        def (assembly_bam, assembly_csi) = bam_payload
         tuple(sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, assembly_bam, assembly_csi)
       }
 
-    def failure_note_ch = channel.empty()
-      .mix(resolved_srr.note)
-      .mix(downloaded_srr.note)
-      .mix(short_mapping.note)
-      .mix(nano_mapping.note)
-      .mix(pacbio_mapping.note)
-      .mix(hifi_mapping.note)
+    def mapping_failure_note_channel = channel.empty()
+      .mix(resolved_srr_out.note)
+      .mix(downloaded_srr_out.note)
+      .mix(short_mapping_out.note)
+      .mix(nanopore_mapping_out.note)
+      .mix(pacbio_mapping_out.note)
+      .mix(hifi_mapping_out.note)
 
-    def planned_binning_input = mapped_all
+    def planned_binning_input = mapped_assembly_rows_channel
       .map { sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, assembly_bam, assembly_csi ->
-        def sampleBinners = binnersForSample(phase0Options, sra, srr, read_type).join(',')
-        tuple(sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, assembly_bam, assembly_csi, sampleBinners)
+        def sample_binner_csv = binnersForSample(binning_options, sra, srr, read_type).join(',')
+        tuple(sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, assembly_bam, assembly_csi, sample_binner_csv)
       }
 
     def binner_plan_by_sample = planned_binning_input
-      .map { sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, assembly_bam, assembly_csi, sampleBinners ->
-        tuple([sra, srr, read_type, assembler], binnerCsvSize(sampleBinners))
+      .map { sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, assembly_bam, assembly_csi, sample_binner_csv ->
+        tuple([sra, srr, read_type, assembler], binnerCsvSize(sample_binner_csv))
       }
 
     def metabat_input = planned_binning_input
-      .filter { sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, assembly_bam, assembly_csi, sampleBinners ->
-        binnerCsvContains(sampleBinners, 'metabat')
+      .filter { sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, assembly_bam, assembly_csi, sample_binner_csv ->
+        binnerCsvContains(sample_binner_csv, 'metabat')
       }
-      .map { sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, assembly_bam, assembly_csi, sampleBinners ->
+      .map { sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, assembly_bam, assembly_csi, sample_binner_csv ->
         tuple(sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, assembly_bam, assembly_csi)
       }
 
     def comebin_input = planned_binning_input
-      .filter { sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, assembly_bam, assembly_csi, sampleBinners ->
-        binnerCsvContains(sampleBinners, 'comebin')
+      .filter { sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, assembly_bam, assembly_csi, sample_binner_csv ->
+        binnerCsvContains(sample_binner_csv, 'comebin')
       }
-      .map { sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, assembly_bam, assembly_csi, sampleBinners ->
+      .map { sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, assembly_bam, assembly_csi, sample_binner_csv ->
         tuple(sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, assembly_bam, assembly_csi)
       }
 
     def vamb_input = planned_binning_input
-      .filter { sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, assembly_bam, assembly_csi, sampleBinners ->
-        binnerCsvContains(sampleBinners, 'vamb')
+      .filter { sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, assembly_bam, assembly_csi, sample_binner_csv ->
+        binnerCsvContains(sample_binner_csv, 'vamb')
       }
-      .map { sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, assembly_bam, assembly_csi, sampleBinners ->
+      .map { sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, assembly_bam, assembly_csi, sample_binner_csv ->
         tuple(sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, assembly_bam, assembly_csi)
       }
 
     def lorbin_input = planned_binning_input
-      .filter { sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, assembly_bam, assembly_csi, sampleBinners ->
-        binnerCsvContains(sampleBinners, 'lorbin')
+      .filter { sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, assembly_bam, assembly_csi, sample_binner_csv ->
+        binnerCsvContains(sample_binner_csv, 'lorbin')
       }
-      .map { sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, assembly_bam, assembly_csi, sampleBinners ->
+      .map { sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, assembly_bam, assembly_csi, sample_binner_csv ->
         tuple(sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, assembly_bam, assembly_csi)
       }
 
     def semibin_input = planned_binning_input
-      .filter { sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, assembly_bam, assembly_csi, sampleBinners ->
-        binnerCsvContains(sampleBinners, 'semibin')
+      .filter { sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, assembly_bam, assembly_csi, sample_binner_csv ->
+        binnerCsvContains(sample_binner_csv, 'semibin')
       }
-      .map { sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, assembly_bam, assembly_csi, sampleBinners ->
+      .map { sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, assembly_bam, assembly_csi, sample_binner_csv ->
         tuple(sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, assembly_bam, assembly_csi)
       }
 
     def rosella_input = planned_binning_input
-      .filter { sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, assembly_bam, assembly_csi, sampleBinners ->
-        binnerCsvContains(sampleBinners, 'rosella')
+      .filter { sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, assembly_bam, assembly_csi, sample_binner_csv ->
+        binnerCsvContains(sample_binner_csv, 'rosella')
       }
-      .map { sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, assembly_bam, assembly_csi, sampleBinners ->
+      .map { sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, assembly_bam, assembly_csi, sample_binner_csv ->
         tuple(sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, assembly_bam, assembly_csi)
       }
 
@@ -1148,37 +1148,37 @@ workflow {
     def semibin_results = channel.empty()
     def rosella_results = channel.empty()
 
-    if ('metabat' in selectedBinners) {
+    if ('metabat' in selected_binners) {
       metabat_results = METABAT(metabat_input).result
     }
-    if ('comebin' in selectedBinners) {
-      if (useGpu) {
+    if ('comebin' in selected_binners) {
+      if (use_gpu_binners) {
         comebin_results = COMEBIN_GPU(comebin_input).result
       }
       else {
         comebin_results = COMEBIN(comebin_input).result
       }
     }
-    if ('vamb' in selectedBinners) {
-      if (useGpu) {
+    if ('vamb' in selected_binners) {
+      if (use_gpu_binners) {
         vamb_results = VAMB_GPU(vamb_input).result
       }
       else {
         vamb_results = VAMB(vamb_input).result
       }
     }
-    if ('lorbin' in selectedBinners) {
-      if (useGpu) {
+    if ('lorbin' in selected_binners) {
+      if (use_gpu_binners) {
         lorbin_results = LORBIN_GPU(lorbin_input).result
       }
       else {
         lorbin_results = LORBIN(lorbin_input).result
       }
     }
-    if ('semibin' in selectedBinners) {
+    if ('semibin' in selected_binners) {
       semibin_results = SEMIBIN(semibin_input, uniprot_db_ch).result
     }
-    if ('rosella' in selectedBinners) {
+    if ('rosella' in selected_binners) {
       rosella_results = ROSELLA(rosella_input).result
     }
 
@@ -1190,7 +1190,7 @@ workflow {
       .mix(semibin_results)
       .mix(rosella_results)
 
-    def dastool_base_by = mapped_all.map { sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, _bam, _csi ->
+    def dastool_base_by = mapped_assembly_rows_channel.map { sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, _bam, _csi ->
       tuple([sra, srr, read_type, assembler], [platform, model, strategy, assembly_fasta])
     }
 
@@ -1199,16 +1199,16 @@ workflow {
         tuple([sra, srr, read_type, assembler], [tool, contig2bin])
       }
       .combine(binner_plan_by_sample, by: 0)
-      .map { key, entry, expectedCount -> tuple(groupKey(key, expectedCount as int), entry) }
+      .map { sample_join_key, binner_map_payload, expectedCount -> tuple(groupKey(sample_join_key, expectedCount as int), binner_map_payload) }
       .groupTuple()
-      .map { key, entries -> tuple(key.target, entries) }
+      .map { grouped_sample_key, binner_map_entries -> tuple(grouped_sample_key.target, binner_map_entries) }
 
     def dastool_join = dastool_base_by.join(binner_maps_by_sample)
 
-    def dastool_in = dastool_join.map { key, meta, entries ->
-      def (sra, srr, read_type, assembler) = key
-      def (platform, model, strategy, assembly_fasta) = meta
-      def contig2bin_maps = entries.collect { entry -> entry[1] }
+    def dastool_in = dastool_join.map { sample_join_key, assembly_payload, binner_map_entries ->
+      def (sra, srr, read_type, assembler) = sample_join_key
+      def (platform, model, strategy, assembly_fasta) = assembly_payload
+      def contig2bin_maps = binner_map_entries.collect { binner_map_entry -> binner_map_entry[1] }
       tuple(
         sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta,
         contig2bin_maps
@@ -1216,28 +1216,28 @@ workflow {
     }
 
     def dastool_note_entries = channel.empty()
-    if ('dastool' in selectedRefiners) {
+    if ('dastool' in selected_refiners) {
       dastool_note_entries = DASTOOL(dastool_in).note.map { sra, srr, platform, model, strategy, read_type, assembler, note_path ->
         tuple(sra, srr, platform, model, strategy, read_type, assembler, 'dastool', note_path)
       }
     }
 
     def binette_note_entries = channel.empty()
-    if ('binette' in selectedRefiners) {
+    if ('binette' in selected_refiners) {
       def checkm2_db_ch = Channel.value(file(params.checkm2_db, checkIfExists: true))
       binette_note_entries = BINETTE(dastool_in, checkm2_db_ch).note.map { sra, srr, platform, model, strategy, read_type, assembler, note_path ->
         tuple(sra, srr, platform, model, strategy, read_type, assembler, 'binette', note_path)
       }
     }
 
-    def success_meta = mapped_all
+    def successful_mapping_rows_channel = mapped_assembly_rows_channel
       .map { sra, srr, platform, model, strategy, read_type, assembler, _assembly_fasta, _bam, _csi ->
         tuple(sra, srr, platform, model, strategy, read_type, assembler, '')
       }
       .distinct()
 
-    def empty_summary = CREATE_EMPTY_SUMMARY(success_meta).skipped_rows
-    def succeeded_rows = empty_summary.map { sra, srr, platform, model, strategy, read_type, assembler, summary_csv, _note ->
+    def empty_summary_out = CREATE_EMPTY_SUMMARY(successful_mapping_rows_channel).skipped_rows
+    def succeeded_rows = empty_summary_out.map { sra, srr, platform, model, strategy, read_type, assembler, summary_csv, _note ->
       tuple(sra, srr, platform, model, strategy, read_type, assembler, summary_csv, '')
     }
 
@@ -1245,7 +1245,7 @@ workflow {
       tuple(sra, srr, platform, model, strategy, read_type, assembler, tool, note_path)
     }
 
-    def binning_notes = channel.empty()
+    def binning_notes_by_sample_channel = channel.empty()
       .mix(binner_note_entries)
       .mix(dastool_note_entries)
       .mix(binette_note_entries)
@@ -1253,31 +1253,31 @@ workflow {
         tuple([sra, srr, platform, model, strategy, read_type, assembler], [tool, note_path])
       }
       .groupTuple()
-      .map { key, items ->
-        def (sra, srr, platform, model, strategy, read_type, assembler) = key
-        def noteText = items
+      .map { sample_key, note_entries ->
+        def (sra, srr, platform, model, strategy, read_type, assembler) = sample_key
+        def note_text = note_entries
           .sort { left, right -> left[0] <=> right[0] }
-          .collect { entry ->
-            def notePath = entry[1]
-            def text = file(notePath as String).text.trim()
-            text ? "${entry[0]}: ${text}" : null
+          .collect { note_entry ->
+            def note_path = note_entry[1]
+            def text = file(note_path as String).text.trim()
+            text ? "${note_entry[0]}: ${text}" : null
           }
           .findAll { it }
           .join('; ')
-        tuple(sra, srr, platform, model, strategy, read_type, assembler, noteText)
+        tuple(sra, srr, platform, model, strategy, read_type, assembler, note_text)
       }
 
-    def final_success = succeeded_rows
+    def final_success_rows_channel = succeeded_rows
       .map { sra, srr, platform, model, strategy, read_type, assembler, summary_csv, note ->
         tuple([sra, srr, platform, model, strategy, read_type, assembler], [summary_csv, note])
       }
-      .join(binning_notes.map { sra, srr, platform, model, strategy, read_type, assembler, note ->
+      .join(binning_notes_by_sample_channel.map { sra, srr, platform, model, strategy, read_type, assembler, note ->
         tuple([sra, srr, platform, model, strategy, read_type, assembler], note)
       })
-      .map { key, summary_entry, binning_note ->
-        def (sra, srr, platform, model, strategy, read_type, assembler) = key
-        def summary_csv = summary_entry[0]
-        def base_note = summary_entry[1] ?: ''
+      .map { sample_key, summary_payload, binning_note ->
+        def (sra, srr, platform, model, strategy, read_type, assembler) = sample_key
+        def summary_csv = summary_payload[0]
+        def base_note = summary_payload[1] ?: ''
         def extra_note = (binning_note ?: '').trim()
         def final_note = base_note
         if (extra_note) {
@@ -1286,18 +1286,18 @@ workflow {
         tuple(sra, srr, platform, model, strategy, read_type, assembler, summary_csv, final_note)
       }
 
-    def mapping_errors = failure_note_ch.map { sra, srr, platform, model, strategy, read_type, assembler, note_path ->
+    def mapping_errors = mapping_failure_note_channel.map { sra, srr, platform, model, strategy, read_type, assembler, note_path ->
       def note = file(note_path).text.trim()
       tuple(sra, srr, platform, model, strategy, read_type, assembler, note)
     }
 
     def failed_rows = CREATE_EMPTY_FAILURE_SUMMARY(mapping_errors)
 
-    def summary_rows = channel.empty()
-      .mix(final_success)
+    def summary_rows_channel = channel.empty()
+      .mix(final_success_rows_channel)
       .mix(failed_rows)
 
-    APPEND_SUMMARY(summary_rows, outdir)
+    APPEND_SUMMARY(summary_rows_channel, outdir)
 
     workflow.onComplete = {
       def outdirPath = file(params.outdir ?: './output').toAbsolutePath()

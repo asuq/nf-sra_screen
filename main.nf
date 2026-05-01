@@ -103,20 +103,20 @@ def compatibleBinnersForReadType(readType) {
 /*
  * Parse and validate a comma-separated binning tool selection.
  */
-def parseBinnerSelection(rawValue) {
-  def raw = rawValue == null ? 'auto' : rawValue.toString().trim().toLowerCase()
-  if (!raw) {
+def parseBinnerSelection(raw_selection_value) {
+  def normalised_selection_text = raw_selection_value == null ? 'auto' : raw_selection_value.toString().trim().toLowerCase()
+  if (!normalised_selection_text) {
     error "--binners must include at least one tool"
   }
 
-  if (raw in ['auto', 'all-compatible']) {
+  if (normalised_selection_text in ['auto', 'all-compatible']) {
     return [mode: 'auto', tools: allImplementedBinners()]
   }
 
   return [
     mode: 'explicit',
-    tools: parsePhase0ToolSelection(
-      raw,
+    tools: parseToolSelection(
+      normalised_selection_text,
       'auto',
       allImplementedBinners() as Set,
       [] as Set,
@@ -133,69 +133,69 @@ def binnersForSample(selection, sra, srr, readType) {
   def readTypeLc = readType?.toString()?.trim()?.toLowerCase()
   def mode = selection.mode ?: selection.binnerMode
   def tools = selection.tools ?: selection.binners
-  def selected = mode == 'auto'
+  def selected_binners = mode == 'auto'
     ? compatibleBinnersForReadType(readTypeLc)
     : tools
 
-  if ('lorbin' in selected && readTypeLc != 'hifi') {
+  if ('lorbin' in selected_binners && readTypeLc != 'hifi') {
     error "LorBin only supports hifi reads; sample ${sra}:${srr} has read_type ${readType}. Remove lorbin from --binners for this run."
   }
 
-  return selected
+  return selected_binners
 }
 
 
 /*
  * Test whether a comma-separated binner list includes one tool.
  */
-def binnerCsvContains(csv, tool) {
-  return csv.toString().split(',').collect { it.trim() }.contains(tool)
+def binnerCsvContains(binner_csv, tool) {
+  return binner_csv.toString().split(',').collect { it.trim() }.contains(tool)
 }
 
 
 /*
  * Count tools in a comma-separated binner list.
  */
-def binnerCsvSize(csv) {
-  return csv.toString().split(',').collect { it.trim() }.findAll { it }.size()
+def binnerCsvSize(binner_csv) {
+  return binner_csv.toString().split(',').collect { it.trim() }.findAll { it }.size()
 }
 
 
 /*
  * Parse and validate a comma-separated tool selection.
  */
-def parsePhase0ToolSelection(rawValue, defaultValue, allowedTools, plannedTools, paramName) {
-  def raw = rawValue == null ? defaultValue : rawValue.toString()
-  def selected = raw
+def parseToolSelection(raw_selection_value, defaultValue, allowed_tools, planned_tools, parameter_name) {
+  def normalised_selection_text = raw_selection_value == null ? defaultValue : raw_selection_value.toString()
+  def selected_tools = normalised_selection_text
     .split(',')
     .collect { it.trim().toLowerCase() }
     .findAll { it }
     .unique()
 
-  if (!selected) {
-    error "--${paramName} must include at least one tool"
+  if (!selected_tools) {
+    error "--${parameter_name} must include at least one tool"
   }
 
-  def planned = selected.findAll { it in plannedTools }
-  if (planned) {
-    error "--${paramName} includes planned tool(s) not implemented yet: ${planned.join(', ')}"
+  def planned_but_unimplemented_tools = selected_tools.findAll { it in planned_tools }
+  if (planned_but_unimplemented_tools) {
+    error "--${parameter_name} includes planned tool(s) not implemented yet: ${planned_but_unimplemented_tools.join(', ')}"
   }
 
-  def invalid = selected.findAll { !(it in allowedTools) }
-  if (invalid) {
-    error "--${paramName} includes unsupported tool(s): ${invalid.join(', ')}"
+  def unsupported_tools = selected_tools.findAll { !(it in allowed_tools) }
+  if (unsupported_tools) {
+    error "--${parameter_name} includes unsupported tool(s): ${unsupported_tools.join(', ')}"
   }
 
-  selected
+  selected_tools
 }
 
 
 /*
  * Validate the selected SemiBin2 pretrained environment.
  */
-def validateSemibinEnvironment(rawValue) {
-  def selected = (rawValue ?: 'global').toString().trim().toLowerCase()
-  def allowed = [
+def validateSemibinEnvironment(raw_selection_value) {
+  def selected_environment = (raw_selection_value ?: 'global').toString().trim().toLowerCase()
+  def allowed_environments = [
     'human_gut',
     'dog_gut',
     'ocean',
@@ -210,30 +210,30 @@ def validateSemibinEnvironment(rawValue) {
     'global'
   ] as Set
 
-  if (!selected) {
+  if (!selected_environment) {
     error "--semibin_environment must not be empty"
   }
 
-  if (!(selected in allowed)) {
-    error "--semibin_environment includes unsupported environment: ${selected}"
+  if (!(selected_environment in allowed_environments)) {
+    error "--semibin_environment includes unsupported environment: ${selected_environment}"
   }
 
-  selected
+  selected_environment
 }
 
 
 /*
  * Validate reserved binning syntax before workflow construction.
  */
-def validatePhase0BinningOptions() {
-  def useGpu = params.gpu?.toString()?.toBoolean() ?: false
-  def plannedTools = [] as Set
+def validateBinningOptions() {
+  def use_gpu_binners = params.gpu?.toString()?.toBoolean() ?: false
+  def planned_tools = [] as Set
   def binnerSelection = parseBinnerSelection(params.binners)
-  def refiners = parsePhase0ToolSelection(
+  def refiners = parseToolSelection(
     params.refiners,
     'dastool',
     ['dastool', 'binette'] as Set,
-    plannedTools,
+    planned_tools,
     'refiners'
   )
 
@@ -245,7 +245,7 @@ def validatePhase0BinningOptions() {
     binners: binnerSelection.tools,
     binnerMode: binnerSelection.mode,
     refiners: refiners,
-    gpu: useGpu,
+    gpu: use_gpu_binners,
     semibinEnvironment: validateSemibinEnvironment(params.semibin_environment)
   ]
 }
@@ -268,8 +268,8 @@ def canonicalAssemblerName(name) {
  * Parse and validate the assembler selection CLI parameter.
  */
 def selectedAssemblerTokens() {
-  def rawValue = params.assembler ?: params.assemblers ?: 'auto'
-  def rawTokens = rawValue.toString()
+  def raw_selection_value = params.assembler ?: params.assemblers ?: 'auto'
+  def rawTokens = raw_selection_value.toString()
     .split(/\s*,\s*/)
     .collect { canonicalAssemblerName(it) }
     .findAll { it }
@@ -1173,7 +1173,7 @@ process APPEND_SUMMARY {
 //-- Workflow ------------------------------------------------------------------
 workflow PRE_SCREENING {
   take:
-    sra_ch
+    sra_accessions_channel
     validated_taxa
     sandpiper_db_ch
     singlem_db_ch
@@ -1182,12 +1182,12 @@ workflow PRE_SCREENING {
     def doScreening = params.taxa != null
 
     // Start PRE_SCREENING after taxa validation
-    def gated_sra_ch = doScreening
-                        ? sra_ch.combine(validated_taxa).map { sra, vt -> sra }
-                        : sra_ch
+    def gated_sra_accessions_channel = doScreening
+                        ? sra_accessions_channel.combine(validated_taxa).map { sra, vt -> sra }
+                        : sra_accessions_channel
 
     // Extract metadata & filter SRR
-    sra_metadata = DOWNLOAD_SRA_METADATA(gated_sra_ch)
+    sra_metadata = DOWNLOAD_SRA_METADATA(gated_sra_accessions_channel)
     filtered_srr = sra_metadata.filtered_sra
 
     // Build nested channels per CSV, then flatten
@@ -1301,71 +1301,71 @@ workflow ASSEMBLY {
 
     assembler_selection_note = CREATE_ASSEMBLER_SELECTION_NOTE(assembler_selection_errors)
 
-    metaspades_ch = selected_reads.filter { sra, srr, platform, model, strategy, read_type, assembler, reads ->
+    metaspades_reads_channel = selected_reads.filter { sra, srr, platform, model, strategy, read_type, assembler, reads ->
       read_type.equalsIgnoreCase('short') && assembler == 'metaspades'
     }
-    unicycler_ch = selected_reads.filter { sra, srr, platform, model, strategy, read_type, assembler, reads ->
+    unicycler_reads_channel = selected_reads.filter { sra, srr, platform, model, strategy, read_type, assembler, reads ->
       read_type.equalsIgnoreCase('short') && assembler == 'unicycler'
     }
-    nanopore_ch = selected_reads.filter { sra, srr, platform, model, strategy, read_type, assembler, reads ->
+    metaflye_nanopore_reads_channel = selected_reads.filter { sra, srr, platform, model, strategy, read_type, assembler, reads ->
       read_type.equalsIgnoreCase('nanopore') && assembler == 'metaflye'
     }
-    pacbio_ch = selected_reads.filter { sra, srr, platform, model, strategy, read_type, assembler, reads ->
+    metaflye_pacbio_reads_channel = selected_reads.filter { sra, srr, platform, model, strategy, read_type, assembler, reads ->
       read_type.equalsIgnoreCase('pacbio') && assembler == 'metaflye'
     }
-    hifi_flye_ch = selected_reads.filter { sra, srr, platform, model, strategy, read_type, assembler, reads ->
+    metaflye_hifi_reads_channel = selected_reads.filter { sra, srr, platform, model, strategy, read_type, assembler, reads ->
       read_type.equalsIgnoreCase('hifi') && assembler == 'metaflye'
     }
-    hifi_myloasm_ch = selected_reads.filter { sra, srr, platform, model, strategy, read_type, assembler, reads ->
+    myloasm_hifi_reads_channel = selected_reads.filter { sra, srr, platform, model, strategy, read_type, assembler, reads ->
       read_type.equalsIgnoreCase('hifi') && assembler == 'myloasm'
     }
 
-    spades_asm     = METASPADES(metaspades_ch)
-    unicycler_asm  = UNICYCLER(unicycler_ch)
-    flyenano_asm   = METAFLYE_NANO(nanopore_ch)
-    flyepacbio_asm = METAFLYE_PACBIO(pacbio_ch)
-    flyehifi_asm   = METAFLYE_HIFI(hifi_flye_ch)
-    myloasm_asm    = MYLOASM(hifi_myloasm_ch)
+    metaspades_out         = METASPADES(metaspades_reads_channel)
+    unicycler_out          = UNICYCLER(unicycler_reads_channel)
+    metaflye_nanopore_out  = METAFLYE_NANO(metaflye_nanopore_reads_channel)
+    metaflye_pacbio_out    = METAFLYE_PACBIO(metaflye_pacbio_reads_channel)
+    metaflye_hifi_out      = METAFLYE_HIFI(metaflye_hifi_reads_channel)
+    myloasm_out            = MYLOASM(myloasm_hifi_reads_channel)
 
     // Step 6: DIAMOND
-    asm_fasta_ch = channel.empty()
-                        .mix(spades_asm.assembly_fasta)
-                        .mix(unicycler_asm.assembly_fasta)
-                        .mix(flyenano_asm.assembly_fasta)
-                        .mix(flyepacbio_asm.assembly_fasta)
-                        .mix(flyehifi_asm.assembly_fasta)
-                        .mix(myloasm_asm.assembly_fasta)
+    assembly_fasta_channel = channel.empty()
+                        .mix(metaspades_out.assembly_fasta)
+                        .mix(unicycler_out.assembly_fasta)
+                        .mix(metaflye_nanopore_out.assembly_fasta)
+                        .mix(metaflye_pacbio_out.assembly_fasta)
+                        .mix(metaflye_hifi_out.assembly_fasta)
+                        .mix(myloasm_out.assembly_fasta)
 
-    diamond = DIAMOND(asm_fasta_ch, uniprot_db_ch)
+    diamond = DIAMOND(assembly_fasta_channel, uniprot_db_ch)
 
     // BAMs for BlobTools and binning
-    bam_src = channel.empty()
-                  .mix(spades_asm.assembly_bam)
-                  .mix(unicycler_asm.assembly_bam)
-                  .mix(flyenano_asm.assembly_bam)
-                  .mix(flyepacbio_asm.assembly_bam)
-                  .mix(flyehifi_asm.assembly_bam)
-                  .mix(myloasm_asm.assembly_bam)
+    assembly_bam_channel = channel.empty()
+                  .mix(metaspades_out.assembly_bam)
+                  .mix(unicycler_out.assembly_bam)
+                  .mix(metaflye_nanopore_out.assembly_bam)
+                  .mix(metaflye_pacbio_out.assembly_bam)
+                  .mix(metaflye_hifi_out.assembly_bam)
+                  .mix(myloasm_out.assembly_bam)
 
     // Step 7: BlobTools
     // Key every stream by sample, read type, and assembler tool.
-    fasta_by = asm_fasta_ch.map  { sra, srr, platform, model, strategy, read_type, assembler, fasta -> tuple([sra, srr, read_type, assembler], [platform, model, strategy, fasta]) }
-    blast_by = diamond.blast.map { sra, srr, read_type, assembler, blast -> tuple([sra, srr, read_type, assembler], blast) }
-    bam_by   = bam_src.map       { sra, srr, read_type, assembler, bam, csi -> tuple([sra, srr, read_type, assembler], [bam, csi]) }
+    assembly_fasta_by_sample_key = assembly_fasta_channel.map  { sra, srr, platform, model, strategy, read_type, assembler, fasta -> tuple([sra, srr, read_type, assembler], [platform, model, strategy, fasta]) }
+    diamond_blast_by_sample_key = diamond.blast.map { sra, srr, read_type, assembler, blast -> tuple([sra, srr, read_type, assembler], blast) }
+    assembly_bam_by_sample_key   = assembly_bam_channel.map       { sra, srr, read_type, assembler, bam, csi -> tuple([sra, srr, read_type, assembler], [bam, csi]) }
 
     // Join (fasta * diamond) then * bam
-    fasta_blast     = fasta_by.join(blast_by)
-    fasta_blast_bam = fasta_blast.join(bam_by)
+    assembly_with_blast_by_sample_key     = assembly_fasta_by_sample_key.join(diamond_blast_by_sample_key)
+    assembly_with_blast_and_bam_by_sample_key = assembly_with_blast_by_sample_key.join(assembly_bam_by_sample_key)
 
     // Unkey + call BlobTools
-    blobtools_in = fasta_blast_bam.map { key, fasta, blast, pair ->
-      def (sra, srr, read_type, assembler) = key
-      def (platform, model, strategy, assembly) = fasta
-      def (bam, csi) = pair
+    blobtools_input_channel = assembly_with_blast_and_bam_by_sample_key.map { sample_join_key, assembly_payload, blast, alignment_files ->
+      def (sra, srr, read_type, assembler) = sample_join_key
+      def (platform, model, strategy, assembly) = assembly_payload
+      def (bam, csi) = alignment_files
       tuple(sra, srr, platform, model, strategy, read_type, assembler, assembly, blast, bam, csi)
     }
 
-    blobtools = BLOBTOOLS(blobtools_in, taxdump_ch)
+    blobtools = BLOBTOOLS(blobtools_input_channel, taxdump_ch)
 
     // Step 8: EXTRACT_TAXA
     def taxa_summary_ch
@@ -1398,16 +1398,16 @@ workflow ASSEMBLY {
 
     assembly_notes_ch = channel.empty()
                           .mix(assembler_selection_note.note)
-                          .mix(spades_asm.note)
-                          .mix(unicycler_asm.note)
-                          .mix(flyenano_asm.note)
-                          .mix(flyepacbio_asm.note)
-                          .mix(flyehifi_asm.note)
-                          .mix(myloasm_asm.note)
+                          .mix(metaspades_out.note)
+                          .mix(unicycler_out.note)
+                          .mix(metaflye_nanopore_out.note)
+                          .mix(metaflye_pacbio_out.note)
+                          .mix(metaflye_hifi_out.note)
+                          .mix(myloasm_out.note)
 
   emit:
     // For binning
-    assembly_bam_all = bam_src
+    assembly_bam_all = assembly_bam_channel
     blobtable        = blobtools.blobtable
 
     // For summary
@@ -1429,90 +1429,90 @@ workflow BINNING {
     // Build binning_input from blobtable + BAM
     // blobtable_ch: (sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, blobtable)
     // assembly_bam_ch: (sra, srr, read_type, assembler, bam, csi)
-    bam_by = assembly_bam_ch.map { sra, srr, read_type, assembler, bam, csi ->
+    assembly_bam_by_sample_key = assembly_bam_ch.map { sra, srr, read_type, assembler, bam, csi ->
       tuple([sra, srr, read_type, assembler], [bam, csi])
     }
     binning_base_by = blobtable_ch.map { sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, blobtable ->
       tuple([sra, srr, read_type, assembler], [platform, model, strategy, assembly_fasta])
     }
-    binning_join = binning_base_by.join(bam_by)
+    binning_join = binning_base_by.join(assembly_bam_by_sample_key)
 
     // binning_input: (sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, bam, csi)
-    binning_input = binning_join.map { key, meta, bam_idx ->
-      def (sra, srr, read_type, assembler) = key
-      def (platform, model, strategy, assembly_fasta) = meta
-      def (bam, csi) = bam_idx
+    binning_input = binning_join.map { sample_join_key, assembly_payload, bam_payload ->
+      def (sra, srr, read_type, assembler) = sample_join_key
+      def (platform, model, strategy, assembly_fasta) = assembly_payload
+      def (bam, csi) = bam_payload
       tuple(sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, bam, csi)
     }
 
-    def phase0Options = validatePhase0BinningOptions()
-    def selectedBinners = phase0Options.binners
-    def selectedRefiners = phase0Options.refiners
-    def useGpu = phase0Options.gpu
+    def binning_options = validateBinningOptions()
+    def selected_binners = binning_options.binners
+    def selected_refiners = binning_options.refiners
+    def use_gpu_binners = binning_options.gpu
 
-    if (useGpu) {
-      def cpuOnlyBinners = selectedBinners.findAll { it in ['metabat', 'rosella', 'semibin'] }
-      if (cpuOnlyBinners) {
-        log.warn "GPU mode requested; CPU-only binner(s) will remain on CPU: ${cpuOnlyBinners.join(', ')}"
+    if (use_gpu_binners) {
+      def cpu_only_binners = selected_binners.findAll { it in ['metabat', 'rosella', 'semibin'] }
+      if (cpu_only_binners) {
+        log.warn "GPU mode requested; CPU-only binner(s) will remain on CPU: ${cpu_only_binners.join(', ')}"
       }
     }
 
     planned_binning_input = binning_input
       .map { sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, bam, csi ->
-        def sampleBinners = binnersForSample(phase0Options, sra, srr, read_type).join(',')
-        tuple(sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, bam, csi, sampleBinners)
+        def sample_binner_csv = binnersForSample(binning_options, sra, srr, read_type).join(',')
+        tuple(sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, bam, csi, sample_binner_csv)
       }
 
     binner_plan_by_sample = planned_binning_input
-      .map { sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, bam, csi, sampleBinners ->
-        tuple([sra, srr, read_type, assembler], binnerCsvSize(sampleBinners))
+      .map { sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, bam, csi, sample_binner_csv ->
+        tuple([sra, srr, read_type, assembler], binnerCsvSize(sample_binner_csv))
       }
 
     metabat_input = planned_binning_input
-      .filter { sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, bam, csi, sampleBinners ->
-        binnerCsvContains(sampleBinners, 'metabat')
+      .filter { sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, bam, csi, sample_binner_csv ->
+        binnerCsvContains(sample_binner_csv, 'metabat')
       }
-      .map { sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, bam, csi, sampleBinners ->
+      .map { sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, bam, csi, sample_binner_csv ->
         tuple(sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, bam, csi)
       }
 
     comebin_input = planned_binning_input
-      .filter { sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, bam, csi, sampleBinners ->
-        binnerCsvContains(sampleBinners, 'comebin')
+      .filter { sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, bam, csi, sample_binner_csv ->
+        binnerCsvContains(sample_binner_csv, 'comebin')
       }
-      .map { sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, bam, csi, sampleBinners ->
+      .map { sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, bam, csi, sample_binner_csv ->
         tuple(sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, bam, csi)
       }
 
     vamb_input = planned_binning_input
-      .filter { sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, bam, csi, sampleBinners ->
-        binnerCsvContains(sampleBinners, 'vamb')
+      .filter { sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, bam, csi, sample_binner_csv ->
+        binnerCsvContains(sample_binner_csv, 'vamb')
       }
-      .map { sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, bam, csi, sampleBinners ->
+      .map { sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, bam, csi, sample_binner_csv ->
         tuple(sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, bam, csi)
       }
 
     lorbin_input = planned_binning_input
-      .filter { sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, bam, csi, sampleBinners ->
-        binnerCsvContains(sampleBinners, 'lorbin')
+      .filter { sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, bam, csi, sample_binner_csv ->
+        binnerCsvContains(sample_binner_csv, 'lorbin')
       }
-      .map { sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, bam, csi, sampleBinners ->
+      .map { sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, bam, csi, sample_binner_csv ->
         tuple(sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, bam, csi)
       }
 
     semibin_input = planned_binning_input
-      .filter { sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, bam, csi, sampleBinners ->
-        binnerCsvContains(sampleBinners, 'semibin')
+      .filter { sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, bam, csi, sample_binner_csv ->
+        binnerCsvContains(sample_binner_csv, 'semibin')
       }
-      .map { sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, bam, csi, sampleBinners ->
+      .map { sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, bam, csi, sample_binner_csv ->
         tuple(sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, bam, csi)
       }
 
     rosella_input = planned_binning_input
-      .filter { sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, bam, csi, sampleBinners ->
-        binnerCsvContains(sampleBinners, 'rosella')
+      .filter { sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, bam, csi, sample_binner_csv ->
+        binnerCsvContains(sample_binner_csv, 'rosella')
       }
-      .map { sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, bam, csi, sampleBinners ->
+      .map { sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, bam, csi, sample_binner_csv ->
         tuple(sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, bam, csi)
       }
 
@@ -1523,37 +1523,37 @@ workflow BINNING {
     semibin_results = channel.empty()
     rosella_results = channel.empty()
 
-    if ('metabat' in selectedBinners) {
+    if ('metabat' in selected_binners) {
       metabat_results = METABAT(metabat_input).result
     }
-    if ('comebin' in selectedBinners) {
-      if (useGpu) {
+    if ('comebin' in selected_binners) {
+      if (use_gpu_binners) {
         comebin_results = COMEBIN_GPU(comebin_input).result
       }
       else {
         comebin_results = COMEBIN(comebin_input).result
       }
     }
-    if ('vamb' in selectedBinners) {
-      if (useGpu) {
+    if ('vamb' in selected_binners) {
+      if (use_gpu_binners) {
         vamb_results = VAMB_GPU(vamb_input).result
       }
       else {
         vamb_results = VAMB(vamb_input).result
       }
     }
-    if ('lorbin' in selectedBinners) {
-      if (useGpu) {
+    if ('lorbin' in selected_binners) {
+      if (use_gpu_binners) {
         lorbin_results = LORBIN_GPU(lorbin_input).result
       }
       else {
         lorbin_results = LORBIN(lorbin_input).result
       }
     }
-    if ('semibin' in selectedBinners) {
+    if ('semibin' in selected_binners) {
       semibin_results = SEMIBIN(semibin_input, uniprot_db_ch).result
     }
-    if ('rosella' in selectedBinners) {
+    if ('rosella' in selected_binners) {
       rosella_results = ROSELLA(rosella_input).result
     }
 
@@ -1574,16 +1574,16 @@ workflow BINNING {
         tuple([sra, srr, read_type, assembler], [tool, contig2bin])
       }
       .combine(binner_plan_by_sample, by: 0)
-      .map { key, entry, expectedCount -> tuple(groupKey(key, expectedCount as int), entry) }
+      .map { sample_join_key, binner_map_payload, expectedCount -> tuple(groupKey(sample_join_key, expectedCount as int), binner_map_payload) }
       .groupTuple()
-      .map { key, entries -> tuple(key.target, entries) }
+      .map { grouped_sample_key, binner_map_entries -> tuple(grouped_sample_key.target, binner_map_entries) }
 
     dastool_join = dastool_base_by.join(binner_maps_by_sample)
 
-    dastool_in = dastool_join.map { key, meta, entries ->
-      def (sra, srr, read_type, assembler) = key
-      def (platform, model, strategy, assembly_fasta) = meta
-      def contig2bin_maps = entries.collect { entry -> entry[1] }
+    dastool_in = dastool_join.map { sample_join_key, assembly_payload, binner_map_entries ->
+      def (sra, srr, read_type, assembler) = sample_join_key
+      def (platform, model, strategy, assembly_fasta) = assembly_payload
+      def contig2bin_maps = binner_map_entries.collect { binner_map_entry -> binner_map_entry[1] }
       tuple(
         sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta,
         contig2bin_maps
@@ -1592,14 +1592,14 @@ workflow BINNING {
     .filter { it != null }
 
     dastool_note_entries = channel.empty()
-    if ('dastool' in selectedRefiners) {
+    if ('dastool' in selected_refiners) {
       dastool_note_entries = DASTOOL(dastool_in).note.map { sra, srr, platform, model, strategy, read_type, assembler, note_path ->
         tuple(sra, srr, platform, model, strategy, read_type, assembler, 'dastool', note_path)
       }
     }
 
     binette_note_entries = channel.empty()
-    if ('binette' in selectedRefiners) {
+    if ('binette' in selected_refiners) {
       def checkm2_db_ch = Channel.value(file(params.checkm2_db, checkIfExists: true))
       binette_note_entries = BINETTE(dastool_in, checkm2_db_ch).note.map { sra, srr, platform, model, strategy, read_type, assembler, note_path ->
         tuple(sra, srr, platform, model, strategy, read_type, assembler, 'binette', note_path)
@@ -1654,7 +1654,7 @@ workflow SUMMARY {
 
 
     // 1) Convert skipped SRA metadata into per‑SRR rows with a textual note
-    skipped_srr = sra_metadata_skipped
+    skipped_srr_rows_channel = sra_metadata_skipped
       .map { sra, csvfile -> file(csvfile) }
       .splitCsv(header: true, strip: true)
       .map { row ->
@@ -1672,61 +1672,61 @@ workflow SUMMARY {
 
     // 2) Base "successful" samples: anything with a taxa_summary (summary.csv)
     //    Note starts empty here; will add taxa/binning notes later.
-    succeeded_sra = taxa_summary.map { sra, srr, platform, model, strategy, read_type, assembler, summary_csv ->
+    successful_summary_rows_channel = taxa_summary.map { sra, srr, platform, model, strategy, read_type, assembler, summary_csv ->
       tuple(sra, srr, platform, model, strategy, read_type, assembler, summary_csv, '')
     }
 
 
     // 3) Attach taxa notes and classify soft vs fatal EXTRACT_TAXA outcomes
-    def succeeded_with_taxa = succeeded_sra
-    def taxa_fatal_errors   = channel.empty()
+    def summary_rows_with_taxa_notes_channel = successful_summary_rows_channel
+    def taxa_failure_rows_channel = channel.empty()
 
     if( doExtraction ) {
       // Exactly 2 entries per sample:
       // - [summary_csv, base_note] from succeeded_sra
       // - note_path from taxa_note
-      def N_TAXA_ITEMS = 2
+      def taxa_group_size = 2
 
-      succ_keyed = succeeded_sra.map { sra, srr, platform, model, strategy, read_type, assembler, summary_csv, base_note ->
-        def keyMap = [sra: sra, srr: srr, platform: platform,
-                      model: model, strategy: strategy, read_type: read_type, assembler: assembler]
-        def key = groupKey(keyMap, N_TAXA_ITEMS)
-        tuple(key, [summary_csv, base_note])
+      successful_summary_by_taxa_key = successful_summary_rows_channel.map { sra, srr, platform, model, strategy, read_type, assembler, summary_csv, base_note ->
+        def sample_key_map = [sra: sra, srr: srr, platform: platform,
+                              model: model, strategy: strategy, read_type: read_type, assembler: assembler]
+        def grouped_sample_key = groupKey(sample_key_map, taxa_group_size)
+        tuple(grouped_sample_key, [summary_csv, base_note])
       }
 
-      taxa_keyed = taxa_note.map { sra, srr, platform, model, strategy, read_type, assembler, note_path ->
-        def keyMap = [sra: sra, srr: srr, platform: platform,
-                      model: model, strategy: strategy, read_type: read_type, assembler: assembler]
-        def key = groupKey(keyMap, N_TAXA_ITEMS)
-        tuple(key, note_path)
+      taxa_note_by_sample_key = taxa_note.map { sra, srr, platform, model, strategy, read_type, assembler, note_path ->
+        def sample_key_map = [sra: sra, srr: srr, platform: platform,
+                              model: model, strategy: strategy, read_type: read_type, assembler: assembler]
+        def grouped_sample_key = groupKey(sample_key_map, taxa_group_size)
+        tuple(grouped_sample_key, note_path)
       }
 
-      succ_and_taxa = channel.empty()
-        .mix(succ_keyed)
-        .mix(taxa_keyed)
+      success_and_taxa_notes_channel = channel.empty()
+        .mix(successful_summary_by_taxa_key)
+        .mix(taxa_note_by_sample_key)
         .groupTuple()
 
       // Unpack to: (sra, srr, platform, model, strategy, read_type, assembler, summary_csv, base_note, taxa_text)
-      succ_and_taxa_annot = succ_and_taxa
-        .map { key, values ->
-          def m = (Map) key.target
+      summary_rows_with_taxa_text_channel = success_and_taxa_notes_channel
+        .map { grouped_sample_key, grouped_payloads ->
+          def sample_key = (Map) grouped_sample_key.target
           def (sra, srr, platform, model, strategy, read_type, assembler) =
-            [m.sra, m.srr, m.platform, m.model, m.strategy, m.read_type, m.assembler]
+            [sample_key.sra, sample_key.srr, sample_key.platform, sample_key.model, sample_key.strategy, sample_key.read_type, sample_key.assembler]
 
           // [summary_csv, base_note]
-          def summaryEntry = values.find { it instanceof List && it.size() == 2 }
-          if( !summaryEntry ) {
+          def summary_payload = grouped_payloads.find { it instanceof List && it.size() == 2 }
+          if( !summary_payload ) {
             return null
           }
 
-          def summary_csv = summaryEntry[0]
-          def base_note   = summaryEntry[1] ?: ''
+          def summary_csv = summary_payload[0]
+          def base_note   = summary_payload[1] ?: ''
 
           // note_path for EXTRACT_TAXA
-          def taxa_note_file = values.find { !(it instanceof List) }
+          def taxa_note_path = grouped_payloads.find { !(it instanceof List) }
           def taxa_text = ''
-          if( taxa_note_file ) {
-            taxa_text = file(taxa_note_file as String).text.trim()
+          if( taxa_note_path ) {
+            taxa_text = file(taxa_note_path as String).text.trim()
           }
 
           tuple(sra, srr, platform, model, strategy, read_type, assembler, summary_csv, base_note, taxa_text)
@@ -1736,7 +1736,7 @@ workflow SUMMARY {
       // Split EXTRACT_TAXA outcomes into "success" vs "fatal"
       def softPattern = 'skipping extraction because taxa list contains only GTDB-style taxa'
 
-      def taxa_branches = succ_and_taxa_annot.branch { sra, srr, platform, model, strategy, read_type, assembler, summary_csv, base_note, taxa_text ->
+      def taxa_branches = summary_rows_with_taxa_text_channel.branch { sra, srr, platform, model, strategy, read_type, assembler, summary_csv, base_note, taxa_text ->
         // Empty note or GTDB-only “soft skip” => success
         success: (!taxa_text || taxa_text.contains(softPattern))
         // Anything else => fatal
@@ -1748,7 +1748,7 @@ workflow SUMMARY {
 
       // Non-fatal EXTRACT_TAXA results remain as "successful" samples.
       // Append taxa_text (if any) to the note field.
-      succeeded_with_taxa = taxa_success.map { sra, srr, platform, model, strategy, read_type, assembler, summary_csv, base_note, taxa_text ->
+      summary_rows_with_taxa_notes_channel = taxa_success.map { sra, srr, platform, model, strategy, read_type, assembler, summary_csv, base_note, taxa_text ->
         def final_note = base_note
         if( taxa_text ) {
           final_note = final_note ? "${final_note}; ${taxa_text}" : taxa_text
@@ -1758,7 +1758,7 @@ workflow SUMMARY {
 
       // Fatal EXTRACT_TAXA outcomes become "errors" that will go through
       // CREATE_EMPTY_SUMMARY, similar to other fatal notes.
-      taxa_fatal_errors = taxa_fatal.map { sra, srr, platform, model, strategy, read_type, assembler, summary_csv, base_note, taxa_text ->
+      taxa_failure_rows_channel = taxa_fatal.map { sra, srr, platform, model, strategy, read_type, assembler, summary_csv, base_note, taxa_text ->
         def note_text = base_note
         if( taxa_text ) {
           note_text = note_text ? "${note_text}; ${taxa_text}" : taxa_text
@@ -1769,78 +1769,78 @@ workflow SUMMARY {
 
 
     // 4) Aggregate binning notes into a single string per sample (if binning)
-    def binning_agg = channel.empty()
+    def binning_notes_by_sample_channel = channel.empty()
 
     if( doBinning ) {
-      binning_mix = binning_note_entries
+      grouped_binning_notes_channel = binning_note_entries
         .map { sra, srr, platform, model, strategy, read_type, assembler, tool, note_path ->
-          def key = [sra: sra, srr: srr, platform: platform, model: model,
-                     strategy: strategy, read_type: read_type, assembler: assembler]
-          tuple(key, [tool, note_path])
+          def sample_key = [sra: sra, srr: srr, platform: platform, model: model,
+                            strategy: strategy, read_type: read_type, assembler: assembler]
+          tuple(sample_key, [tool, note_path])
         }
         .groupTuple()
 
       // binning_agg: (sra, srr, platform, model, strategy, read_type, assembler, "tool1: msg; tool2: msg; ...")
-      binning_agg = binning_mix.map { key, items ->
-        def m = (Map) key.target
+      binning_notes_by_sample_channel = grouped_binning_notes_channel.map { grouped_sample_key, note_entries ->
+        def sample_key = (Map) grouped_sample_key.target
         def (sra, srr, platform, model, strategy, read_type, assembler) =
-          [m.sra, m.srr, m.platform, m.model, m.strategy, m.read_type, m.assembler]
+          [sample_key.sra, sample_key.srr, sample_key.platform, sample_key.model, sample_key.strategy, sample_key.read_type, sample_key.assembler]
 
-        def note_texts = items.collect { entry ->
-          def (tool, note_path) = entry
-          def txt = file(note_path as String).text.trim()
-          txt ? "${tool}: ${txt}" : null
+        def note_texts = note_entries.collect { note_entry ->
+          def (tool, note_path) = note_entry
+          def note_text = file(note_path as String).text.trim()
+          note_text ? "${tool}: ${note_text}" : null
         }.findAll { it }
 
-        def joined = note_texts ? note_texts.join('; ') : ''
-        tuple(sra, srr, platform, model, strategy, read_type, assembler, joined)
+        def joined_note_text = note_texts ? note_texts.join('; ') : ''
+        tuple(sra, srr, platform, model, strategy, read_type, assembler, joined_note_text)
       }
     }
 
 
     // 5) Combine successful rows with aggregated binning notes (if binning)
-    def final_success = succeeded_with_taxa
+    def final_success_rows_channel = summary_rows_with_taxa_notes_channel
 
     if( doBinning ) {
-      def N_SUCCESS_ITEMS = 2
+      def success_group_size = 2
 
-      succ_keyed2 = succeeded_with_taxa.map { sra, srr, platform, model, strategy, read_type, assembler, summary_csv, base_note ->
-        def keyMap = [sra: sra, srr: srr, platform: platform,
-                      model: model, strategy: strategy, read_type: read_type, assembler: assembler]
-        def key = groupKey(keyMap, N_SUCCESS_ITEMS)
-        tuple(key, [summary_csv, base_note])
+      successful_summary_by_binning_key = summary_rows_with_taxa_notes_channel.map { sra, srr, platform, model, strategy, read_type, assembler, summary_csv, base_note ->
+        def sample_key_map = [sra: sra, srr: srr, platform: platform,
+                              model: model, strategy: strategy, read_type: read_type, assembler: assembler]
+        def grouped_sample_key = groupKey(sample_key_map, success_group_size)
+        tuple(grouped_sample_key, [summary_csv, base_note])
       }
 
-      binning_keyed = binning_agg.map { sra, srr, platform, model, strategy, read_type, assembler, binning_note ->
-        def keyMap = [sra: sra, srr: srr, platform: platform,
-                      model: model, strategy: strategy, read_type: read_type, assembler: assembler]
-        def key = groupKey(keyMap, N_SUCCESS_ITEMS)
-        tuple(key, binning_note)
+      binning_note_by_success_key = binning_notes_by_sample_channel.map { sra, srr, platform, model, strategy, read_type, assembler, binning_note ->
+        def sample_key_map = [sra: sra, srr: srr, platform: platform,
+                              model: model, strategy: strategy, read_type: read_type, assembler: assembler]
+        def grouped_sample_key = groupKey(sample_key_map, success_group_size)
+        tuple(grouped_sample_key, binning_note)
       }
 
-      succ_and_bin = channel.empty()
-        .mix(succ_keyed2)
-        .mix(binning_keyed)
+      success_and_binning_notes_channel = channel.empty()
+        .mix(successful_summary_by_binning_key)
+        .mix(binning_note_by_success_key)
         .groupTuple()
 
-      final_success = succ_and_bin
-        .map { key, values ->
-          def m = (Map) key.target
+      final_success_rows_channel = success_and_binning_notes_channel
+        .map { grouped_sample_key, grouped_payloads ->
+          def sample_key = (Map) grouped_sample_key.target
           def (sra, srr, platform, model, strategy, read_type, assembler) =
-            [m.sra, m.srr, m.platform, m.model, m.strategy, m.read_type, m.assembler]
+            [sample_key.sra, sample_key.srr, sample_key.platform, sample_key.model, sample_key.strategy, sample_key.read_type, sample_key.assembler]
 
-          def summaryEntry = values.find { it instanceof List && it.size() == 2 }
-          if( !summaryEntry ) {
+          def summary_payload = grouped_payloads.find { it instanceof List && it.size() == 2 }
+          if( !summary_payload ) {
             return null
           }
 
-          def summary_csv = summaryEntry[0]
-          def base_note   = summaryEntry[1] ?: ''
+          def summary_csv = summary_payload[0]
+          def base_note   = summary_payload[1] ?: ''
 
           def binning_note_text = ''
-          def extra = values.find { !(it instanceof List) } as String
-          if( extra ) {
-            binning_note_text = extra.trim()
+          def extra_note_text = grouped_payloads.find { !(it instanceof List) } as String
+          if( extra_note_text ) {
+            binning_note_text = extra_note_text.trim()
           }
 
           def final_note = base_note
@@ -1856,7 +1856,7 @@ workflow SUMMARY {
 
     // 6) Collect all fatal errors (including fatal EXTRACT_TAXA) and turn them
     //    into empty per-sample summaries.
-    errors = channel.empty()
+    failure_rows_channel = channel.empty()
       .mix(sra_metadata_note)
       .mix(sandpiper_note)
       .mix(download_srr_note)
@@ -1869,20 +1869,20 @@ workflow SUMMARY {
         tuple(sra, srr, platform, model, strategy, read_type, assembler, note)
       }
       // Fatal EXTRACT_TAXA errors (inc. "run failed") are added here
-      .mix(taxa_fatal_errors)
+      .mix(taxa_failure_rows_channel)
       // Plus skipped SRR rows
-      .mix(skipped_srr)
+      .mix(skipped_srr_rows_channel)
 
     // failed_sra: (sra, srr, platform, model, strategy, read_type, assembler, empty_summary.csv, note)
-    failed_sra = CREATE_EMPTY_SUMMARY(errors)
+    failed_summary_rows_channel = CREATE_EMPTY_SUMMARY(failure_rows_channel)
 
 
     // 7) Combine succeeded and failed, and append rows to summary.tsv
-    summary = channel.empty()
-      .mix(final_success)
-      .mix(failed_sra)
+    summary_rows_channel = channel.empty()
+      .mix(final_success_rows_channel)
+      .mix(failed_summary_rows_channel)
 
-    summary_result = APPEND_SUMMARY(summary, outdir)
+    summary_result = APPEND_SUMMARY(summary_rows_channel, outdir)
 
   emit:
     global_summary = summary_result.global_summary
@@ -1896,7 +1896,7 @@ workflow {
     }
 
     if (params.gpu?.toString()?.toBoolean()) {
-      error "GPU mode is planned but not implemented yet in Phase 0"
+      error "GPU mode is planned but not implemented yet for the current binning selection workflow"
     }
 
     def sraMode   = params.sra != null
@@ -1976,27 +1976,27 @@ workflow {
     def sra_download_srr_note   = channel.empty()
     def sra_singlem_note        = channel.empty()
     if (sraMode) {
-      sra_ch = channel.fromPath(params.sra, checkIfExists: true)
+      sra_accessions_channel = channel.fromPath(params.sra, checkIfExists: true)
                       .splitCsv(header: true, strip: true)
                       .map { row -> row.sra.trim() }
                       .filter { it }
                       .distinct()
 
-      pre = PRE_SCREENING(sra_ch, validated_taxa_ch, sandpiper_db_ch, singlem_db_ch)
+      pre_screening_out = PRE_SCREENING(sra_accessions_channel, validated_taxa_ch, sandpiper_db_ch, singlem_db_ch)
 
-      sra_singlem_reads_ch    = pre.singlem_reads
-      sra_metadata_skipped_ch = pre.sra_metadata_skipped
-      sra_metadata_note       = pre.sra_metadata_note
-      sra_sandpiper_note      = pre.sandpiper_note
-      sra_download_srr_note   = pre.download_srr_note
-      sra_singlem_note        = pre.singlem_note
+      sra_singlem_reads_ch    = pre_screening_out.singlem_reads
+      sra_metadata_skipped_ch = pre_screening_out.sra_metadata_skipped
+      sra_metadata_note       = pre_screening_out.sra_metadata_note
+      sra_sandpiper_note      = pre_screening_out.sandpiper_note
+      sra_download_srr_note   = pre_screening_out.download_srr_note
+      sra_singlem_note        = pre_screening_out.singlem_note
     }
 
     // FASTQ mode
     def fastq_singlem_reads_ch = channel.empty()
     def fastq_singlem_note     = channel.empty()
     if (fastqMode) {
-      fastq_ch = channel.fromPath(params.fastq_tsv, checkIfExists: true)
+      fastq_samplesheet_channel = channel.fromPath(params.fastq_tsv, checkIfExists: true)
                         .splitCsv(header: true, sep: '\t', strip: true)
                         .map { row ->
                           def sample    = (row.sample ?: '').trim()
@@ -2026,7 +2026,7 @@ workflow {
                         .filter { it != null }
 
       if (doScreening) {
-        fastq_for_singlem_ch = fastq_ch.map { sra, srr, platform, model, strategy, read_type, reads ->
+        fastq_for_singlem_ch = fastq_samplesheet_channel.map { sra, srr, platform, model, strategy, read_type, reads ->
           tuple(sra, srr, platform, model, strategy, read_type, "RUN_SINGLEM", reads)
         }
 
@@ -2035,16 +2035,16 @@ workflow {
         fastq_singlem_note     = singlem_fastq.note
       }
       else {
-        fastq_singlem_reads_ch = fastq_ch
+        fastq_singlem_reads_ch = fastq_samplesheet_channel
         fastq_singlem_note     = channel.empty()
       }
     }
 
     // Merge SRA and FASTQ reads for assembly
-    def singlem_reads_all = channel.empty()
+    def screened_reads_channel = channel.empty()
                                   .mix(sra_singlem_reads_ch)
                                   .mix(fastq_singlem_reads_ch)
-    def singlem_notes_all = channel.empty()
+    def prescreening_note_channel = channel.empty()
                                   .mix(sra_singlem_note)
                                   .mix(fastq_singlem_note)
 
@@ -2061,7 +2061,7 @@ workflow {
     log.info "--noassembly set: skipping ASSEMBLY/BINNING; generating screening-only summary.tsv"
 
     // Prepare empty summary for succeeded samples
-    def prescreen_success_meta = singlem_reads_all
+    def prescreen_success_meta = screened_reads_channel
       .map { sra, srr, platform, model, strategy, read_type, reads ->
         tuple(sra, srr, platform, model, strategy, read_type, '', '')
       }
@@ -2075,17 +2075,17 @@ workflow {
     }
   }
   else {
-    def asm = ASSEMBLY(singlem_reads_all, validated_taxa_ch, uniprot_db_ch, taxdump_ch)
+    def assembly_out = ASSEMBLY(screened_reads_channel, validated_taxa_ch, uniprot_db_ch, taxdump_ch)
 
-    assembly_notes_ch = asm.assembly_notes
-    diamond_note_ch   = asm.diamond_note
-    blobtools_note_ch = asm.blobtools_note
-    taxa_note_ch      = asm.taxa_note
-    taxa_summary_ch   = asm.taxa_summary
+    assembly_notes_ch = assembly_out.assembly_notes
+    diamond_note_ch   = assembly_out.diamond_note
+    blobtools_note_ch = assembly_out.blobtools_note
+    taxa_note_ch      = assembly_out.taxa_note
+    taxa_summary_ch   = assembly_out.taxa_summary
 
     if (doBinning) {
-      def binning = BINNING(asm.blobtable, asm.assembly_bam_all, uniprot_db_ch)
-      binning_note_entries_ch = binning.note_entries
+      def binning_out = BINNING(assembly_out.blobtable, assembly_out.assembly_bam_all, uniprot_db_ch)
+      binning_note_entries_ch = binning_out.note_entries
     }
   }
 
@@ -2096,7 +2096,7 @@ workflow {
     sra_metadata_note,
     sra_sandpiper_note,
     sra_download_srr_note,
-    singlem_notes_all,
+    prescreening_note_channel,
 
     // ASSEMBLY: summary-related outputs (empty in --noassembly)
     assembly_notes_ch,
