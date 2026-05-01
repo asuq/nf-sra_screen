@@ -106,13 +106,13 @@ R2="${read_files[1]}"
 
 # fastp
 if ! fastp --in1 "${R1}" --in2 "${R2}" --out1 "${srr}_fastp_R1.fastq.gz" --out2 "${srr}_fastp_R2.fastq.gz" \
-        --thread "${threads}" --length_required 50 --detect_adapter_for_pe --qualified_quality_phred 30 --html fastp.html; then
+        --thread "${threads}" --length_required 100 --detect_adapter_for_pe --qualified_quality_phred 30 ; then
   fail "metaSPAdes: fastp failed"
 fi
 
 # SPAdes
 if ! spades.py -1 "${srr}_fastp_R1.fastq.gz" -2 "${srr}_fastp_R2.fastq.gz" -o '.' \
-      -k 21,33,55,77,99,119,127 --meta --threads "${threads}" --memory "${mem_gb}"; then
+      -k 21,33,55,77,99,119,127 --meta --phred-offset 33 --threads "${threads}" --memory "${mem_gb}"; then
   fail "metaSPAdes: assembly failed"
 fi
 
