@@ -1,6 +1,4 @@
 #!/usr/bin/env nextflow
-nextflow.enable.dsl=2
-
 
 //-- Help Message ---------------------------------------------------------------
 
@@ -149,7 +147,7 @@ def binnersForSample(selection, sra, srr, readType) {
  * Test whether a comma-separated binner list includes one tool.
  */
 def binnerCsvContains(binner_csv, tool) {
-  return binner_csv.toString().split(',').collect { it.trim() }.contains(tool)
+  return binner_csv.toString().split(',').collect { token -> token.trim() }.contains(tool)
 }
 
 
@@ -157,7 +155,7 @@ def binnerCsvContains(binner_csv, tool) {
  * Count tools in a comma-separated binner list.
  */
 def binnerCsvSize(binner_csv) {
-  return binner_csv.toString().split(',').collect { it.trim() }.findAll { it }.size()
+  return binner_csv.toString().split(',').collect { token -> token.trim() }.findAll { token -> token }.size()
 }
 
 
@@ -168,20 +166,20 @@ def parseToolSelection(raw_selection_value, defaultValue, allowed_tools, planned
   def normalised_selection_text = raw_selection_value == null ? defaultValue : raw_selection_value.toString()
   def selected_tools = normalised_selection_text
     .split(',')
-    .collect { it.trim().toLowerCase() }
-    .findAll { it }
+    .collect { token -> token.trim().toLowerCase() }
+    .findAll { token -> token }
     .unique()
 
   if (!selected_tools) {
     error "--${parameter_name} must include at least one tool"
   }
 
-  def planned_but_unimplemented_tools = selected_tools.findAll { it in planned_tools }
+  def planned_but_unimplemented_tools = selected_tools.findAll { tool_name -> tool_name in planned_tools }
   if (planned_but_unimplemented_tools) {
     error "--${parameter_name} includes planned tool(s) not implemented yet: ${planned_but_unimplemented_tools.join(', ')}"
   }
 
-  def unsupported_tools = selected_tools.findAll { !(it in allowed_tools) }
+  def unsupported_tools = selected_tools.findAll { tool_name -> !(tool_name in allowed_tools) }
   if (unsupported_tools) {
     error "--${parameter_name} includes unsupported tool(s): ${unsupported_tools.join(', ')}"
   }
@@ -271,14 +269,14 @@ def selectedAssemblerTokens() {
   def raw_selection_value = params.assembler ?: params.assemblers ?: 'auto'
   def rawTokens = raw_selection_value.toString()
     .split(/\s*,\s*/)
-    .collect { canonicalAssemblerName(it) }
-    .findAll { it }
+    .collect { token -> canonicalAssemblerName(token) }
+    .findAll { token -> token }
     .unique()
 
   def tokens = rawTokens ?: ['auto']
   def supported = ['metaspades', 'unicycler', 'metaflye', 'myloasm'] as Set
   def keywords = ['auto', 'all'] as Set
-  def unsupported = tokens.findAll { !(it in supported) && !(it in keywords) }
+  def unsupported = tokens.findAll { token -> !(token in supported) && !(token in keywords) }
 
   if (unsupported) {
     error "Unsupported assembler(s): ${unsupported.join(', ')}"
@@ -334,7 +332,7 @@ def assemblersForReadType(readType) {
     return supported
   }
 
-  tokens.findAll { it in supported }
+  tokens.findAll { token -> token in supported }
 }
 
 
@@ -378,7 +376,7 @@ process VALIDATE_TAXA {
 
 process DOWNLOAD_SRA_METADATA {
     tag "${sra}"
-    publishDir "${params.outdir}/metadata/${sra}/",
+    publishDir { "${params.outdir}/metadata/${sra}/" },
         mode: 'copy',
         overwrite: true,
         saveAs: { filename ->
@@ -408,7 +406,7 @@ process DOWNLOAD_SRA_METADATA {
 
 process SANDPIPER {
     tag "${sra}:${srr}"
-    publishDir "${params.outdir}/${sra}/${srr}/", mode: 'copy', overwrite: true
+    publishDir { "${params.outdir}/${sra}/${srr}/" }, mode: 'copy', overwrite: true
 
     input:
     tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type)
@@ -435,7 +433,7 @@ process SANDPIPER {
 
 process DOWNLOAD_SRR {
     tag "${sra}:${srr}"
-    publishDir "${params.outdir}/${sra}/${srr}/",
+    publishDir { "${params.outdir}/${sra}/${srr}/" },
       mode: 'copy',
       overwrite: true,
       saveAs: { filename ->
@@ -464,7 +462,7 @@ process DOWNLOAD_SRR {
 
 process SINGLEM {
     tag "${sra}:${srr}"
-    publishDir "${params.outdir}/${sra}/${srr}/",
+    publishDir { "${params.outdir}/${sra}/${srr}/" },
       mode: 'copy',
       overwrite: true,
       saveAs: { filename ->
@@ -1069,7 +1067,7 @@ process DASTOOL {
     tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler), path("dastool.note"), emit: note
 
     script:
-    def mapArg = contig2bin_maps.collect { it.toString() }.join(',')
+    def mapArg = contig2bin_maps.collect { contig2bin_map -> contig2bin_map.toString() }.join(',')
     """
     run_dastool.sh \\
       --assembly "${assembly_fasta}" \\
@@ -1098,7 +1096,7 @@ process BINETTE {
     tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler), path("binette.note"), emit: note
 
     script:
-    def mapArg = contig2bin_maps.collect { it.toString() }.join(',')
+    def mapArg = contig2bin_maps.collect { contig2bin_map -> contig2bin_map.toString() }.join(',')
     """
     run_binette.sh \\
       --assembly "${assembly_fasta}" \\
@@ -1202,7 +1200,7 @@ workflow PRE_SCREENING {
                   def read_type = (row.read_type ?: row.assembler ?: '').trim()
                   [sra, srr, platform, model, strategy, read_type]
               }
-              .filter { it[1] }  // ensure SRR not empty
+              .filter { row_values -> row_values[1] }  // ensure SRR not empty
               .distinct()
 
     def singlem_reads_ch
@@ -1451,7 +1449,7 @@ workflow BINNING {
     def use_gpu_binners = binning_options.gpu
 
     if (use_gpu_binners) {
-      def cpu_only_binners = selected_binners.findAll { it in ['metabat', 'rosella', 'semibin'] }
+      def cpu_only_binners = selected_binners.findAll { binner -> binner in ['metabat', 'rosella', 'semibin'] }
       if (cpu_only_binners) {
         log.warn "GPU mode requested; CPU-only binner(s) will remain on CPU: ${cpu_only_binners.join(', ')}"
       }
@@ -1589,7 +1587,7 @@ workflow BINNING {
         contig2bin_maps
       )
     }
-    .filter { it != null }
+    .filter { row -> row != null }
 
     dastool_note_entries = channel.empty()
     if ('dastool' in selected_refiners) {
@@ -1600,7 +1598,7 @@ workflow BINNING {
 
     binette_note_entries = channel.empty()
     if ('binette' in selected_refiners) {
-      def checkm2_db_ch = Channel.value(file(params.checkm2_db, checkIfExists: true))
+      def checkm2_db_ch = channel.value(file(params.checkm2_db, checkIfExists: true))
       binette_note_entries = BINETTE(dastool_in, checkm2_db_ch).note.map { sra, srr, platform, model, strategy, read_type, assembler, note_path ->
         tuple(sra, srr, platform, model, strategy, read_type, assembler, 'binette', note_path)
       }
@@ -1667,7 +1665,7 @@ workflow SUMMARY {
         // Read type and assembler are empty for skipped rows.
         tuple(sra, srr, platform, model, strategy, '', '', note)
       }
-      .filter { it[1] } // keep only rows with srr
+      .filter { row_values -> row_values[1] } // keep only rows with srr
 
 
     // 2) Base "successful" samples: anything with a taxa_summary (summary.csv)
@@ -1709,12 +1707,12 @@ workflow SUMMARY {
       // Unpack to: (sra, srr, platform, model, strategy, read_type, assembler, summary_csv, base_note, taxa_text)
       summary_rows_with_taxa_text_channel = success_and_taxa_notes_channel
         .map { grouped_sample_key, grouped_payloads ->
-          def sample_key = (Map) grouped_sample_key.target
+          def sample_key = grouped_sample_key.target as Map
           def (sra, srr, platform, model, strategy, read_type, assembler) =
             [sample_key.sra, sample_key.srr, sample_key.platform, sample_key.model, sample_key.strategy, sample_key.read_type, sample_key.assembler]
 
           // [summary_csv, base_note]
-          def summary_payload = grouped_payloads.find { it instanceof List && it.size() == 2 }
+          def summary_payload = grouped_payloads.find { payload -> payload instanceof List && payload.size() == 2 }
           if( !summary_payload ) {
             return null
           }
@@ -1723,7 +1721,7 @@ workflow SUMMARY {
           def base_note   = summary_payload[1] ?: ''
 
           // note_path for EXTRACT_TAXA
-          def taxa_note_path = grouped_payloads.find { !(it instanceof List) }
+          def taxa_note_path = grouped_payloads.find { payload -> !(payload instanceof List) }
           def taxa_text = ''
           if( taxa_note_path ) {
             taxa_text = file(taxa_note_path as String).text.trim()
@@ -1731,7 +1729,7 @@ workflow SUMMARY {
 
           tuple(sra, srr, platform, model, strategy, read_type, assembler, summary_csv, base_note, taxa_text)
         }
-        .filter { it != null }
+        .filter { row -> row != null }
 
       // Split EXTRACT_TAXA outcomes into "success" vs "fatal"
       def softPattern = 'skipping extraction because taxa list contains only GTDB-style taxa'
@@ -1782,7 +1780,7 @@ workflow SUMMARY {
 
       // binning_agg: (sra, srr, platform, model, strategy, read_type, assembler, "tool1: msg; tool2: msg; ...")
       binning_notes_by_sample_channel = grouped_binning_notes_channel.map { grouped_sample_key, note_entries ->
-        def sample_key = (Map) grouped_sample_key.target
+        def sample_key = grouped_sample_key.target as Map
         def (sra, srr, platform, model, strategy, read_type, assembler) =
           [sample_key.sra, sample_key.srr, sample_key.platform, sample_key.model, sample_key.strategy, sample_key.read_type, sample_key.assembler]
 
@@ -1790,7 +1788,7 @@ workflow SUMMARY {
           def (tool, note_path) = note_entry
           def note_text = file(note_path as String).text.trim()
           note_text ? "${tool}: ${note_text}" : null
-        }.findAll { it }
+        }.findAll { token -> token }
 
         def joined_note_text = note_texts ? note_texts.join('; ') : ''
         tuple(sra, srr, platform, model, strategy, read_type, assembler, joined_note_text)
@@ -1825,11 +1823,11 @@ workflow SUMMARY {
 
       final_success_rows_channel = success_and_binning_notes_channel
         .map { grouped_sample_key, grouped_payloads ->
-          def sample_key = (Map) grouped_sample_key.target
+          def sample_key = grouped_sample_key.target as Map
           def (sra, srr, platform, model, strategy, read_type, assembler) =
             [sample_key.sra, sample_key.srr, sample_key.platform, sample_key.model, sample_key.strategy, sample_key.read_type, sample_key.assembler]
 
-          def summary_payload = grouped_payloads.find { it instanceof List && it.size() == 2 }
+          def summary_payload = grouped_payloads.find { payload -> payload instanceof List && payload.size() == 2 }
           if( !summary_payload ) {
             return null
           }
@@ -1838,7 +1836,7 @@ workflow SUMMARY {
           def base_note   = summary_payload[1] ?: ''
 
           def binning_note_text = ''
-          def extra_note_text = grouped_payloads.find { !(it instanceof List) } as String
+          def extra_note_text = grouped_payloads.find { payload -> !(payload instanceof List) } as String
           if( extra_note_text ) {
             binning_note_text = extra_note_text.trim()
           }
@@ -1850,7 +1848,7 @@ workflow SUMMARY {
 
           tuple(sra, srr, platform, model, strategy, read_type, assembler, summary_csv, final_note)
         }
-        .filter { it != null }
+        .filter { row -> row != null }
     }
 
 
@@ -1890,6 +1888,7 @@ workflow SUMMARY {
 
 
 workflow {
+    main:
     if (params.help) {
       helpMessage()
       exit 0
@@ -1979,7 +1978,7 @@ workflow {
       sra_accessions_channel = channel.fromPath(params.sra, checkIfExists: true)
                       .splitCsv(header: true, strip: true)
                       .map { row -> row.sra.trim() }
-                      .filter { it }
+                      .filter { row -> row }
                       .distinct()
 
       pre_screening_out = PRE_SCREENING(sra_accessions_channel, validated_taxa_ch, sandpiper_db_ch, singlem_db_ch)
@@ -2008,7 +2007,7 @@ workflow {
                             return null
                           }
 
-                          def read_files = reads_raw.split(/\s*,\s*/).findAll { it }.collect { file(it) }
+                          def read_files = reads_raw.split(/\s*,\s*/).findAll { token -> token }.collect { read_path -> file(read_path) }
 
                           if (!read_files) {
                             log.warn "No valid FASTQ paths for sample ${sample}; skipping"
@@ -2023,7 +2022,7 @@ workflow {
 
                           tuple(sra, srr, platform, model, strategy, read_type, read_files)
                         }
-                        .filter { it != null }
+                        .filter { row -> row != null }
 
       if (doScreening) {
         fastq_for_singlem_ch = fastq_samplesheet_channel.map { sra, srr, platform, model, strategy, read_type, reads ->
@@ -2111,9 +2110,8 @@ workflow {
     // constant
     outdir
   )
-}
 
-workflow.onComplete {
+  workflow.onComplete = {
     def outdirPath  = file(params.outdir ?: './output').toAbsolutePath()
     def summaryFile = outdirPath.resolve('summary.tsv')
     def traceFile   = file("${workflow.launchDir}/execution-reports/trace.tsv").toAbsolutePath()
@@ -2123,38 +2121,35 @@ workflow.onComplete {
     log.info "onComplete: trace.tsv   -> ${traceFile}"
     log.info "onComplete: annotator   -> ${scriptFile}"
 
-    // Sanity checks
     if( !summaryFile.exists() ) {
       log.warn "onComplete: ${summaryFile} not found; skipping scheduler annotation"
-      return
     }
-    if( !traceFile.exists() ) {
+    else if( !traceFile.exists() ) {
       log.warn "onComplete: ${traceFile} not found; skipping scheduler annotation"
-      return
-    }
-
-    // python3 annotate_summary_from_trace.py summary.tsv trace.tsv
-    def cmd = [
-      'python3',
-      scriptFile.toString(),
-      summaryFile.toString(),
-      traceFile.toString()
-    ]
-
-    log.info "onComplete: running ${cmd.join(' ')}"
-
-    // Run the script in the launch directory (where execution-report lives)
-    def proc = new ProcessBuilder(cmd)
-      .directory( workflow.launchDir.toFile() )
-      .redirectError( java.lang.ProcessBuilder.Redirect.INHERIT )
-      .redirectOutput( java.lang.ProcessBuilder.Redirect.INHERIT )
-      .start()
-
-    int rc = proc.waitFor()
-    if( rc != 0 ) {
-      log.warn "onComplete: annotator script exited with code ${rc}"
     }
     else {
-      log.info "onComplete: summary.tsv successfully annotated with scheduler error information"
+      def cmd = [
+        'python3',
+        scriptFile.toString(),
+        summaryFile.toString(),
+        traceFile.toString()
+      ]
+
+      log.info "onComplete: running ${cmd.join(' ')}"
+
+      def proc = new java.lang.ProcessBuilder(cmd)
+        .directory( workflow.launchDir.toFile() )
+        .redirectError( java.lang.ProcessBuilder.Redirect.INHERIT )
+        .redirectOutput( java.lang.ProcessBuilder.Redirect.INHERIT )
+        .start()
+
+      def rc = proc.waitFor()
+      if( rc != 0 ) {
+        log.warn "onComplete: annotator script exited with code ${rc}"
+      }
+      else {
+        log.info "onComplete: summary.tsv successfully annotated with scheduler error information"
+      }
     }
+  }
 }

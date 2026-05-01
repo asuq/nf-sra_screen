@@ -1,6 +1,4 @@
 #!/usr/bin/env nextflow
-nextflow.enable.dsl=2
-
 
 /*
  * Return the command-line help text for the standalone binning workflow.
@@ -113,7 +111,7 @@ def binnersForSample(selection, sra, srr, readType) {
  * Test whether a comma-separated binner list includes one tool.
  */
 def binnerCsvContains(binner_csv, tool) {
-  return binner_csv.toString().split(',').collect { it.trim() }.contains(tool)
+  return binner_csv.toString().split(',').collect { token -> token.trim() }.contains(tool)
 }
 
 
@@ -121,7 +119,7 @@ def binnerCsvContains(binner_csv, tool) {
  * Count tools in a comma-separated binner list.
  */
 def binnerCsvSize(binner_csv) {
-  return binner_csv.toString().split(',').collect { it.trim() }.findAll { it }.size()
+  return binner_csv.toString().split(',').collect { token -> token.trim() }.findAll { token -> token }.size()
 }
 
 
@@ -132,20 +130,20 @@ def parseToolSelection(raw_selection_value, defaultValue, allowed_tools, planned
   def normalised_selection_text = raw_selection_value == null ? defaultValue : raw_selection_value.toString()
   def selected_tools = normalised_selection_text
     .split(',')
-    .collect { it.trim().toLowerCase() }
-    .findAll { it }
+    .collect { token -> token.trim().toLowerCase() }
+    .findAll { token -> token }
     .unique()
 
   if (!selected_tools) {
     error "--${parameter_name} must include at least one tool"
   }
 
-  def planned_but_unimplemented_tools = selected_tools.findAll { it in planned_tools }
+  def planned_but_unimplemented_tools = selected_tools.findAll { tool_name -> tool_name in planned_tools }
   if (planned_but_unimplemented_tools) {
     error "--${parameter_name} includes planned tool(s) not implemented yet: ${planned_but_unimplemented_tools.join(', ')}"
   }
 
-  def unsupported_tools = selected_tools.findAll { !(it in allowed_tools) }
+  def unsupported_tools = selected_tools.findAll { tool_name -> !(tool_name in allowed_tools) }
   if (unsupported_tools) {
     error "--${parameter_name} includes unsupported tool(s): ${unsupported_tools.join(', ')}"
   }
@@ -270,8 +268,8 @@ def normaliseBinningRow(row) {
 
   def readFiles = readsRaw
     .split(/\s*,\s*/)
-    .findAll { it }
-    .collect { file(it, checkIfExists: true) }
+    .findAll { token -> token }
+    .collect { read_path -> file(read_path, checkIfExists: true) }
 
   if (!readFiles) {
     error "No read files were provided for sample '${sampleRaw}'"
@@ -302,9 +300,9 @@ def normaliseBinningRow(row) {
 def parseResolvedMetadata(sra, srr, resolvedTsv) {
   def fields = file(resolvedTsv).text
     .readLines()
-    .find { it?.trim() }
+    .find { value -> value?.trim() }
     ?.split(/\t/, -1)
-    ?.collect { it.trim() }
+    ?.collect { token -> token.trim() }
 
   if (!fields || fields.size() != 4) {
     error "Invalid resolved metadata for sample '${sra}' run '${srr}'"
@@ -348,7 +346,7 @@ process RESOLVE_SRR_METADATA {
 
 process DOWNLOAD_SRR {
     tag "${sra}:${srr}"
-    publishDir "${params.outdir}/${sra}/${srr}/",
+    publishDir { "${params.outdir}/${sra}/${srr}/" },
       mode: 'copy',
       overwrite: true,
       saveAs: { filename ->
@@ -508,7 +506,7 @@ process MAP_HIFI {
 process METABAT {
     tag "${sra}:${srr}"
     label 'binning'
-    publishDir "${params.outdir}/${sra}/${srr}/binning",
+    publishDir { "${params.outdir}/${sra}/${srr}/binning" },
       mode: 'copy',
       overwrite: true
 
@@ -542,7 +540,7 @@ process METABAT {
 process COMEBIN {
     tag "${sra}:${srr}"
     label 'binning'
-    publishDir "${params.outdir}/${sra}/${srr}/binning",
+    publishDir { "${params.outdir}/${sra}/${srr}/binning" },
       mode: 'copy',
       overwrite: true
 
@@ -576,7 +574,7 @@ process COMEBIN {
 process COMEBIN_GPU {
     tag "${sra}:${srr}"
     label 'gpu'
-    publishDir "${params.outdir}/${sra}/${srr}/binning",
+    publishDir { "${params.outdir}/${sra}/${srr}/binning" },
       mode: 'copy',
       overwrite: true
 
@@ -611,7 +609,7 @@ process COMEBIN_GPU {
 process VAMB {
     tag "${sra}:${srr}"
     label 'binning'
-    publishDir "${params.outdir}/${sra}/${srr}/binning",
+    publishDir { "${params.outdir}/${sra}/${srr}/binning" },
       mode: 'copy',
       overwrite: true
 
@@ -645,7 +643,7 @@ process VAMB {
 process VAMB_GPU {
     tag "${sra}:${srr}"
     label 'gpu'
-    publishDir "${params.outdir}/${sra}/${srr}/binning",
+    publishDir { "${params.outdir}/${sra}/${srr}/binning" },
       mode: 'copy',
       overwrite: true
 
@@ -681,7 +679,7 @@ process VAMB_GPU {
 process LORBIN {
     tag "${sra}:${srr}"
     label 'binning'
-    publishDir "${params.outdir}/${sra}/${srr}/binning",
+    publishDir { "${params.outdir}/${sra}/${srr}/binning" },
       mode: 'copy',
       overwrite: true
 
@@ -715,7 +713,7 @@ process LORBIN {
 process LORBIN_GPU {
     tag "${sra}:${srr}"
     label 'gpu'
-    publishDir "${params.outdir}/${sra}/${srr}/binning",
+    publishDir { "${params.outdir}/${sra}/${srr}/binning" },
       mode: 'copy',
       overwrite: true
 
@@ -750,7 +748,7 @@ process LORBIN_GPU {
 process SEMIBIN {
     tag "${sra}:${srr}"
     label 'binning'
-    publishDir "${params.outdir}/${sra}/${srr}/binning",
+    publishDir { "${params.outdir}/${sra}/${srr}/binning" },
       mode: 'copy',
       overwrite: true
 
@@ -789,7 +787,7 @@ process SEMIBIN {
 process ROSELLA {
     tag "${sra}:${srr}"
     label 'binning'
-    publishDir "${params.outdir}/${sra}/${srr}/binning",
+    publishDir { "${params.outdir}/${sra}/${srr}/binning" },
       mode: 'copy',
       overwrite: true
 
@@ -822,7 +820,7 @@ process ROSELLA {
 
 process DASTOOL {
     tag "${sra}:${srr}"
-    publishDir "${params.outdir}/${sra}/${srr}/binning",
+    publishDir { "${params.outdir}/${sra}/${srr}/binning" },
       mode: 'copy',
       overwrite: true
 
@@ -836,7 +834,7 @@ process DASTOOL {
     tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler), path("dastool.note"), emit: note
 
     script:
-    def mapArg = contig2bin_maps.collect { it.toString() }.join(',')
+    def mapArg = contig2bin_maps.collect { contig2bin_map -> contig2bin_map.toString() }.join(',')
     def dastoolScript = file("${workflow.projectDir}/bin/run_dastool.sh").toAbsolutePath()
     """
     ${dastoolScript} \\
@@ -857,7 +855,7 @@ process DASTOOL {
 
 process BINETTE {
     tag "${sra}:${srr}"
-    publishDir "${params.outdir}/${sra}/${srr}/binning",
+    publishDir { "${params.outdir}/${sra}/${srr}/binning" },
       mode: 'copy',
       overwrite: true
 
@@ -872,7 +870,7 @@ process BINETTE {
     tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler), path("binette.note"), emit: note
 
     script:
-    def mapArg = contig2bin_maps.collect { it.toString() }.join(',')
+    def mapArg = contig2bin_maps.collect { contig2bin_map -> contig2bin_map.toString() }.join(',')
     def binetteScript = file("${workflow.projectDir}/bin/run_binette.sh").toAbsolutePath()
     """
     ${binetteScript} \\
@@ -954,6 +952,7 @@ process APPEND_SUMMARY {
 
 
 workflow {
+    main:
     if (params.help) {
       helpMessage()
       exit 0
@@ -969,7 +968,7 @@ workflow {
     def use_gpu_binners = binning_options.gpu
 
     if (use_gpu_binners) {
-      def cpu_only_binners = selected_binners.findAll { it in ['metabat', 'rosella', 'semibin'] }
+      def cpu_only_binners = selected_binners.findAll { binner -> binner in ['metabat', 'rosella', 'semibin'] }
       if (cpu_only_binners) {
         log.warn "GPU mode requested; CPU-only binner(s) will remain on CPU: ${cpu_only_binners.join(', ')}"
       }
@@ -1224,7 +1223,7 @@ workflow {
 
     def binette_note_entries = channel.empty()
     if ('binette' in selected_refiners) {
-      def checkm2_db_ch = Channel.value(file(params.checkm2_db, checkIfExists: true))
+      def checkm2_db_ch = channel.value(file(params.checkm2_db, checkIfExists: true))
       binette_note_entries = BINETTE(dastool_in, checkm2_db_ch).note.map { sra, srr, platform, model, strategy, read_type, assembler, note_path ->
         tuple(sra, srr, platform, model, strategy, read_type, assembler, 'binette', note_path)
       }
@@ -1262,7 +1261,7 @@ workflow {
             def text = file(note_path as String).text.trim()
             text ? "${note_entry[0]}: ${text}" : null
           }
-          .findAll { it }
+          .findAll { token -> token }
           .join('; ')
         tuple(sra, srr, platform, model, strategy, read_type, assembler, note_text)
       }
@@ -1311,35 +1310,33 @@ workflow {
 
       if (!summaryFile.exists()) {
         log.warn "onComplete: ${summaryFile} not found; skipping scheduler annotation"
-        return
       }
-
-      if (!traceFile.exists()) {
+      else if (!traceFile.exists()) {
         log.warn "onComplete: ${traceFile} not found; skipping scheduler annotation"
-        return
-      }
-
-      def cmd = [
-        'python3',
-        scriptFile.toString(),
-        summaryFile.toString(),
-        traceFile.toString()
-      ]
-
-      log.info "onComplete: running ${cmd.join(' ')}"
-
-      def proc = new ProcessBuilder(cmd)
-        .directory(workflow.launchDir.toFile())
-        .redirectError(java.lang.ProcessBuilder.Redirect.INHERIT)
-        .redirectOutput(java.lang.ProcessBuilder.Redirect.INHERIT)
-        .start()
-
-      int rc = proc.waitFor()
-      if (rc != 0) {
-        log.warn "onComplete: annotator script exited with code ${rc}"
       }
       else {
-        log.info "onComplete: summary.tsv successfully annotated with scheduler error information"
+        def cmd = [
+          'python3',
+          scriptFile.toString(),
+          summaryFile.toString(),
+          traceFile.toString()
+        ]
+
+        log.info "onComplete: running ${cmd.join(' ')}"
+
+        def proc = new java.lang.ProcessBuilder(cmd)
+          .directory(workflow.launchDir.toFile())
+          .redirectError(java.lang.ProcessBuilder.Redirect.INHERIT)
+          .redirectOutput(java.lang.ProcessBuilder.Redirect.INHERIT)
+          .start()
+
+        def rc = proc.waitFor()
+        if (rc != 0) {
+          log.warn "onComplete: annotator script exited with code ${rc}"
+        }
+        else {
+          log.info "onComplete: summary.tsv successfully annotated with scheduler error information"
+        }
       }
     }
 }
