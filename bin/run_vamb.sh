@@ -133,6 +133,9 @@ else
 fi
 
 awk 'BEGIN { FS = OFS = "\t" }
+  NR == 1 && $1 == "clustername" && $2 == "contigname" {
+    next
+  }
   NF >= 2 && $1 != "" && $2 != "" {
     print $2, $1
   }
