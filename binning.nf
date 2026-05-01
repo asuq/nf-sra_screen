@@ -22,10 +22,13 @@ def helpMessage() {
 
   Optional parameters:
     --outdir        Output directory (default: ./output)
-    --binners       Comma-separated CPU-only binners (default: metabat,semibin,rosella; allowed: metabat,semibin,rosella,comebin,vamb,lorbin)
-    --refiners      Comma-separated CPU-only refiners (default: dastool; allowed: dastool,binette)
+    --binners       Comma-separated binners (default: metabat,semibin,rosella; allowed: metabat,semibin,rosella,comebin,vamb,lorbin)
+    --refiners      Comma-separated refiners (default: dastool; allowed: dastool,binette)
     --checkm2_db    CheckM2 DIAMOND database required with --refiners binette
-    --gpu           Reserved for future GPU mode; not implemented yet
+    --semibin_environment  SemiBin2 pretrained environment (default: global)
+    --gpu           Use GPU variants for COMEBin, VAMB, and LorBin
+    --gpu_type      GPU type for scheduler requests on GWDG (default: A100)
+    --gpus          GPU count for scheduler requests on GWDG (default: 1)
     --max_retries   Maximum number of retries for each process (default: 3)
     --help          Show this help message
 
@@ -56,12 +59,12 @@ def parsePhase0ToolSelection(rawValue, defaultValue, allowedTools, plannedTools,
 
   def planned = selected.findAll { it in plannedTools }
   if (planned) {
-    error "--${paramName} includes planned tool(s) not implemented yet in Phase 0: ${planned.join(', ')}"
+    error "--${paramName} includes planned tool(s) not implemented yet: ${planned.join(', ')}"
   }
 
   def invalid = selected.findAll { !(it in allowedTools) }
   if (invalid) {
-    error "--${paramName} includes unsupported Phase 0 tool(s): ${invalid.join(', ')}"
+    error "--${paramName} includes unsupported tool(s): ${invalid.join(', ')}"
   }
 
   selected
@@ -69,13 +72,42 @@ def parsePhase0ToolSelection(rawValue, defaultValue, allowedTools, plannedTools,
 
 
 /*
- * Validate reserved Phase 0 binning syntax before workflow construction.
+ * Validate the selected SemiBin2 pretrained environment.
  */
-def validatePhase0BinningOptions() {
-  if (params.gpu?.toString()?.toBoolean()) {
-    error "GPU mode is planned but not implemented yet in Phase 0"
+def validateSemibinEnvironment(rawValue) {
+  def selected = (rawValue ?: 'global').toString().trim().toLowerCase()
+  def allowed = [
+    'human_gut',
+    'dog_gut',
+    'ocean',
+    'soil',
+    'cat_gut',
+    'human_oral',
+    'mouse_gut',
+    'pig_gut',
+    'built_environment',
+    'wastewater',
+    'chicken_caecum',
+    'global'
+  ] as Set
+
+  if (!selected) {
+    error "--semibin_environment must not be empty"
   }
 
+  if (!(selected in allowed)) {
+    error "--semibin_environment includes unsupported environment: ${selected}"
+  }
+
+  selected
+}
+
+
+/*
+ * Validate binning syntax before workflow construction.
+ */
+def validatePhase0BinningOptions() {
+  def useGpu = params.gpu?.toString()?.toBoolean() ?: false
   def plannedTools = [] as Set
   def binners = parsePhase0ToolSelection(
     params.binners,
@@ -96,7 +128,12 @@ def validatePhase0BinningOptions() {
     error "--checkm2_db is required when --refiners includes binette"
   }
 
-  [binners: binners, refiners: refiners]
+  [
+    binners: binners,
+    refiners: refiners,
+    gpu: useGpu,
+    semibinEnvironment: validateSemibinEnvironment(params.semibin_environment)
+  ]
 }
 
 
@@ -273,7 +310,7 @@ process MAP_SHORT {
     tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path(assembly_fasta), path(reads)
 
     output:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path(assembly_fasta), path("assembly.bam"), path("assembly.bam.csi"), optional: true, emit: mapped
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("assembly.bam"), path("assembly.bam.csi"), optional: true, emit: mapped
     tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("FAIL.note"), optional: true, emit: note
 
     script:
@@ -304,7 +341,7 @@ process MAP_NANO {
     tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path(assembly_fasta), path(reads)
 
     output:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path(assembly_fasta), path("assembly.bam"), path("assembly.bam.csi"), optional: true, emit: mapped
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("assembly.bam"), path("assembly.bam.csi"), optional: true, emit: mapped
     tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("FAIL.note"), optional: true, emit: note
 
     script:
@@ -335,7 +372,7 @@ process MAP_PACBIO {
     tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path(assembly_fasta), path(reads)
 
     output:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path(assembly_fasta), path("assembly.bam"), path("assembly.bam.csi"), optional: true, emit: mapped
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("assembly.bam"), path("assembly.bam.csi"), optional: true, emit: mapped
     tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("FAIL.note"), optional: true, emit: note
 
     script:
@@ -366,7 +403,7 @@ process MAP_HIFI {
     tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path(assembly_fasta), path(reads)
 
     output:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path(assembly_fasta), path("assembly.bam"), path("assembly.bam.csi"), optional: true, emit: mapped
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("assembly.bam"), path("assembly.bam.csi"), optional: true, emit: mapped
     tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path("FAIL.note"), optional: true, emit: note
 
     script:
@@ -457,6 +494,41 @@ process COMEBIN {
 }
 
 
+process COMEBIN_GPU {
+    tag "${sra}:${srr}"
+    label 'gpu'
+    publishDir "${params.outdir}/${sra}/${srr}/binning",
+      mode: 'copy',
+      overwrite: true
+
+    input:
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path(assembly_fasta), path(assembly_bam), path(assembly_csi)
+
+    output:
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler),
+          val("comebin"), path("comebin"), path("comebin.contig2bin.tsv"), path("comebin.note"),             emit: result
+
+    script:
+    def comebinScript = file("${workflow.projectDir}/bin/run_comebin_nf.sh").toAbsolutePath()
+    """
+    ${comebinScript} \\
+      --assembly "${assembly_fasta}" \\
+      --bam "${assembly_bam}" \\
+      --cpus ${task.cpus} \\
+      --attempt ${task.attempt} \\
+      --max-retries ${params.max_retries} \\
+      --require-cuda
+    """
+
+    stub:
+    """
+    mkdir -p comebin
+    : > comebin.contig2bin.tsv
+    : > comebin.note
+    """
+}
+
+
 process VAMB {
     tag "${sra}:${srr}"
     label 'binning'
@@ -480,6 +552,42 @@ process VAMB {
       --cpus ${task.cpus} \\
       --attempt ${task.attempt} \\
       --max-retries ${params.max_retries}
+    """
+
+    stub:
+    """
+    mkdir -p vamb
+    : > vamb.contig2bin.tsv
+    : > vamb.note
+    """
+}
+
+
+process VAMB_GPU {
+    tag "${sra}:${srr}"
+    label 'gpu'
+    publishDir "${params.outdir}/${sra}/${srr}/binning",
+      mode: 'copy',
+      overwrite: true
+
+    input:
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path(assembly_fasta), path(assembly_bam), path(assembly_csi)
+
+    output:
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler),
+          val("vamb"), path("vamb"), path("vamb.contig2bin.tsv"), path("vamb.note"),                         emit: result
+
+    script:
+    def vambScript = file("${workflow.projectDir}/bin/run_vamb.sh").toAbsolutePath()
+    """
+    ${vambScript} \\
+      --assembly "${assembly_fasta}" \\
+      --bam "${assembly_bam}" \\
+      --cpus ${task.cpus} \\
+      --attempt ${task.attempt} \\
+      --max-retries ${params.max_retries} \\
+      --cuda \\
+      --require-cuda
     """
 
     stub:
@@ -525,6 +633,41 @@ process LORBIN {
 }
 
 
+process LORBIN_GPU {
+    tag "${sra}:${srr}"
+    label 'gpu'
+    publishDir "${params.outdir}/${sra}/${srr}/binning",
+      mode: 'copy',
+      overwrite: true
+
+    input:
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler), path(assembly_fasta), path(assembly_bam), path(assembly_csi)
+
+    output:
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(assembler),
+          val("lorbin"), path("lorbin"), path("lorbin.contig2bin.tsv"), path("lorbin.note"),                  emit: result
+
+    script:
+    def lorbinScript = file("${workflow.projectDir}/bin/run_lorbin.sh").toAbsolutePath()
+    """
+    ${lorbinScript} \\
+      --assembly "${assembly_fasta}" \\
+      --bam "${assembly_bam}" \\
+      --cpus ${task.cpus} \\
+      --attempt ${task.attempt} \\
+      --max-retries ${params.max_retries} \\
+      --require-cuda
+    """
+
+    stub:
+    """
+    mkdir -p lorbin
+    : > lorbin.contig2bin.tsv
+    : > lorbin.note
+    """
+}
+
+
 process SEMIBIN {
     tag "${sra}:${srr}"
     label 'binning'
@@ -547,6 +690,8 @@ process SEMIBIN {
       --assembly "${assembly_fasta}" \\
       --bam "${assembly_bam}" \\
       --diamond-db "${uniprot_db}" \\
+      --read-type "${assembler}" \\
+      --environment "${params.semibin_environment}" \\
       --cpus ${task.cpus} \\
       --attempt ${task.attempt} \\
       --max-retries ${params.max_retries}
@@ -741,6 +886,14 @@ workflow {
     def phase0Options = validatePhase0BinningOptions()
     def selectedBinners = phase0Options.binners
     def selectedRefiners = phase0Options.refiners
+    def useGpu = phase0Options.gpu
+
+    if (useGpu) {
+      def cpuOnlyBinners = selectedBinners.findAll { it in ['metabat', 'rosella', 'semibin'] }
+      if (cpuOnlyBinners) {
+        log.warn "GPU mode requested; CPU-only binner(s) will remain on CPU: ${cpuOnlyBinners.join(', ')}"
+      }
+    }
 
     def outdir = file(params.outdir ?: './output').toAbsolutePath().toString()
     def uniprot_db_ch = channel.value(file(params.uniprot_db, checkIfExists: true))
@@ -816,11 +969,28 @@ workflow {
     def pacbio_mapping = MAP_PACBIO(pacbio_ch)
     def hifi_mapping = MAP_HIFI(hifi_ch)
 
-    def mapped_all = channel.empty()
+    def mapped_bams = channel.empty()
       .mix(short_mapping.mapped)
       .mix(nano_mapping.mapped)
       .mix(pacbio_mapping.mapped)
       .mix(hifi_mapping.mapped)
+
+    def assembly_by_sample = mapping_rows.map { sra, srr, platform, model, strategy, assembler, assembly_fasta, _reads ->
+      tuple([sra, srr], [platform, model, strategy, assembler, assembly_fasta])
+    }
+
+    def mapped_bams_by_sample = mapped_bams.map { sra, srr, _platform, _model, _strategy, _assembler, assembly_bam, assembly_csi ->
+      tuple([sra, srr], [assembly_bam, assembly_csi])
+    }
+
+    def mapped_all = assembly_by_sample
+      .join(mapped_bams_by_sample)
+      .map { key, meta, bam_idx ->
+        def (sra, srr) = key
+        def (platform, model, strategy, assembler, assembly_fasta) = meta
+        def (assembly_bam, assembly_csi) = bam_idx
+        tuple(sra, srr, platform, model, strategy, assembler, assembly_fasta, assembly_bam, assembly_csi)
+      }
 
     def failure_note_ch = channel.empty()
       .mix(resolved_srr.note)
@@ -841,13 +1011,28 @@ workflow {
       metabat_results = METABAT(mapped_all).result
     }
     if ('comebin' in selectedBinners) {
-      comebin_results = COMEBIN(mapped_all).result
+      if (useGpu) {
+        comebin_results = COMEBIN_GPU(mapped_all).result
+      }
+      else {
+        comebin_results = COMEBIN(mapped_all).result
+      }
     }
     if ('vamb' in selectedBinners) {
-      vamb_results = VAMB(mapped_all).result
+      if (useGpu) {
+        vamb_results = VAMB_GPU(mapped_all).result
+      }
+      else {
+        vamb_results = VAMB(mapped_all).result
+      }
     }
     if ('lorbin' in selectedBinners) {
-      lorbin_results = LORBIN(mapped_all).result
+      if (useGpu) {
+        lorbin_results = LORBIN_GPU(mapped_all).result
+      }
+      else {
+        lorbin_results = LORBIN(mapped_all).result
+      }
     }
     if ('semibin' in selectedBinners) {
       semibin_results = SEMIBIN(mapped_all, uniprot_db_ch).result

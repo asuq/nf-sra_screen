@@ -6,6 +6,8 @@
 #   --assembly     assembly fasta
 #   --bam          BAM mapped against the assembly
 #   --diamond-db   DIAMOND reference database
+#   --read-type    read type: short, nanopore, pacbio, or hifi
+#   --environment  SemiBin2 pretrained environment
 #   --cpus         threads to use
 #   --attempt      current attempt number (for Nextflow retries)
 #   --max-retries  maximum attempts before treating failures as soft and writing semibin.note
@@ -15,6 +17,8 @@ set -euo pipefail
 assembly=""
 bam=""
 diamond_db=""
+read_type=""
+environment="global"
 cpus=1
 attempt=0
 max_retries=1
@@ -24,6 +28,8 @@ while [[ $# -gt 0 ]]; do
     --assembly) assembly="$2"; shift 2 ;;
     --bam) bam="$2"; shift 2 ;;
     --diamond-db) diamond_db="$2"; shift 2 ;;
+    --read-type) read_type="$2"; shift 2 ;;
+    --environment) environment="$2"; shift 2 ;;
     --cpus) cpus="$2"; shift 2 ;;
     --attempt) attempt="$2"; shift 2 ;;
     --max-retries) max_retries="$2"; shift 2 ;;
@@ -33,12 +39,37 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if [[ -z "$assembly" || -z "$bam" || -z "$diamond_db" ]]; then
-  echo "run_semibin.sh: missing --assembly, --bam, or --diamond-db" >&2
+if [[ -z "$assembly" || -z "$bam" || -z "$diamond_db" || -z "$read_type" ]]; then
+  echo "run_semibin.sh: missing --assembly, --bam, --diamond-db, or --read-type" >&2
   exit 1
 fi
 
 export DIAMONDDB="$diamond_db"
+
+read_type_lc="$(printf '%s' "$read_type" | tr '[:upper:]' '[:lower:]')"
+environment_lc="$(printf '%s' "$environment" | tr '[:upper:]' '[:lower:]')"
+
+case "$read_type_lc" in
+  short)
+    sequencing_type="short_read"
+    ;;
+  nanopore|pacbio|hifi)
+    sequencing_type="long_read"
+    ;;
+  *)
+    echo "run_semibin.sh: unsupported read type '${read_type}'" >&2
+    exit 1
+    ;;
+esac
+
+case "$environment_lc" in
+  human_gut|dog_gut|ocean|soil|cat_gut|human_oral|mouse_gut|pig_gut|built_environment|wastewater|chicken_caecum|global)
+    ;;
+  *)
+    echo "run_semibin.sh: unsupported SemiBin environment '${environment}'" >&2
+    exit 1
+    ;;
+esac
 
 tmp_dir="tmp_semibin"
 final_dir="semibin"
@@ -67,7 +98,9 @@ fail() {
 if ! SemiBin2 single_easy_bin \
       --input-fasta "$assembly" \
       --input-bam "$bam" \
-      --environment global \
+      --environment "$environment_lc" \
+      --sequencing-type "$sequencing_type" \
+      --engine cpu \
       --output "$tmp_dir" \
       --threads "$cpus"; then
   fail "SemiBin2: single_easy_bin failed"
