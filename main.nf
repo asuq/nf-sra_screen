@@ -40,11 +40,11 @@ def helpMessage() {
     --assemblers    Assembly tools: auto, all, or comma-separated tool names
                     (default: auto; aliases: --assembler, spades, flye)
     --binners       Comma-separated binners (default: auto; allowed: auto,metabat,semibin,rosella,comebin,vamb,lorbin)
-    --refiners      Comma-separated refiners (default: dastool; allowed: dastool,binette)
+    --refiners      Comma-separated refiners (default: binette; allowed: dastool,binette)
     --checkm2_db    CheckM2 DIAMOND database required with --refiners binette
     --semibin_environment  SemiBin2 pretrained environment (default: global)
     --gpu           Use GPU variants for COMEBin, VAMB, and HiFi-only LorBin
-    --gpu_type      GPU type for scheduler requests on GWDG (default: A100)
+    --gpu_type      Optional GPU type for typed scheduler requests on GWDG
     --gpus          GPU count for scheduler requests on GWDG (default: 1)
     --outdir        Output directory (default: ./output)
     --max_retries   Maximum number of retries for each process (default: 3)
@@ -231,7 +231,7 @@ def validateBinningOptions() {
   def binnerSelection = parseBinnerSelection(params.binners)
   def refiners = parseToolSelection(
     params.refiners,
-    'dastool',
+    'binette',
     ['dastool', 'binette'] as Set,
     planned_tools,
     'refiners'

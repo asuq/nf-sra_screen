@@ -1,6 +1,6 @@
 # nf-sra_screen
 
-[![Nextflow](https://img.shields.io/badge/version-25.04.8-green?style=flat&logo=nextflow&logoColor=white&color=%230DC09D&link=https%3A%2F%2Fnextflow.io)](https://www.nextflow.io/)
+[![Nextflow](https://img.shields.io/badge/version-%3E%3D25.04.8-green?style=flat&logo=nextflow&logoColor=white&color=%230DC09D&link=https%3A%2F%2Fnextflow.io)](https://www.nextflow.io/)
 [![run with docker](https://img.shields.io/badge/run%20with-docker-0db7ed?labelColor=000000&logo=docker)](https://www.docker.com/)
 [![run with singularity](https://img.shields.io/badge/run%20with-singularity-1d355c.svg?labelColor=000000)](https://sylabs.io/docs/)
 <!-- [![run with conda](http://img.shields.io/badge/run%20with-conda-3EB049?labelColor=000000&logo=anaconda)](https://docs.conda.io/en/latest/) -->
@@ -71,20 +71,13 @@ There is also a standalone binning entrypoint, `binning.nf`, for cases where you
 
 ### Requirements
 
-- **Nextflow**: `== 25.04.8`
-- **Plugins**:
-  - `nf-boost@~0.6.0` (configured in `nextflow.config`)
+- **Nextflow**: `>= 25.04.8`
 - **Container back‑end**:
   - Docker, or
   - Singularity / Apptainer
 - For the helper watcher scripts (`watch_and_transfer.sh` / `run.sh`): a **Slurm** cluster with:
   - `sbatch`, `sacct`, `rsync`, `flock`
   - a data‑copy partition (the example uses `-p datacp`)
-
-> [!IMPORTANT]
-> This pipeline is pinned to **Nextflow `25.04.8` exactly** (newer versions are not supported due to plugin compatibility, e.g. `nf-boost`).
-> Please do not use `nextflow self-update` for this project unless you have verified plugin support.
-
 
 ### Database requirements
 All tools used by the pipeline are provided via containers defined in `nextflow.config`
@@ -256,9 +249,9 @@ nextflow run binning.nf \
 - `--gtdb_ncbi_map`  (Required with `--taxa`) Directory with ncbi_vs_gtdb_bacteria.xlsx and ncbi_vs_gtdb_archaea.xlsx. For taxonomy screening
 - `--sandpiper_db`   (Required with `--taxa` and `--sra`) Directory with Sandpiper summary tables. For taxonomy screening
 - `--singlem_db`     (Required with `--taxa`) SingleM metapackage (e.g. S5.4.0.GTDB_r226.metapackage_20250331.smpkg.zb) For taxonomy screening
-- `--binning`        (Optional) Run BINNING after ASSEMBLY (MetaBAT2 + SemiBin + Rosella + DAS Tool by default)
+- `--binning`        (Optional) Run BINNING after ASSEMBLY (MetaBAT2 + SemiBin + Rosella + Binette by default)
 - `--binners`        Comma-separated binners (default: `auto`; allowed: `auto,metabat,semibin,rosella,comebin,vamb,lorbin`). `auto` runs all read-type-compatible binners; LorBin runs only for HiFi reads.
-- `--refiners`       Comma-separated refiners (default: `dastool`; allowed: `dastool,binette`)
+- `--refiners`       Comma-separated refiners (default: `binette`; allowed: `dastool,binette`)
 - `--checkm2_db`     CheckM2 DIAMOND database required when `--refiners` includes `binette`
 - `--semibin_environment` SemiBin2 pretrained environment (default: `global`)
 - `--gpu`            Bare flag enabling GPU variants for COMEBin, VAMB, and HiFi-only LorBin; MetaBAT2, SemiBin, and Rosella stay CPU-only
@@ -274,7 +267,7 @@ nextflow run binning.nf \
 - `--gpu_cluster_options` Optional extra scheduler options for GPU jobs
 - `--singularity_cache_dir` Optional Singularity cache directory override
 - `--singularity_run_options` Optional Singularity runtime options override
-- `--gpu_type`       GPU type for typed SLURM requests on GWDG (default: `A100`)
+- `--gpu_type`       Optional GPU type for typed SLURM requests on GPU-enabled profiles
 - `--gpus`           GPU count for typed SLURM requests on GWDG (default: `1`)
 - `--gpu_container_options` Optional container runtime options for GPU jobs (GWDG default: `--nv`)
 - `--help`           Print the pipeline help message and exit.
@@ -293,6 +286,10 @@ nextflow run binning.nf \
 - `gwdg`
   - Includes `conf/gwdg.config` for the GWDG SCC SLURM environment.
   - Uses Singularity with SHM-first temporary storage and defaults all queue classes to `scc-cpu`.
+- `marmic`
+  - Includes `conf/marmic.config` for the Marmic SLURM environment.
+  - Uses Apptainer/Singularity cache settings matching `/home/ashima/nextflow_marmic.config`.
+  - Keep database paths as command-line parameters, for example `--taxdump` and `--uniprot_db`.
 - `debug`
   - docker.enabled = true
   - `executor.queueSize = 1`
