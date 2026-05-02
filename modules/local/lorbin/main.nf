@@ -23,4 +23,11 @@ process LORBIN {
       --attempt ${task.attempt} \\
       --max-retries ${params.max_retries}
     """
+
+    stub:
+    """
+    mkdir -p lorbin
+    : > lorbin.contig2bin.tsv
+    : > lorbin.note
+    """
 }

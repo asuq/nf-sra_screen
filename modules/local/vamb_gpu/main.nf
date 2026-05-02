@@ -25,4 +25,11 @@ process VAMB_GPU {
       --cuda \\
       --require-cuda
     """
+
+    stub:
+    """
+    mkdir -p vamb
+    : > vamb.contig2bin.tsv
+    : > vamb.note
+    """
 }

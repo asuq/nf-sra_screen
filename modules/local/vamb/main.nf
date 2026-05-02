@@ -23,4 +23,11 @@ process VAMB {
       --attempt ${task.attempt} \\
       --max-retries ${params.max_retries}
     """
+
+    stub:
+    """
+    mkdir -p vamb
+    : > vamb.contig2bin.tsv
+    : > vamb.note
+    """
 }

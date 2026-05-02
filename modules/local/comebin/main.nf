@@ -23,4 +23,11 @@ process COMEBIN {
       --attempt ${task.attempt} \\
       --max-retries ${params.max_retries}
     """
+
+    stub:
+    """
+    mkdir -p comebin
+    : > comebin.contig2bin.tsv
+    : > comebin.note
+    """
 }

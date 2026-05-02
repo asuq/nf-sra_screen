@@ -24,4 +24,11 @@ process LORBIN_GPU {
       --max-retries ${params.max_retries} \\
       --require-cuda
     """
+
+    stub:
+    """
+    mkdir -p lorbin
+    : > lorbin.contig2bin.tsv
+    : > lorbin.note
+    """
 }

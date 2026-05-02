@@ -25,4 +25,10 @@ process DASTOOL {
       --attempt ${task.attempt} \\
       --max-retries ${params.max_retries}
     """
+
+    stub:
+    """
+    mkdir -p dastool
+    : > dastool.note
+    """
 }

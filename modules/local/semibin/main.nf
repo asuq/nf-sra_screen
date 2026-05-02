@@ -27,4 +27,12 @@ process SEMIBIN {
       --attempt ${task.attempt} \\
       --max-retries ${params.max_retries}
     """
+
+    stub:
+    """
+    mkdir -p semibin
+    printf 'contig\tbin\n' > semibin/contig_bins.tsv
+    : > semibin.contig2bin.tsv
+    : > semibin.note
+    """
 }

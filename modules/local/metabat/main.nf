@@ -23,4 +23,11 @@ process METABAT {
       --attempt ${task.attempt} \\
       --max-retries ${params.max_retries}
     """
+
+    stub:
+    """
+    mkdir -p metabat
+    : > metabat.contig2bin.tsv
+    : > metabat.note
+    """
 }

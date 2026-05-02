@@ -27,4 +27,11 @@ process BINETTE {
       --attempt ${task.attempt} \\
       --max-retries ${params.max_retries}
     """
+
+    stub:
+    """
+    mkdir -p binette
+    : > binette/final_contig_to_bin.tsv
+    : > binette.note
+    """
 }

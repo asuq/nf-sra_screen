@@ -23,4 +23,11 @@ process ROSELLA {
       --attempt ${task.attempt} \\
       --max-retries ${params.max_retries}
     """
+
+    stub:
+    """
+    mkdir -p rosella
+    : > rosella.contig2bin.tsv
+    : > rosella.note
+    """
 }

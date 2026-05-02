@@ -24,4 +24,11 @@ process COMEBIN_GPU {
       --max-retries ${params.max_retries} \\
       --require-cuda
     """
+
+    stub:
+    """
+    mkdir -p comebin
+    : > comebin.contig2bin.tsv
+    : > comebin.note
+    """
 }
