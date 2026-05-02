@@ -1729,8 +1729,9 @@ workflow SUMMARY {
     // EXTRACT_TAXA only exists when assembly is running
     def doExtraction = doScreening && !noAssembly
 
-    // Binning only exists when assembly is running
-    def doBinning    = (params.binning == true) && !noAssembly
+    // Binning only exists when assembly is running.
+    def binningRequested = params.binning?.toString()?.toBoolean() ?: false
+    def doBinning        = binningRequested && !noAssembly
 
 
     // 1) Convert skipped SRA metadata into per‑SRR rows with a textual note
@@ -1995,9 +1996,10 @@ workflow {
       selectedAssemblerTokens()
     }
 
-    // If noassembly, binning makes no sense
-    def doBinning  = doAssembly && (params.binning == true)
-    if (!doAssembly && params.binning == true) {
+    // If noassembly, binning makes no sense.
+    def binningRequested = params.binning?.toString()?.toBoolean() ?: false
+    def doBinning        = doAssembly && binningRequested
+    if (!doAssembly && binningRequested) {
       log.warn "Warning: --binning is ignored because --noassembly was set"
     }
 
