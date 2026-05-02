@@ -1863,7 +1863,7 @@ workflow SUMMARY {
 
       // binning_agg: (sra, srr, platform, model, strategy, read_type, assembler, "tool1: msg; tool2: msg; ...")
       binning_notes_by_sample_channel = grouped_binning_notes_channel.map { grouped_sample_key, note_entries ->
-        def sample_key = grouped_sample_key.target as Map
+        def sample_key = grouped_sample_key as Map
         def (sra, srr, platform, model, strategy, read_type, assembler) =
           [sample_key.sra, sample_key.srr, sample_key.platform, sample_key.model, sample_key.strategy, sample_key.read_type, sample_key.assembler]
 
