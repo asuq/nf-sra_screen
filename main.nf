@@ -85,7 +85,7 @@ include {
 
 include { VALIDATE_TAXA } from './modules/local/validate_taxa'
 include { PRE_SCREENING } from './subworkflows/local/pre_screening'
-include { SINGLEM } from './modules/local/singlem'
+include { FASTQ_PRE_SCREENING } from './subworkflows/local/fastq_pre_screening'
 
 include { ASSEMBLY } from './subworkflows/local/assembly'
 
@@ -232,19 +232,9 @@ workflow {
                         }
                         .filter { row -> row != null }
 
-      if (doScreening) {
-        fastq_for_singlem_ch = fastq_samplesheet_channel.map { sra, srr, platform, model, strategy, read_type, reads ->
-          tuple(sra, srr, platform, model, strategy, read_type, "RUN_SINGLEM", reads)
-        }
-
-        singlem_fastq = SINGLEM(fastq_for_singlem_ch, validated_taxa_ch, singlem_db_ch)
-        fastq_singlem_reads_ch = singlem_fastq.reads
-        fastq_singlem_note     = singlem_fastq.note
-      }
-      else {
-        fastq_singlem_reads_ch = fastq_samplesheet_channel
-        fastq_singlem_note     = channel.empty()
-      }
+      def fastq_pre_screening_out = FASTQ_PRE_SCREENING(fastq_samplesheet_channel, validated_taxa_ch, singlem_db_ch)
+      fastq_singlem_reads_ch = fastq_pre_screening_out.reads
+      fastq_singlem_note     = fastq_pre_screening_out.note
     }
 
     // Merge SRA and FASTQ reads for assembly
