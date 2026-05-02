@@ -53,6 +53,7 @@ include {
 
 include { RESOLVE_SRR_METADATA } from './modules/local/resolve_srr_metadata'
 include { DOWNLOAD_SRR } from './modules/local/download_srr_binning'
+include { MAP_TO_ASSEMBLY } from './modules/local/map_to_assembly'
 
 
 /*
@@ -65,130 +66,6 @@ def missingParametersError() {
   For standalone binning, please provide:
     --binning_tsv and --uniprot_db
   """.stripIndent()
-}
-
-
-process MAP_SHORT {
-    tag "${sra}:${srr}"
-    label 'binning'
-
-    input:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler), path(assembly_fasta), path(reads)
-
-    output:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler), path("assembly.bam"), path("assembly.bam.csi"), optional: true, emit: mapped
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler), path("FAIL.note"), optional: true, emit: note
-
-    script:
-    def mapScript = file("${workflow.projectDir}/bin/run_map_to_assembly.sh").toAbsolutePath()
-    """
-    ${mapScript} \\
-      --read-type short \\
-      --assembly "${assembly_fasta}" \\
-      --cpus ${task.cpus} \\
-      --attempt ${task.attempt} \\
-      --max-retries ${params.max_retries} \\
-      --reads ${reads}
-    """
-
-    stub:
-    """
-    : > assembly.bam
-    : > assembly.bam.csi
-    """
-}
-
-
-process MAP_NANO {
-    tag "${sra}:${srr}"
-    label 'binning'
-
-    input:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler), path(assembly_fasta), path(reads)
-
-    output:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler), path("assembly.bam"), path("assembly.bam.csi"), optional: true, emit: mapped
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler), path("FAIL.note"), optional: true, emit: note
-
-    script:
-    def mapScript = file("${workflow.projectDir}/bin/run_map_to_assembly.sh").toAbsolutePath()
-    """
-    ${mapScript} \\
-      --read-type nanopore \\
-      --assembly "${assembly_fasta}" \\
-      --cpus ${task.cpus} \\
-      --attempt ${task.attempt} \\
-      --max-retries ${params.max_retries} \\
-      --reads ${reads}
-    """
-
-    stub:
-    """
-    : > assembly.bam
-    : > assembly.bam.csi
-    """
-}
-
-
-process MAP_PACBIO {
-    tag "${sra}:${srr}"
-    label 'binning'
-
-    input:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler), path(assembly_fasta), path(reads)
-
-    output:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler), path("assembly.bam"), path("assembly.bam.csi"), optional: true, emit: mapped
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler), path("FAIL.note"), optional: true, emit: note
-
-    script:
-    def mapScript = file("${workflow.projectDir}/bin/run_map_to_assembly.sh").toAbsolutePath()
-    """
-    ${mapScript} \\
-      --read-type pacbio \\
-      --assembly "${assembly_fasta}" \\
-      --cpus ${task.cpus} \\
-      --attempt ${task.attempt} \\
-      --max-retries ${params.max_retries} \\
-      --reads ${reads}
-    """
-
-    stub:
-    """
-    : > assembly.bam
-    : > assembly.bam.csi
-    """
-}
-
-
-process MAP_HIFI {
-    tag "${sra}:${srr}"
-    label 'binning'
-
-    input:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler), path(assembly_fasta), path(reads)
-
-    output:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler), path("assembly.bam"), path("assembly.bam.csi"), optional: true, emit: mapped
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler), path("FAIL.note"), optional: true, emit: note
-
-    script:
-    def mapScript = file("${workflow.projectDir}/bin/run_map_to_assembly.sh").toAbsolutePath()
-    """
-    ${mapScript} \\
-      --read-type hifi \\
-      --assembly "${assembly_fasta}" \\
-      --cpus ${task.cpus} \\
-      --attempt ${task.attempt} \\
-      --max-retries ${params.max_retries} \\
-      --reads ${reads}
-    """
-
-    stub:
-    """
-    : > assembly.bam
-    : > assembly.bam.csi
-    """
 }
 
 
@@ -717,39 +594,14 @@ workflow {
       .mix(local_binning_rows_channel)
       .mix(downloaded_binning_rows_channel)
 
-    def short_mapping_rows_channel = mapping_input_rows_channel
-      .filter { _sra, _srr, _platform, _model, _strategy, read_type, _assembler, _assembly_fasta, _reads ->
-        read_type.equalsIgnoreCase('short')
-      }
-    def nanopore_mapping_rows_channel = mapping_input_rows_channel
-      .filter { _sra, _srr, _platform, _model, _strategy, read_type, _assembler, _assembly_fasta, _reads ->
-        read_type.equalsIgnoreCase('nanopore')
-      }
-    def pacbio_mapping_rows_channel = mapping_input_rows_channel
-      .filter { _sra, _srr, _platform, _model, _strategy, read_type, _assembler, _assembly_fasta, _reads ->
-        read_type.equalsIgnoreCase('pacbio')
-      }
-    def hifi_mapping_rows_channel = mapping_input_rows_channel
-      .filter { _sra, _srr, _platform, _model, _strategy, read_type, _assembler, _assembly_fasta, _reads ->
-        read_type.equalsIgnoreCase('hifi')
-      }
-
-    def short_mapping_out = MAP_SHORT(short_mapping_rows_channel)
-    def nanopore_mapping_out = MAP_NANO(nanopore_mapping_rows_channel)
-    def pacbio_mapping_out = MAP_PACBIO(pacbio_mapping_rows_channel)
-    def hifi_mapping_out = MAP_HIFI(hifi_mapping_rows_channel)
-
-    def mapped_bam_channel = channel.empty()
-      .mix(short_mapping_out.mapped)
-      .mix(nanopore_mapping_out.mapped)
-      .mix(pacbio_mapping_out.mapped)
-      .mix(hifi_mapping_out.mapped)
+    def map_to_assembly_out = MAP_TO_ASSEMBLY(mapping_input_rows_channel)
+    def mapped_bam_channel = map_to_assembly_out.mapped
 
     def assembly_fasta_by_sample_key = mapping_input_rows_channel.map { sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, _reads ->
       tuple([sra, srr, read_type, assembler], [platform, model, strategy, assembly_fasta])
     }
 
-    def mapped_bam_by_sample_key = mapped_bam_channel.map { sra, srr, _platform, _model, _strategy, read_type, assembler, assembly_bam, assembly_csi ->
+    def mapped_bam_by_sample_key = mapped_bam_channel.map { sra, srr, read_type, assembler, assembly_bam, assembly_csi ->
       tuple([sra, srr, read_type, assembler], [assembly_bam, assembly_csi])
     }
 
@@ -765,10 +617,7 @@ workflow {
     def mapping_failure_note_channel = channel.empty()
       .mix(resolved_srr_out.note)
       .mix(downloaded_srr_out.note)
-      .mix(short_mapping_out.note)
-      .mix(nanopore_mapping_out.note)
-      .mix(pacbio_mapping_out.note)
-      .mix(hifi_mapping_out.note)
+      .mix(map_to_assembly_out.note)
 
     def planned_binning_input = mapped_assembly_rows_channel
       .map { sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, assembly_bam, assembly_csi ->

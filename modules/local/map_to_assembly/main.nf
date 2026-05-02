@@ -29,4 +29,10 @@ process MAP_TO_ASSEMBLY {
       --max-retries ${params.max_retries} \\
       --reads ${reads}
     """
+
+    stub:
+    """
+    : > assembly.bam
+    : > assembly.bam.csi
+    """
 }
