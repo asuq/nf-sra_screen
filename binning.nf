@@ -65,6 +65,9 @@ include { SEMIBIN } from './modules/local/semibin'
 include { ROSELLA } from './modules/local/rosella'
 include { DASTOOL } from './modules/local/dastool'
 include { BINETTE } from './modules/local/binette'
+include { CREATE_EMPTY_SUMMARY } from './modules/local/create_empty_summary'
+include { CREATE_EMPTY_FAILURE_SUMMARY } from './modules/local/create_empty_failure_summary'
+include { APPEND_SUMMARY } from './modules/local/append_summary'
 
 
 /*
@@ -79,66 +82,6 @@ def missingParametersError() {
   """.stripIndent()
 }
 
-
-
-process CREATE_EMPTY_SUMMARY {
-    tag "${sra}:${srr}"
-
-    input:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler), val(note)
-
-    output:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler), path("empty_summary.csv"), val(note), emit: skipped_rows
-
-    script:
-    """
-    echo 'rank,ncbi_taxa,n_contigs,output_ids_csv,output_fasta' > empty_summary.csv
-    """
-}
-
-
-process CREATE_EMPTY_FAILURE_SUMMARY {
-    tag "${sra}:${srr}"
-
-    input:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler), val(note)
-
-    output:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler), path("empty_summary.csv"), val(note), emit: skipped_rows
-
-    script:
-    """
-    echo 'rank,ncbi_taxa,n_contigs,output_ids_csv,output_fasta' > empty_summary.csv
-    """
-}
-
-
-process APPEND_SUMMARY {
-    tag "${sra}:${srr}"
-
-    input:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler), path(summary_csv), val(note)
-    val outdir
-
-    output:
-    path("summary.tsv"), optional: true, emit: global_summary
-
-    script:
-    def appendScript = file("${workflow.projectDir}/bin/run_append_summary.sh").toAbsolutePath()
-    """
-    ${appendScript} \\
-      --outdir "${outdir}" \\
-      --sra "${sra}" \\
-      --srr "${srr}" \\
-      --platform "${platform}" \\
-      --model "${model}" \\
-      --strategy "${strategy}" \\
-      --read-type "${read_type}" \\
-      --assembler "${assembler}" \\
-      --summary-csv "${summary_csv}" \\
-      --note "${note}"
-    """
-}
 
 
 workflow {
