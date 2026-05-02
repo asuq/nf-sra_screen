@@ -51,6 +51,9 @@ include {
   parseResolvedMetadata
 } from './lib/workflow_helpers.nf'
 
+include { RESOLVE_SRR_METADATA } from './modules/local/resolve_srr_metadata'
+include { DOWNLOAD_SRR } from './modules/local/download_srr_binning'
+
 
 /*
  * Abort with a consistent parameter error and show the help text.
@@ -62,68 +65,6 @@ def missingParametersError() {
   For standalone binning, please provide:
     --binning_tsv and --uniprot_db
   """.stripIndent()
-}
-
-
-process RESOLVE_SRR_METADATA {
-    tag "${sra}:${srr}"
-
-    input:
-    tuple val(sra), val(srr), path(assembly_fasta)
-
-    output:
-    tuple val(sra), val(srr), path("resolved.tsv"), path(assembly_fasta), optional: true, emit: resolved
-    tuple val(sra), val(srr), val('UNKNOWN'), val('UNKNOWN'), val('UNKNOWN'), val('UNKNOWN'), val('provided'), path("FAIL.note"), optional: true, emit: note
-
-    script:
-    def resolveScript = file("${workflow.projectDir}/bin/run_resolve_srr_metadata.sh").toAbsolutePath()
-    """
-    ${resolveScript} \\
-      --sample "${sra}" \\
-      --srr "${srr}" \\
-      --attempt ${task.attempt} \\
-      --max-retries ${params.max_retries}
-    """
-
-    stub:
-    """
-    printf 'ILLUMINA\tNovaSeq 6000\tWGS\tshort\n' > resolved.tsv
-    """
-}
-
-
-process DOWNLOAD_SRR {
-    tag "${sra}:${srr}"
-    publishDir { "${params.outdir}/${sra}/${srr}/" },
-      mode: 'copy',
-      overwrite: true,
-      saveAs: { filename ->
-        filename in ["FAIL.note"] ? filename : null
-      }
-
-    input:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler), path(assembly_fasta)
-
-    output:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler), path(assembly_fasta), path("*.f*q*"), path("assembler.txt"), optional: true, emit: reads
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler), path("FAIL.note"), optional: true, emit: note
-
-    script:
-    """
-    run_download_srr.sh \\
-      --srr "${srr}" \\
-      --platform "${platform}" \\
-      --read-type "${read_type}" \\
-      --cpus ${task.cpus} \\
-      --attempt ${task.attempt} \\
-      --max-retries ${params.max_retries}
-    """
-
-    stub:
-    """
-    : > "${srr}_1.fastq.gz"
-    printf '%s\n' "${read_type}" > assembler.txt
-    """
 }
 
 
