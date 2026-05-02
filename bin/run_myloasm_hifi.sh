@@ -8,8 +8,6 @@
 #
 # Produces:
 #   - assembly.fasta
-#   - assembly.bam
-#   - assembly.bam.csi
 #   - assembly.gfa
 #   - myloasm_(DATETIME).log
 #   - FAIL.note (only on fatal problems)
@@ -99,13 +97,4 @@ if ! (
   && mv -v final_contig_graph.gfa assembly.gfa
   ); then
   fail "myloasm: graph rename failed"
-fi
-
-# Map reads back with minimap2 + samtools
-if ! (
-  minimap2 -ax map-hifi -I 20G -t "${cpus}" assembly.fasta "${read_files[@]}" \
-    | samtools sort --output-fmt BAM -@ "${cpus}" -o assembly.bam \
-  && samtools index -c -o assembly.bam.csi -@ "${cpus}" assembly.bam
-  ); then
-  fail "myloasm: mapping/indexing failed"
 fi

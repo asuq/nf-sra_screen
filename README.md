@@ -288,7 +288,7 @@ nextflow run binning.nf \
   - Uses Singularity with SHM-first temporary storage and defaults all queue classes to `scc-cpu`.
 - `marmic`
   - Includes `conf/marmic.config` for the Marmic SLURM environment.
-  - Uses Apptainer/Singularity cache settings matching `/home/ashima/nextflow_marmic.config`.
+  - Uses Apptainer/Singularity cache settings under `/bioinf/home/$USER/nfx_singularity_cache`.
   - Keep database paths as command-line parameters, for example `--taxdump` and `--uniprot_db`.
 - `debug`
   - docker.enabled = true
@@ -310,7 +310,8 @@ nextflow run binning.nf \
       <sra>.skipped.csv
       <sra>.FAIL.note              # if metadata step failed
 
-  <sra>/<srr>/
+  <sra>/<srr>/                       # default/single assembler
+  <sra>/<srr>/<assembler>/           # multi-assembler runs
     # Screening
     singlem_taxonomic_profile.tsv
     singlem_taxonomic_profile_krona*
@@ -326,6 +327,8 @@ nextflow run binning.nf \
     assembly.gfa
     spades.log / flye.log / myloasm.log
     fastp.html                     # short-read only
+    fastp.json                     # short-read only
+    assembly.bam.csi               # read-to-assembly mapping index
 
     # BlobToolKit
     blobtools.csv
@@ -546,27 +549,23 @@ To reuse this pattern:
 `Author / maintainer`: Akito Shima (ASUQ), akito-shima[at]oist.jp
 
 ### Core tools (via containers)
-- iSeq
-- SRA toolkit
-- Sandpiper
-- SingleM
-- DIAMOND
-- BlobToolKit
-- fastp
-- metaSPAdes / SPAdes
-- Flye
-- myloasm
-- bowtie2
-- minimap2
-- samtools
-- MetaBAT2
-- COMEBin
-- VAMB
-- LorBin
-- SemiBin
-- Rosella
-- DAS Tool
-- Binette
+- iSeq 1.9.8 with SRA Toolkit 3.4.1
+- Sandpiper inputs, SingleM 0.20.3
+- DIAMOND 2.1.24
+- BlobToolKit 4.4.6
+- fastp 1.3.3
+- metaSPAdes / SPAdes 3.15.5
+- Flye 2.9.6
+- myloasm 0.5.1
+- bowtie2 2.5.5, minimap2 2.30, samtools 1.23.1
+- MetaBAT2 2.18
+- COMEBin 1.0.4
+- VAMB 5.0.4
+- LorBin 0.1.0
+- SemiBin 2.2.1
+- Rosella 0.5.7
+- DAS Tool 1.1.7
+- Binette 1.2.1
 
 GPU mode on GWDG uses patched CUDA-enabled images for COMEBin, VAMB, and HiFi-only LorBin. SemiBin uses its pretrained environment model on CPU.
 

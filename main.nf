@@ -498,6 +498,40 @@ process SINGLEM {
 }
 
 
+process FASTP_SHORT {
+    tag "${sra}:${srr}:${assembler}"
+    publishDir { assemblerPublishDir(sra, srr, assembler) },
+      mode: 'copy',
+      overwrite: true,
+      saveAs: { filename ->
+        filename in [
+          "fastp.html",
+          "fastp.json",
+          "FAIL.note"
+        ] ? filename : null
+      }
+
+    input:
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler), path(reads)
+
+    output:
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler), path("*_fastp_R*.fastq.gz"), optional: true, emit: reads
+    tuple val(sra), val(srr), val(read_type), val(assembler), path("fastp.html"),                                                        optional: true, emit: html
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler), path("FAIL.note"),               optional: true, emit: note
+
+    script:
+    """
+    run_fastp_short.sh \\
+      --srr "${srr}" \\
+      --assembler "${assembler}" \\
+      --cpus ${task.cpus} \\
+      --attempt ${task.attempt} \\
+      --max-retries ${params.max_retries} \\
+      --reads ${reads}
+    """
+}
+
+
 process METASPADES {
     tag "${sra}:${srr}:${assembler}"
     label 'assembly'
@@ -509,8 +543,6 @@ process METASPADES {
           "assembly.fasta",
           "assembly.gfa",
           "spades.log",
-          "assembly.bam.csi",
-          "fastp.html",
           "FAIL.note"
         ] ? filename : null
       }
@@ -522,8 +554,6 @@ process METASPADES {
     tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler), path("assembly.fasta"), optional: true, emit: assembly_fasta
     tuple val(sra), val(srr), val(read_type), val(assembler), path("assembly.gfa"),                                            optional: true, emit: assembly_graph
     tuple val(sra), val(srr), val(read_type), val(assembler), path("spades.log"),                                              optional: true, emit: assembly_log
-    tuple val(sra), val(srr), val(read_type), val(assembler), path("assembly.bam"), path("assembly.bam.csi"),                  optional: true, emit: assembly_bam
-    tuple val(sra), val(srr), val(read_type), val(assembler), path("fastp.html"),                                              optional: true, emit: fastp_html
     tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler), path("FAIL.note"),     optional: true, emit: note
 
     script:
@@ -551,8 +581,6 @@ process UNICYCLER {
           "assembly.fasta",
           "assembly.gfa",
           "spades.log",
-          "assembly.bam.csi",
-          "fastp.html",
           "FAIL.note"
         ] ? filename : null
       }
@@ -564,8 +592,6 @@ process UNICYCLER {
     tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler), path("assembly.fasta"), optional: true, emit: assembly_fasta
     tuple val(sra), val(srr), val(read_type), val(assembler), path("assembly.gfa"),                                            optional: true, emit: assembly_graph
     tuple val(sra), val(srr), val(read_type), val(assembler), path("spades.log"),                                              optional: true, emit: assembly_log
-    tuple val(sra), val(srr), val(read_type), val(assembler), path("assembly.bam"), path("assembly.bam.csi"),                  optional: true, emit: assembly_bam
-    tuple val(sra), val(srr), val(read_type), val(assembler), path("fastp.html"),                                              optional: true, emit: fastp_html
     tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler), path("FAIL.note"),     optional: true, emit: note
 
     script:
@@ -593,7 +619,6 @@ process METAFLYE_NANO {
           "assembly.fasta",
           "assembly.gfa",
           "flye.log",
-          "assembly.bam.csi",
           "FAIL.note"
         ] ? filename : null
       }
@@ -605,7 +630,6 @@ process METAFLYE_NANO {
     tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler), path("assembly.fasta"), optional: true, emit: assembly_fasta
     tuple val(sra), val(srr), val(read_type), val(assembler), path("assembly.gfa"),                                            optional: true, emit: assembly_graph
     tuple val(sra), val(srr), val(read_type), val(assembler), path("flye.log"),                                                optional: true, emit: assembly_log
-    tuple val(sra), val(srr), val(read_type), val(assembler), path("assembly.bam"), path("assembly.bam.csi"),                  optional: true, emit: assembly_bam
     tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler), path("FAIL.note"),     optional: true, emit: note
 
     script:
@@ -630,7 +654,6 @@ process METAFLYE_PACBIO {
           "assembly.fasta",
           "assembly.gfa",
           "flye.log",
-          "assembly.bam.csi",
           "FAIL.note"
         ] ? filename : null
       }
@@ -642,7 +665,6 @@ process METAFLYE_PACBIO {
     tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler), path("assembly.fasta"), optional: true, emit: assembly_fasta
     tuple val(sra), val(srr), val(read_type), val(assembler), path("assembly.gfa"),                                            optional: true, emit: assembly_graph
     tuple val(sra), val(srr), val(read_type), val(assembler), path("flye.log"),                                                optional: true, emit: assembly_log
-    tuple val(sra), val(srr), val(read_type), val(assembler), path("assembly.bam"), path("assembly.bam.csi"),                  optional: true, emit: assembly_bam
     tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler), path("FAIL.note"),     optional: true, emit: note
 
     script:
@@ -667,7 +689,6 @@ process METAFLYE_HIFI {
           "assembly.fasta",
           "assembly.gfa",
           "flye.log",
-          "assembly.bam.csi",
           "FAIL.note"
         ] ? filename : null
       }
@@ -679,7 +700,6 @@ process METAFLYE_HIFI {
     tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler), path("assembly.fasta"), optional: true, emit: assembly_fasta
     tuple val(sra), val(srr), val(read_type), val(assembler), path("assembly.gfa"),                                            optional: true, emit: assembly_graph
     tuple val(sra), val(srr), val(read_type), val(assembler), path("flye.log"),                                                optional: true, emit: assembly_log
-    tuple val(sra), val(srr), val(read_type), val(assembler), path("assembly.bam"), path("assembly.bam.csi"),                  optional: true, emit: assembly_bam
     tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler), path("FAIL.note"),     optional: true, emit: note
 
     script:
@@ -702,7 +722,6 @@ process MYLOASM {
       saveAs: { filename ->
         if (filename == "assembly.fasta") return filename
         if (filename == "assembly.gfa") return filename
-        if (filename == "assembly.bam.csi") return filename
         if (filename.startsWith("myloasm_") && filename.endsWith(".log")) return filename
         if (filename == "FAIL.note") return filename
         return null
@@ -715,12 +734,43 @@ process MYLOASM {
     tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler), path("assembly.fasta"), optional: true, emit: assembly_fasta
     tuple val(sra), val(srr), val(read_type), val(assembler), path("assembly.gfa"),                                            optional: true, emit: assembly_graph
     tuple val(sra), val(srr), val(read_type), val(assembler), path("myloasm_*.log"),                                           optional: true, emit: assembly_log
-    tuple val(sra), val(srr), val(read_type), val(assembler), path("assembly.bam"), path("assembly.bam.csi"),                  optional: true, emit: assembly_bam
     tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler), path("FAIL.note"),     optional: true, emit: note
 
     script:
     """
     run_myloasm_hifi.sh \\
+      --cpus ${task.cpus} \\
+      --attempt ${task.attempt} \\
+      --max-retries ${params.max_retries} \\
+      --reads ${reads}
+    """
+}
+
+
+process MAP_TO_ASSEMBLY {
+    tag "${sra}:${srr}:${assembler}"
+    publishDir { assemblerPublishDir(sra, srr, assembler) },
+      mode: 'copy',
+      overwrite: true,
+      saveAs: { filename ->
+        filename in [
+          "assembly.bam.csi",
+          "FAIL.note"
+        ] ? filename : null
+      }
+
+    input:
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler), path(assembly_fasta), path(reads)
+
+    output:
+    tuple val(sra), val(srr), val(read_type), val(assembler), path("assembly.bam"), path("assembly.bam.csi"),              optional: true, emit: mapped
+    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler), path("FAIL.note"), optional: true, emit: note
+
+    script:
+    """
+    run_map_to_assembly.sh \\
+      --read-type "${read_type}" \\
+      --assembly "${assembly_fasta}" \\
       --cpus ${task.cpus} \\
       --attempt ${task.attempt} \\
       --max-retries ${params.max_retries} \\
@@ -1318,8 +1368,21 @@ workflow ASSEMBLY {
       read_type.equalsIgnoreCase('hifi') && assembler == 'myloasm'
     }
 
-    metaspades_out         = METASPADES(metaspades_reads_channel)
-    unicycler_out          = UNICYCLER(unicycler_reads_channel)
+    short_reads_channel = channel.empty()
+                        .mix(metaspades_reads_channel)
+                        .mix(unicycler_reads_channel)
+
+    fastp_short_out = FASTP_SHORT(short_reads_channel)
+
+    metaspades_preprocessed_reads_channel = fastp_short_out.reads.filter { sra, srr, platform, model, strategy, read_type, assembler, reads ->
+      read_type.equalsIgnoreCase('short') && assembler == 'metaspades'
+    }
+    unicycler_preprocessed_reads_channel = fastp_short_out.reads.filter { sra, srr, platform, model, strategy, read_type, assembler, reads ->
+      read_type.equalsIgnoreCase('short') && assembler == 'unicycler'
+    }
+
+    metaspades_out         = METASPADES(metaspades_preprocessed_reads_channel)
+    unicycler_out          = UNICYCLER(unicycler_preprocessed_reads_channel)
     metaflye_nanopore_out  = METAFLYE_NANO(metaflye_nanopore_reads_channel)
     metaflye_pacbio_out    = METAFLYE_PACBIO(metaflye_pacbio_reads_channel)
     metaflye_hifi_out      = METAFLYE_HIFI(metaflye_hifi_reads_channel)
@@ -1336,14 +1399,31 @@ workflow ASSEMBLY {
 
     diamond = DIAMOND(assembly_fasta_channel, uniprot_db_ch)
 
-    // BAMs for BlobTools and binning
-    assembly_bam_channel = channel.empty()
-                  .mix(metaspades_out.assembly_bam)
-                  .mix(unicycler_out.assembly_bam)
-                  .mix(metaflye_nanopore_out.assembly_bam)
-                  .mix(metaflye_pacbio_out.assembly_bam)
-                  .mix(metaflye_hifi_out.assembly_bam)
-                  .mix(myloasm_out.assembly_bam)
+    // Map reads back to assemblies for BlobTools and binning.
+    mapping_reads_channel = channel.empty()
+                  .mix(fastp_short_out.reads)
+                  .mix(metaflye_nanopore_reads_channel)
+                  .mix(metaflye_pacbio_reads_channel)
+                  .mix(metaflye_hifi_reads_channel)
+                  .mix(myloasm_hifi_reads_channel)
+
+    assembly_fasta_for_mapping_by_sample_key = assembly_fasta_channel.map { sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta ->
+      tuple([sra, srr, read_type, assembler], [platform, model, strategy, assembly_fasta])
+    }
+    mapping_reads_by_sample_key = mapping_reads_channel.map { sra, srr, platform, model, strategy, read_type, assembler, reads ->
+      tuple([sra, srr, read_type, assembler], [platform, model, strategy, reads])
+    }
+    mapping_input_channel = assembly_fasta_for_mapping_by_sample_key
+      .join(mapping_reads_by_sample_key)
+      .map { sample_join_key, assembly_payload, reads_payload ->
+        def (sra, srr, read_type, assembler) = sample_join_key
+        def (platform, model, strategy, assembly_fasta) = assembly_payload
+        def reads = reads_payload[3]
+        tuple(sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta, reads)
+      }
+
+    map_to_assembly_out = MAP_TO_ASSEMBLY(mapping_input_channel)
+    assembly_bam_channel = map_to_assembly_out.mapped
 
     // Step 7: BlobTools
     // Key every stream by sample, read type, and assembler tool.
@@ -1396,12 +1476,14 @@ workflow ASSEMBLY {
 
     assembly_notes_ch = channel.empty()
                           .mix(assembler_selection_note.note)
+                          .mix(fastp_short_out.note)
                           .mix(metaspades_out.note)
                           .mix(unicycler_out.note)
                           .mix(metaflye_nanopore_out.note)
                           .mix(metaflye_pacbio_out.note)
                           .mix(metaflye_hifi_out.note)
                           .mix(myloasm_out.note)
+                          .mix(map_to_assembly_out.note)
 
   emit:
     // For binning

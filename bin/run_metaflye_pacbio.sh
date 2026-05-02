@@ -8,8 +8,6 @@
 #
 # Produces:
 #   - assembly.fasta
-#   - assembly.bam
-#   - assembly.bam.csi
 #   - assembly.gfa
 #   - flye.log
 #   - FAIL.note (only on fatal problems)
@@ -100,13 +98,4 @@ fi
 # Rename graph to standard name
 if ! mv -v assembly_graph.gfa assembly.gfa; then
   fail "metaFlye (PacBio): graph rename failed"
-fi
-
-# Map reads back with minimap2 + samtools
-if ! (
-  minimap2 -ax map-pb -I 20G -t "${cpus}" assembly.fasta "${read_files[@]}" \
-      | samtools sort --output-fmt BAM -@ "${cpus}" -o assembly.bam \
-  && samtools index -c -o assembly.bam.csi -@ "${cpus}" assembly.bam
-  ); then
-  fail "metaFlye (PacBio): mapping/indexing failed"
 fi

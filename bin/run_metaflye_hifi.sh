@@ -8,8 +8,6 @@
 #
 # Produces:
 #   - assembly.fasta
-#   - assembly.bam
-#   - assembly.bam.csi
 #   - assembly.gfa
 #   - flye.log
 #   - FAIL.note (only on fatal problems)
@@ -95,15 +93,6 @@ if ! flye --pacbio-hifi "${read_files[@]}" \
           --out-dir '.' \
           --meta; then
   fail "metaFlye (HiFi): assembly failed"
-fi
-
-# Map reads back with minimap2 + samtools
-if ! (
-  minimap2 -ax map-hifi -I 20G -t "${cpus}" assembly.fasta "${read_files[@]}" \
-    | samtools sort --output-fmt BAM -@ "${cpus}" -o assembly.bam \
-  && samtools index -c -o assembly.bam.csi -@ "${cpus}" assembly.bam
-  ); then
-  fail "metaFlye (HiFi): mapping/indexing failed"
 fi
 
 # Rename graph to standard name

@@ -8,8 +8,6 @@
 #
 # Produces:
 #   - assembly.fasta
-#   - assembly.bam
-#   - assembly.bam.csi
 #   - assembly.gfa
 #   - flye.log
 #   - FAIL.note (only on fatal problems)
@@ -95,15 +93,6 @@ if ! flye --nano-raw "${read_files[@]}" \
           --out-dir '.' \
           --meta; then
   fail "metaFlye (ONT): assembly failed"
-fi
-
-# Map reads back with minimap2 + samtools
-if ! (
-  minimap2 -ax map-ont -I 20G -t "${cpus}" assembly.fasta "${read_files[@]}" \
-      | samtools sort --output-fmt BAM -@ "${cpus}" -o assembly.bam \
-  && samtools index -c -o assembly.bam.csi -@ "${cpus}" assembly.bam
-  ); then
-  fail "metaFlye (ONT): mapping/indexing failed"
 fi
 
 # Rename graph to standard name

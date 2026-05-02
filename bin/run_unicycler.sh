@@ -6,15 +6,12 @@
 #     --memory-gb MEM \
 #     --attempt A \
 #     --max-retries M \
-#     --reads READS.fastq.gz
+#     --reads FASTP_R1.fastq.gz FASTP_R2.fastq.gz
 #
 # Produces:
 #   - assembly.fasta
-#   - assembly.bam
-#   - assembly.bam.csi
 #   - assembly.gfa
 #   - spades.log
-#   - fastp.html
 #   - FAIL.note (only on fatal problems)
 
 set -euo pipefail
@@ -83,14 +80,6 @@ if [[ -z "$srr" ]]; then
   exit 1
 fi
 
-
-if (( ${#read_files[@]} < 2 )); then
-  fail "Unicycler: paired-end reads not found"
-fi
-
-readonly work_dir=$PWD
-trap cleanup EXIT
-
 fail() {
   local msg="$1"
   echo "$msg" >&2
@@ -101,26 +90,18 @@ fail() {
   exit 0
 }
 
+if (( ${#read_files[@]} < 2 )); then
+  fail "Unicycler: paired-end reads not found"
+fi
+
+readonly work_dir=$PWD
+trap cleanup EXIT
+
 R1="${read_files[0]}"
 R2="${read_files[1]}"
 
-# fastp
-if ! fastp --in1 "${R1}" --in2 "${R2}" --out1 "${srr}_fastp_R1.fastq.gz" --out2 "${srr}_fastp_R2.fastq.gz" \
-        --thread "${threads}" --length_required 50 --detect_adapter_for_pe --qualified_quality_phred 30 --html fastp.html; then
-  fail "Unicycler: fastp failed"
-fi
-
 # Unicycler
-if ! unicycler -1 "${srr}_fastp_R1.fastq.gz" -2 "${srr}_fastp_R2.fastq.gz" -o '.' \
+if ! unicycler -1 "${R1}" -2 "${R2}" -o '.' \
       --threads "${threads}" --verbosity 2 ; then
   fail "Unicycler: assembly failed"
-fi
-
-# bowtie2 + samtools
-if ! ( bowtie2-build -f -q --threads "$threads" assembly.fasta assembly_index \
-      && bowtie2 -q --reorder --threads "$threads" --time --met-stderr --met 10 \
-         -x assembly_index -1 "${srr}_fastp_R1.fastq.gz" -2 "${srr}_fastp_R2.fastq.gz" \
-         | samtools sort --output-fmt BAM -@ "$threads" -o assembly.bam \
-      && samtools index -c -o assembly.bam.csi -@ "$threads" assembly.bam ); then
-  fail "Unicycler: mapping/indexing failed"
 fi
