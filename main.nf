@@ -119,66 +119,10 @@ include { ROSELLA } from './modules/local/rosella'
 include { DASTOOL } from './modules/local/dastool'
 include { BINETTE } from './modules/local/binette'
 
-process CREATE_EMPTY_SUMMARY {
-  tag "${sra}:${srr}:${read_type}:${assembler}"
+include { CREATE_EMPTY_SUMMARY } from './modules/local/create_empty_summary'
+include { CREATE_ASSEMBLER_SELECTION_NOTE } from './modules/local/create_assembler_selection_note'
+include { APPEND_SUMMARY } from './modules/local/append_summary'
 
-  input:
-  tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler), val(note)
-
-  output:
-  tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler), path("empty_summary.csv"), val(note), emit: skipped_rows
-
-  script:
-  """
-  echo 'rank,ncbi_taxa,n_contigs,output_ids_csv,output_fasta' > empty_summary.csv
-  """
-}
-
-
-process CREATE_ASSEMBLER_SELECTION_NOTE {
-  tag "${sra}:${srr}:${read_type}"
-
-  input:
-  tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler), val(note)
-
-  output:
-  tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler), path("FAIL.note"), emit: note
-
-  script:
-  """
-  printf '%s\n' "${note}" > FAIL.note
-  """
-}
-
-
-process APPEND_SUMMARY {
-    tag "${sra}:${srr}:${read_type}:${assembler}"
-
-    input:
-    tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler), path(summary_csv), val(note)
-    val outdir
-
-    output:
-    path("summary.tsv"), optional: true, emit: global_summary
-
-    script:
-    """
-    run_append_summary.sh \\
-      --outdir "${outdir}" \\
-      --sra "${sra}" \\
-      --srr "${srr}" \\
-      --platform "${platform}" \\
-      --model "${model}" \\
-      --strategy "${strategy}" \\
-      --read-type "${read_type}" \\
-      --assembler "${assembler}" \\
-      --summary-csv "${summary_csv}" \\
-      --note "${note}"
-    """
-}
-
-
-//-- Workflow ------------------------------------------------------------------
 workflow PRE_SCREENING {
   take:
     sra_accessions_channel
