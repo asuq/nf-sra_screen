@@ -85,7 +85,6 @@ include {
 
 include { VALIDATE_TAXA } from './modules/local/validate_taxa'
 include { PRE_SCREENING } from './subworkflows/local/pre_screening'
-include { FASTQ_PRE_SCREENING } from './subworkflows/local/fastq_pre_screening'
 
 include { ASSEMBLY } from './subworkflows/local/assembly'
 
@@ -175,33 +174,17 @@ workflow {
     }
 
 
-    // SRA mode
-    def sra_singlem_reads_ch    = channel.empty()
-    def sra_metadata_skipped_ch = channel.empty()
-    def sra_metadata_note       = channel.empty()
-    def sra_sandpiper_note      = channel.empty()
-    def sra_download_srr_note   = channel.empty()
-    def sra_singlem_note        = channel.empty()
+    // Input modes
+    def sra_accessions_channel = channel.empty()
     if (sraMode) {
       sra_accessions_channel = channel.fromPath(params.sra, checkIfExists: true)
                       .splitCsv(header: true, strip: true)
                       .map { row -> row.sra.trim() }
                       .filter { row -> row }
                       .distinct()
-
-      pre_screening_out = PRE_SCREENING(sra_accessions_channel, validated_taxa_ch, sandpiper_db_ch, singlem_db_ch)
-
-      sra_singlem_reads_ch    = pre_screening_out.singlem_reads
-      sra_metadata_skipped_ch = pre_screening_out.sra_metadata_skipped
-      sra_metadata_note       = pre_screening_out.sra_metadata_note
-      sra_sandpiper_note      = pre_screening_out.sandpiper_note
-      sra_download_srr_note   = pre_screening_out.download_srr_note
-      sra_singlem_note        = pre_screening_out.singlem_note
     }
 
-    // FASTQ mode
-    def fastq_singlem_reads_ch = channel.empty()
-    def fastq_singlem_note     = channel.empty()
+    def fastq_samplesheet_channel = channel.empty()
     if (fastqMode) {
       fastq_samplesheet_channel = channel.fromPath(params.fastq_tsv, checkIfExists: true)
                         .splitCsv(header: true, sep: '\t', strip: true)
@@ -231,19 +214,22 @@ workflow {
                           tuple(sra, srr, platform, model, strategy, read_type, read_files)
                         }
                         .filter { row -> row != null }
-
-      def fastq_pre_screening_out = FASTQ_PRE_SCREENING(fastq_samplesheet_channel, validated_taxa_ch, singlem_db_ch)
-      fastq_singlem_reads_ch = fastq_pre_screening_out.reads
-      fastq_singlem_note     = fastq_pre_screening_out.note
     }
 
-    // Merge SRA and FASTQ reads for assembly
-    def screened_reads_channel = channel.empty()
-                                  .mix(sra_singlem_reads_ch)
-                                  .mix(fastq_singlem_reads_ch)
-    def prescreening_note_channel = channel.empty()
-                                  .mix(sra_singlem_note)
-                                  .mix(fastq_singlem_note)
+    def pre_screening_out = PRE_SCREENING(
+      sra_accessions_channel,
+      fastq_samplesheet_channel,
+      validated_taxa_ch,
+      sandpiper_db_ch,
+      singlem_db_ch
+    )
+
+    def screened_reads_channel   = pre_screening_out.reads
+    def sra_metadata_skipped_ch  = pre_screening_out.sra_metadata_skipped
+    def sra_metadata_note        = pre_screening_out.sra_metadata_note
+    def sra_sandpiper_note       = pre_screening_out.sandpiper_note
+    def sra_download_srr_note    = pre_screening_out.download_srr_note
+    def prescreening_note_channel = pre_screening_out.singlem_note
 
 
   // Empty notes

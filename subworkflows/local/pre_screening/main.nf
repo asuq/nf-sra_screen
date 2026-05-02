@@ -6,7 +6,8 @@ include { SINGLEM } from '../../../modules/local/singlem'
 workflow PRE_SCREENING {
   take:
     sra_accessions_channel
-    validated_taxa
+    fastq_samplesheet_channel
+    validated_taxa_ch
     sandpiper_db_ch
     singlem_db_ch
 
@@ -15,7 +16,7 @@ workflow PRE_SCREENING {
 
     // Start PRE_SCREENING after taxa validation
     def gated_sra_accessions_channel = doScreening
-                        ? sra_accessions_channel.combine(validated_taxa).map { sra, vt -> sra }
+                        ? sra_accessions_channel.combine(validated_taxa_ch).map { sra, vt -> sra }
                         : sra_accessions_channel
 
     // Extract metadata & filter SRR
@@ -44,7 +45,7 @@ workflow PRE_SCREENING {
 
     if (doScreening) {
       // SANDPIPER prescreening
-      sandpiper = SANDPIPER(srr_ch, validated_taxa, sandpiper_db_ch)
+      sandpiper = SANDPIPER(srr_ch, validated_taxa_ch, sandpiper_db_ch)
       // decision: NEGATIVE / RUN_SINGLEM / PASS
       sandpiper_decision_ch = sandpiper.decision.map { sra, srr, platform, model, strategy, read_type, dec_path ->
         def decision = file(dec_path).text.trim()
@@ -59,13 +60,21 @@ workflow PRE_SCREENING {
       // Download SRR reads
       download_srr = DOWNLOAD_SRR(srr_prescreened)
 
-      srr_reads = download_srr.reads.map { sra, srr, platform, model, strategy, detected_read_type, sandpiper_dec, reads, asm_txt ->
+      sra_reads_for_singlem_channel = download_srr.reads.map { sra, srr, platform, model, strategy, detected_read_type, sandpiper_dec, reads, asm_txt ->
         def fixedReadType = file(asm_txt)?.text?.trim() ?: detected_read_type
         tuple(sra, srr, platform, model, strategy, fixedReadType, sandpiper_dec, reads)
       }
 
-      // SINGLEM prescreening
-      singlem = SINGLEM(srr_reads, validated_taxa, singlem_db_ch)
+      fastq_reads_for_singlem_channel = fastq_samplesheet_channel.map { sra, srr, platform, model, strategy, read_type, reads ->
+        tuple(sra, srr, platform, model, strategy, read_type, 'RUN_SINGLEM', reads)
+      }
+
+      singlem_input_channel = channel.empty()
+        .mix(sra_reads_for_singlem_channel)
+        .mix(fastq_reads_for_singlem_channel)
+
+      // SINGLEM prescreening for all downloaded SRA reads and user-provided FASTQ rows.
+      singlem = SINGLEM(singlem_input_channel, validated_taxa_ch, singlem_db_ch)
       singlem_reads_ch     = singlem.reads
 
       sandpiper_note_ch    = sandpiper.note
@@ -83,10 +92,13 @@ workflow PRE_SCREENING {
       download_srr = DOWNLOAD_SRR(srr_prescreened)
 
       // Normalise read type, then drop sandpiper decision.
-      singlem_reads_ch = download_srr.reads.map { sra, srr, platform, model, strategy, detected_read_type, sandpiper_dec, reads, asm_txt ->
+      sra_downloaded_reads_channel = download_srr.reads.map { sra, srr, platform, model, strategy, detected_read_type, sandpiper_dec, reads, asm_txt ->
         def fixedReadType = file(asm_txt)?.text?.trim() ?: detected_read_type
         tuple(sra, srr, platform, model, strategy, fixedReadType, reads)
       }
+      singlem_reads_ch = channel.empty()
+        .mix(sra_downloaded_reads_channel)
+        .mix(fastq_samplesheet_channel)
 
       sandpiper_note_ch    = channel.empty()
       download_srr_note_ch = download_srr.note
@@ -95,7 +107,7 @@ workflow PRE_SCREENING {
 
   emit:
     // For assembly
-    singlem_reads         = singlem_reads_ch
+    reads                 = singlem_reads_ch
 
     // For summary
     sra_metadata_skipped  = sra_metadata.skipped_sra
@@ -104,4 +116,3 @@ workflow PRE_SCREENING {
     download_srr_note     = download_srr_note_ch
     singlem_note          = singlem_note_ch
 }
-
