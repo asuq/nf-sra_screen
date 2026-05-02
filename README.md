@@ -249,8 +249,8 @@ nextflow run binning.nf \
 - `--gtdb_ncbi_map`  (Required with `--taxa`) Directory with ncbi_vs_gtdb_bacteria.xlsx and ncbi_vs_gtdb_archaea.xlsx. For taxonomy screening
 - `--sandpiper_db`   (Required with `--taxa` and `--sra`) Directory with Sandpiper summary tables. For taxonomy screening
 - `--singlem_db`     (Required with `--taxa`) SingleM metapackage (e.g. S5.4.0.GTDB_r226.metapackage_20250331.smpkg.zb) For taxonomy screening
-- `--binning`        (Optional) Run BINNING after ASSEMBLY (MetaBAT2 + SemiBin + Rosella + Binette by default)
-- `--binners`        Comma-separated binners (default: `auto`; allowed: `auto,metabat,semibin,rosella,comebin,vamb,lorbin`). `auto` runs all read-type-compatible binners; LorBin runs only for HiFi reads.
+- `--binning`        (Optional) Run BINNING after ASSEMBLY (all read-type-compatible binners + Binette by default)
+- `--binners`        Comma-separated binners (default: `all-compatible`; allowed: `all-compatible,auto,metabat,semibin,rosella,comebin,vamb,lorbin`). `all-compatible` runs all read-type-compatible binners; `auto` is accepted as a compatibility alias. LorBin runs only for HiFi reads.
 - `--refiners`       Comma-separated refiners (default: `binette`; allowed: `dastool,binette`)
 - `--checkm2_db`     CheckM2 DIAMOND database required when `--refiners` includes `binette`
 - `--semibin_environment` SemiBin2 pretrained environment (default: `global`)

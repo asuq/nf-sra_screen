@@ -20,7 +20,7 @@ def helpMessage() {
 
   Optional parameters:
     --outdir        Output directory (default: ./output)
-    --binners       Comma-separated binners (default: auto; allowed: auto,metabat,semibin,rosella,comebin,vamb,lorbin)
+    --binners       Comma-separated binners (default: all-compatible; allowed: all-compatible,auto,metabat,semibin,rosella,comebin,vamb,lorbin)
     --refiners      Comma-separated refiners (default: binette; allowed: dastool,binette)
     --checkm2_db    CheckM2 DIAMOND database required with --refiners binette
     --semibin_environment  SemiBin2 pretrained environment (default: global)
@@ -66,7 +66,7 @@ def compatibleBinnersForReadType(readType) {
  * Parse and validate a comma-separated binning tool selection.
  */
 def parseBinnerSelection(raw_selection_value) {
-  def normalised_selection_text = raw_selection_value == null ? 'auto' : raw_selection_value.toString().trim().toLowerCase()
+  def normalised_selection_text = raw_selection_value == null ? 'all-compatible' : raw_selection_value.toString().trim().toLowerCase()
   if (!normalised_selection_text) {
     error "--binners must include at least one tool"
   }
@@ -79,7 +79,7 @@ def parseBinnerSelection(raw_selection_value) {
     mode: 'explicit',
     tools: parseToolSelection(
       normalised_selection_text,
-      'auto',
+      'all-compatible',
       allImplementedBinners() as Set,
       [] as Set,
       'binners'
