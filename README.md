@@ -417,6 +417,15 @@ nextflow run asuq/nf-sra_screen \
 
 This keeps large intermediate task data on Lustre while final result files accumulate on NFS. It also avoids a separate transfer process because Nextflow writes the final outputs directly to the requested NFS output directory.
 
+After a run has finished, completed sample work directories can be cleaned from the trace file:
+
+```bash
+helpers/cleanup_processed_sample_workdirs.sh execution-reports/trace.tsv \
+  --work-root /lustre/$USER/nf-sra_screen_work
+```
+
+The helper writes `processed_sample_workdirs.tsv` beside the trace file and deletes by default. Add `--dry-run` to write the processed sample list and inspect candidate directories without deleting them. The helper only cleans a sample when all final observed trace rows for that sample are `COMPLETED` or `CACHED`.
+
 </details>
 
 <details>
