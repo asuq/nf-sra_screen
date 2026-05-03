@@ -25,7 +25,7 @@ assert_path_missing() {
 }
 
 assert_file_contains "$REPO_ROOT/.gitmodules" "path = external/nf-helper"
-assert_file_contains "$REPO_ROOT/.gitmodules" "url = github:asuq/nf-helper.git"
+assert_file_contains "$REPO_ROOT/.gitmodules" "url = https://github.com/asuq/nf-helper.git"
 assert_path_exists "$REPO_ROOT/external/nf-helper/conf/sites/oist.config"
 assert_path_exists "$REPO_ROOT/external/nf-helper/conf/sites/gwdg.config"
 assert_path_exists "$REPO_ROOT/external/nf-helper/conf/sites/marmic.config"
