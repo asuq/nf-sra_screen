@@ -7,13 +7,10 @@ export NXF_VER=25.04.8
 # User settings
 # ------------------------------------------------------------------
 RUN_DIR='/path/to/running_dir'
-DEST_DIR='/path/to/destination_dir'
-INTERVAL_MIN=10
 NF_SRA_SCREEN='/path/to/nf-sra_screen'
 ENABLE_GWDG_QOS_HELPER=false
 GWDG_QOS_HELPER_OPTS=(--quiet)
 
-WATCH_PID=""
 QOS_HELPER_PID=""
 nf_exit=0
 
@@ -23,6 +20,7 @@ nf_exit=0
 # ------------------------------------------------------------------
 # Cleanup on normal exit, failure, or Ctrl+C
 # ------------------------------------------------------------------
+# shellcheck disable=SC2329
 stop_background_process() {
   local name=$1
   local pid=$2
@@ -36,12 +34,12 @@ stop_background_process() {
   fi
 }
 
+# shellcheck disable=SC2329
 cleanup() {
   # Exit status of the script at the moment the trap fired
   local status=$?
 
   stop_background_process "gwdg_promote_2h_qos" "${QOS_HELPER_PID}"
-  stop_background_process "watch_and_transfer" "${WATCH_PID}"
 
   # Preserve the original exit status of the script
   return "${status}"
@@ -56,24 +54,9 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 
 # ------------------------------------------------------------------
-# Go to run directory (where .nextflow.log, work/, output/ will live)
+# Go to run directory (where .nextflow.log and execution reports will live)
 # ------------------------------------------------------------------
 cd "${RUN_DIR}" || exit 1
-
-# ------------------------------------------------------------------
-# Start watcher in background
-# ------------------------------------------------------------------
-mkdir -p "${DEST_DIR}"
-
-"${NF_SRA_SCREEN}/bin/watch_and_transfer.sh" \
-  "${RUN_DIR}" \
-  "${DEST_DIR}" \
-  "${INTERVAL_MIN}" \
-  > watch_and_transfer.log 2>&1 &
-
-WATCH_PID=$!
-echo "watch_and_transfer pid: ${WATCH_PID}"
-printf '%s\n' "${WATCH_PID}" > watch_and_transfer.pid
 
 case "${ENABLE_GWDG_QOS_HELPER}" in
   true|false)
@@ -109,7 +92,8 @@ nextflow run asuq/nf-sra_screen \
   --gtdb_ncbi_map /path/to/ncbi_vs_gtdb_xlsx_dir \
   --sandpiper_db /path/to/sandpiper_db_dir \
   --singlem_db /path/to/singlem_metapackage \
-  --outdir nf-sra_screen_results \
+  -work-dir /lustre/path/to/nf-sra_screen_work \
+  --outdir /nfs/path/to/nf-sra_screen_results \
   -resume \
 || nf_exit=$?
 

@@ -13,7 +13,7 @@
 - [Inputs](#inputs)
 - [Usage](#usage)
 - [Output Structure](#output-structure)
-- [Managing storage with watch_and_transfer.sh](#managing-storage-with-watch_and_transfersh)
+- [Managing storage with Nextflow](#managing-storage-with-nextflow)
 - [Managing GWDG 2h QOS](#managing-gwdg-2h-qos)
 - [Example SLURM wrapper: run.sh](#example-slurm-wrapper-runsh)
 
@@ -77,9 +77,7 @@ There is also a standalone binning entrypoint, `binning.nf`, for cases where you
 - **Container backend**:
   - Docker, or
   - Singularity / Apptainer
-- For the helper watcher scripts (`watch_and_transfer.sh` / `run.sh`): a **Slurm** cluster with:
-  - `sbatch`, `sacct`, `rsync`, `flock`
-  - a data-copy partition (the example uses `-p datacp`)
+- For the optional GWDG QOS helper: a **Slurm** cluster with `squeue` and `scontrol`
 
 ### Database requirements
 All tools used by the pipeline are provided via containers defined in `nextflow.config`.
@@ -404,123 +402,20 @@ execution-reports/
 </details>
 
 <details>
-<summary><strong>Managing storage with watch_and_transfer.sh</strong></summary>
+<summary><strong>Managing storage with Nextflow</strong></summary>
 
-## Managing storage with `watch_and_transfer.sh`
+## Managing storage with Nextflow
 
-Long metagenomic runs can fill storage rapidly. The helper script `watch_and_transfer.sh` streams finished per-sample output folders from the run directory to longer-term storage and cleans up safely.
-
-### Requirements
-
-- Slurm environment with:
-  - `sbatch`
-  - `sacct`
-  - a partition suitable for data transfer (the script uses `-p datacp`; change if needed)
-
-The pipeline must write `summary.tsv` to `RUN_DIR/output/summary.tsv`. This is the default when you run from `RUN_DIR` and leave `--outdir` as `output`.
-
-If you move `--outdir` away from `RUN_DIR/output`, `watch_and_transfer.sh` will not find `RUN_DIR/output/summary.tsv`. For watcher-based runs, keep `--outdir output` under `RUN_DIR` and let the watcher transfer outputs to NFS. If you prefer `--outdir /nfs/...` directly, skip the watcher unless you also adapt its `RUN_DIR/output` expectations.
-
-### What it does
-
-Given:
-
-- `RUN_DIR`: the Nextflow run directory (where output/ and summary.tsv live)
-- `DEST_DIR`: a larger storage area (e.g. object store or shared filesystem)
-- `INTERVAL_MINS`: how often to scan for new samples
-
-`watch_and_transfer.sh` will:
-1. Acquire an exclusive lock in `RUN_DIR/.watch_and_transfer.lock` so only one watcher instance runs per pipeline.
-
-2. Read `RUN_DIR/output/summary.tsv` and, for each `(sra,srr)`:
-    - Skip samples already listed in `RUN_DIR/.processed_summary.tsv`.
-    - Skip samples that already have a pending transfer in `RUN_DIR/.pending_copy_jobs.tsv`.
-
-3. Interpret the note column:
-    - If `note` starts with
-      - `did not match the criteria`:
-      the run was filtered at the metadata stage; it is recorded as processed without any transfer.
-
-    - If `note` is non-empty and `output/$sra/$srr` does not exist, the run is considered failed/filtered with no outputs and is marked processed.
-
-    - Otherwise, the run is treated as a completed sample with outputs.
-
-4. For each completed sample with an output directory:
-    - Submits a Slurm job via sbatch on partition datacp:
-      `rsync -a "${RUN_DIR}/output/$sra/$srr"/ "${DEST_DIR}/$sra/$srr"/`
-
-    - followed by: `rm -rf ${RUN_DIR}/output/$sra/$srr`
-
-    - Attempts to remove the now-empty `${RUN_DIR}/output/$sra` directory.
-
-Records (sra,srr,job_id) in .pending_copy_jobs.tsv.
-
-5. On each cycle, `check_pending_jobs`:
-    - Queries Slurm with `sacct` for all pending job IDs.
-    - For jobs that finished with `State=COMPLETED` and ExitCode starting with 0, logs success.
-    - Deletes the corresponding `slurm-<jobid>.out` log.
-    - Appends `(sra,srr)` to `.processed_summary.tsv`.
-    - For jobs in transient states (PENDING/RUNNING/etc.), keeps them pending.
-    - For failed/cancelled/time-out jobs, removes them from pending; the sample will be re-submitted in a later cycle.
-
-The script runs indefinitely in a loop:
-```bash
-while :; do
-  check_pending_jobs
-  move_output_to_storage
-  sleep "$INTERVAL_MINS" minutes
-done
-```
-
-### Basic usage
-
-From a login node (ideally in a tmux/screen session):
+Long metagenomic runs can fill storage rapidly. Prefer separating transient task work from final outputs with Nextflow's built-in path controls:
 
 ```bash
-bin/watch_and_transfer.sh RUN_DIR DEST_DIR INTERVAL_MINS
+nextflow run asuq/nf-sra_screen \
+  -profile marmic \
+  -work-dir /lustre/$USER/nf-sra_screen_work \
+  --outdir /nfs/$USER/nf-sra_screen_results
 ```
 
-Example:
-```bash
-bin/watch_and_transfer.sh \
-  /fast/youruser/project_X/run1 \
-  /long/yourgroup/project_X/archive \
-  10
-```
-
-This will:
-
-- Check every 10 minutes for new rows in `output/summary.tsv`.
-- Start Slurm copy jobs as samples finish.
-- Free space under `RUN_DIR/output` once a copy is verified as successful.
-- Keep a small amount of state in:
-  - `RUN_DIR/.processed_summary.tsv`
-  - `RUN_DIR/.pending_copy_jobs.tsv`
-  - `RUN_DIR/.watch_and_transfer.lock`
-
-### Cleaning processed work directories
-
-`watch_and_transfer.sh` does not delete Nextflow `work/` directories. After a sample has been transferred and recorded in `RUN_DIR/.processed_summary.tsv`, you can clean its matching per-SRR work directories with:
-
-```bash
-helpers/cleanup_processed_sra_workdirs.sh RUN_DIR
-```
-
-The helper reads processed `(sra,srr)` pairs from `RUN_DIR/.processed_summary.tsv`, matches them to `tag` and `workdir` columns in the Nextflow trace file, and deletes only paths safely fenced under `RUN_DIR/work/`. By default it looks for `RUN_DIR/execution-reports/trace.tsv`, then `RUN_DIR/trace.tsv`.
-
-Preview the cleanup without deleting anything:
-
-```bash
-helpers/cleanup_processed_sra_workdirs.sh RUN_DIR --dry-run
-```
-
-Use explicit paths when needed:
-
-```bash
-helpers/cleanup_processed_sra_workdirs.sh RUN_DIR \
-  --trace RUN_DIR/execution-reports/trace.tsv \
-  --state-file RUN_DIR/.processed_summary.tsv
-```
+This keeps large intermediate task data on Lustre while final result files accumulate on NFS. It also avoids a separate transfer process because Nextflow writes the final outputs directly to the requested NFS output directory.
 
 </details>
 
@@ -553,39 +448,25 @@ The helper can affect all pending short jobs owned by the current user, not only
 
 ## Example SLURM wrapper: `run.sh`
 
-The repository includes an example wrapper `run.sh` showing how to run the pipeline and watcher together on a Slurm cluster.
+The repository includes an example wrapper `run.sh` showing how to run the pipeline on a Slurm cluster with optional GWDG QOS promotion.
 
 What `run.sh` does
 1. Defines user-specific paths:
 ```bash
-RUN_DIR='/fast/.../nf-sra_screen_run/outdir'
-DEST_DIR='/long/.../nf-sra_screen_archive'
-INTERVAL_MINS=10
+RUN_DIR='/fast/.../nf-sra_screen_run'
 NF_SRA_SCREEN='/path/to/nf-sra_screen'  # clone of this repo
 ENABLE_GWDG_QOS_HELPER=false
 GWDG_QOS_HELPER_OPTS=(--quiet)
 ```
 
 2. Installs a `trap` so that when the script exits (successfully or not), it:
-  - Attempts to stop the background watcher process cleanly.
   - Attempts to stop the optional GWDG QOS helper cleanly.
   - Preserves the original Nextflow exit status.
 
 3. Changes into `RUN_DIR` so that:
-  - `.nextflow.log`, `work/`, and `output/` live there.
-  - `watch_and_transfer.sh` can find `output/summary.tsv` at the expected location.
+  - `.nextflow.log` and execution reports live there.
 
-4. Starts the watcher in the background:
-```bash
-"${NF_SRA_SCREEN}/bin/watch_and_transfer.sh" \
-  "${RUN_DIR}" \
-  "${DEST_DIR}" \
-  "${INTERVAL_MINS}" \
-  > watch_and_transfer.log 2>&1 &
-```
-and records its PID in watch_and_transfer.pid.
-
-5. If `ENABLE_GWDG_QOS_HELPER=true`, starts the GWDG QOS helper in the background:
+4. If `ENABLE_GWDG_QOS_HELPER=true`, starts the GWDG QOS helper in the background:
 
 ```bash
 "${NF_SRA_SCREEN}/helpers/gwdg_promote_2h_qos.sh" \
@@ -595,7 +476,7 @@ and records its PID in watch_and_transfer.pid.
 
 and records its PID in gwdg_promote_2h_qos.pid.
 
-6. Runs the Nextflow pipeline (with your chosen profile and parameters):
+5. Runs the Nextflow pipeline (with your chosen profile and parameters):
 
 ```bash
 nextflow run asuq/nf-sra_screen \
@@ -610,11 +491,12 @@ nextflow run asuq/nf-sra_screen \
   --sandpiper_db /path/to/sandpiper_db_dir \
   --singlem_db /path/to/singlem_metapackage \
   --checkm2_db /path/to/checkm2_db \
-  --outdir nf-sra_screen_results \
+  -work-dir /lustre/path/to/nf-sra_screen_work \
+  --outdir /nfs/path/to/nf-sra_screen_results \
   -resume
 ```
 
-7. Exits with the same status code as the Nextflow run, triggering the `EXIT` trap, which in turn stops the watcher and optional QOS helper.
+6. Exits with the same status code as the Nextflow run, triggering the `EXIT` trap, which in turn stops the optional QOS helper.
 
 ### Adapting `run.sh` for your cluster
 
@@ -623,14 +505,12 @@ To reuse this pattern:
 1. Copy `run.sh` somewhere in your project.
 
 2. Edit:
-    - `RUN_DIR`: a scratch or fast filesystem path for the actual run.
-    - `DEST_DIR`: slower / archival filesystem for final results.
+    - `RUN_DIR`: a project directory for the Nextflow launch logs and execution reports.
     - `NF_SRA_SCREEN`: path to your clone of this repository.
     - `ENABLE_GWDG_QOS_HELPER`: set to `true` only on GWDG when you want short pending jobs promoted into free `2h` QOS slots.
     - `GWDG_QOS_HELPER_OPTS`: options for `helpers/gwdg_promote_2h_qos.sh`, such as `--quiet`, `--cap`, or `--interval`.
-    - The Nextflow command at the bottom (profile name, database paths, etc.).
-    - The Slurm partition used for data copy in `watch_and_transfer.sh` (-p datacp) if your site uses a different name.
-    - Submit `run.sh` itself as a Slurm job or run it on a login node with `tmux` (depending on your site policy). All heavy work is still done by Nextflow processes and the per-sample transfer jobs.
+    - The Nextflow command at the bottom, especially profile name, database paths, `-work-dir` on Lustre, and `--outdir` on NFS.
+    - Submit `run.sh` itself as a Slurm job or run it on a login node with `tmux` (depending on your site policy). All heavy work is still done by Nextflow processes.
 
 </details>
 
