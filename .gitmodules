@@ -1,4 +1,4 @@
 [submodule "external/nf-helper"]
 	path = external/nf-helper
-	url = github:asuq/nf-helper.git
+	url = https://github.com/asuq/nf-helper.git
 	branch = main
