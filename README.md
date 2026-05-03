@@ -308,6 +308,19 @@ nextflow run binning.nf \
 - `test`
   - For small regression tests.
 
+### Lustre/NFS storage layout
+
+To reduce persistent Lustre usage, put transient Nextflow task directories on Lustre and write final outputs to NFS. Use Nextflow's portable `-work-dir` option for the work directory and `--outdir` for pipeline outputs:
+
+```bash
+nextflow run asuq/nf-sra_screen \
+  -profile marmic \
+  -work-dir /lustre/$USER/nf-sra_screen_work \
+  --outdir /nfs/$USER/nf-sra_screen_results
+```
+
+This keeps large intermediate task data in Lustre-backed `work/` storage while final result files accumulate on NFS.
+
 
 <details>
 <summary><strong>Output structure</strong></summary>
@@ -405,6 +418,8 @@ Long metagenomic runs can fill storage rapidly. The helper script `watch_and_tra
   - a partition suitable for data transfer (the script uses `-p datacp`; change if needed)
 
 The pipeline must write `summary.tsv` to `RUN_DIR/output/summary.tsv`. This is the default when you run from `RUN_DIR` and leave `--outdir` as `output`.
+
+If you move `--outdir` away from `RUN_DIR/output`, `watch_and_transfer.sh` will not find `RUN_DIR/output/summary.tsv`. For watcher-based runs, keep `--outdir output` under `RUN_DIR` and let the watcher transfer outputs to NFS. If you prefer `--outdir /nfs/...` directly, skip the watcher unless you also adapt its `RUN_DIR/output` expectations.
 
 ### What it does
 
