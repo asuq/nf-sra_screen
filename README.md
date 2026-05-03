@@ -20,35 +20,36 @@
 
 ## Introduction
 
-**nf-sra_screen** is a Nextflow pipeline for taxon‑focused screening and assembly of public SRA runs and/or local FASTQ files, followed by taxonomic annotation and (optionally) binning.
+**nf-sra_screen** is a Nextflow pipeline for taxon-focused screening and assembly of public SRA runs and/or local FASTQ files, followed by taxonomic annotation and optional binning.
 
 ![nf-sra_screen diagram](./images/nf-sra_screen_diagram.png)
 
 Given:
 - a list of SRA accessions and/or a table of local FASTQ files,
 - a NCBI taxonomy snapshot and NCBI <-> GTDB mapping tables,
-- a UniProt DIAMOND database
-- (Optional) Sandpiper and SingleM marker‑gene databases for pre-screening,
+- a UniProt DIAMOND database,
+- optionally, Sandpiper and SingleM marker-gene databases for pre-screening,
+- optionally, a CheckM2 database when using Binette refinement.
 
 the pipeline will:
-1. Discover and filter suitable SRR runs from SRA metadata (short‑read, ONT, PacBio CLR/HiFi).
-2. (Optional, with `--taxa`) Pre‑screen samples using Sandpiper and/or SingleM against a GTDB‑derived phylum list.
+1. Discover and filter suitable SRR runs from SRA metadata (short-read, ONT, PacBio CLR/HiFi).
+2. Optionally, with `--taxa`, pre-screen samples using Sandpiper and/or SingleM against a GTDB-derived phylum list.
 3. (Assembly mode; default) Assemble reads with:
    - **metaSPAdes** for short reads
    - **metaFlye** for ONT and PacBio CLR
    - **myloasm** for PacBio HiFi
    - optional multi-assembler selection with `--assemblers`
 4. (Assembly mode) Annotate contigs with DIAMOND against UniProt and summarise with BlobToolKit.
-5. (Optional, with `--taxa`) Extract contigs matching user‑specified taxa into per‑taxon FASTA and ID lists.
-6. (Optional, with `--binning`) Run compatible metagenome binners (MetaBAT2, SemiBin, Rosella, COMEBin, VAMB, and HiFi-only LorBin) and refine them with DAS Tool and/or Binette.
-7. Collate a per‑sample `summary.tsv` with counts and failure/success notes, and post‑annotate it using scheduler info from the Nextflow `trace.tsv`.
+5. Optionally, with `--taxa`, extract contigs matching user-specified taxa into per-taxon FASTA and ID lists.
+6. Optionally, with `--binning`, run compatible metagenome binners (MetaBAT2, SemiBin, Rosella, COMEBin, VAMB, and HiFi-only LorBin) and refine them with DAS Tool and/or Binette.
+7. Collate a per-sample `summary.tsv` with counts and failure/success notes, and post-annotate it using scheduler info from the Nextflow `trace.tsv`.
 
 ### Pipeline modes
-The pipeline has four phases:
-- `PRE_SCREENING` – SRA metadata -> SRR selection -> optional Sandpiper/SingleM screening.
-- `ASSEMBLY` – Assembly, DIAMOND, BlobToolKit, optional taxon extraction.
-- `BINNING` – MetaBAT2, SemiBin, Rosella, COMEBin, VAMB, HiFi-only LorBin, DAS Tool/Binette, and binning note aggregation.
-- `SUMMARY` – merges all success and failure notes into the final global `summary.tsv`.
+The pipeline is organised into four subworkflow stages:
+- `PRE_SCREENING` - SRA metadata -> SRR selection -> optional Sandpiper/SingleM screening.
+- `ASSEMBLY` - Assembly, DIAMOND, BlobToolKit, optional taxon extraction.
+- `BINNING` - MetaBAT2, SemiBin, Rosella, COMEBin, VAMB, HiFi-only LorBin, DAS Tool/Binette, and binning note aggregation.
+- `SUMMARY` - merges all success and failure notes into the final global `summary.tsv`.
 
 You can run it in the following modes:
 
@@ -56,13 +57,13 @@ You can run it in the following modes:
 | ---- | ----------| --------- | ----------- |
 | **Screening only** | PRE_SCREENING + SUMMARY | `--noassembly` (often with `--taxa`) | Quickly triage many SRR/sample inputs before committing to assembly |
 | **Assembly only** | PRE_SCREENING + ASSEMBLY + SUMMARY | *(default)* | Assemblies + BlobToolKit summaries, no binning |
-| **Assembly + binning** | PRE_SCREENING + ASSEMBLY + BINNING + SUMMARY | `--binning` | Assemblies + multi‑binner bins + DAS Tool |
+| **Assembly + binning** | PRE_SCREENING + ASSEMBLY + BINNING + SUMMARY | `--binning` | Assemblies + compatible binners + Binette by default |
 | **Taxon screening + extraction** | Adds Sandpiper/SingleM (and extraction in assembly mode) | `--taxa` | Focus on a taxon list; optionally extract contigs |
 | **Taxon screening + extraction + binning** | As above + binning | `--taxa --binning` | Full run |
 
 > [!NOTE]
 > - `--binning` is only meaningful when assembly is enabled (i.e. when you do not set `--noassembly`). If you set both, `--binning` is ignored.
-> - If you omit `--taxa`, Sandpiper/SingleM and taxon‑specific extraction are skipped.
+> - If you omit `--taxa`, Sandpiper/SingleM and taxon-specific extraction are skipped.
 
 There is also a standalone binning entrypoint, `binning.nf`, for cases where you already have `assembly.fasta` and either the original reads or an SRR accession, and only want the mapping + binning stage.
 
@@ -72,17 +73,17 @@ There is also a standalone binning entrypoint, `binning.nf`, for cases where you
 ### Requirements
 
 - **Nextflow**: `>= 26.04.0`
-- **Container back‑end**:
+- **Container backend**:
   - Docker, or
   - Singularity / Apptainer
 - For the helper watcher scripts (`watch_and_transfer.sh` / `run.sh`): a **Slurm** cluster with:
   - `sbatch`, `sacct`, `rsync`, `flock`
-  - a data‑copy partition (the example uses `-p datacp`)
+  - a data-copy partition (the example uses `-p datacp`)
 
 ### Database requirements
-All tools used by the pipeline are provided via containers defined in `nextflow.config`
+All tools used by the pipeline are provided via containers defined in `nextflow.config`.
 
-- Assembly mode (default; i.e. without `--noassembly`)
+- Assembly mode (default, without `--noassembly`)
   - `--taxdump`       NCBI taxdump dir (`nodes.dmp`, `names.dmp`, `taxidlineage.dmp` or classical taxdump)
   - `--uniprot_db`    UniProt DIAMOND database (`.dmnd`) (See the [BlobToolKit documentation](https://blobtoolkit.genomehubs.org/install/) for how to build this)
 
@@ -92,11 +93,15 @@ All tools used by the pipeline are provided via containers defined in `nextflow.
   - `--singlem_db`    SingleM metapackage (e.g. `S5.4.0.GTDB_r226.metapackage_20250331.smpkg.zb`)
   - `--sandpiper_db`  (with `--sra` only) Sandpiper db with `sandpiper_sra.txt`, `sandpiper1.0.0.condensed.tsv`
 
+- Binning with Binette refinement
+  - `--checkm2_db`    CheckM2 database required when `--refiners` includes `binette`, including the default binning configuration
+
 - Standalone binning (`binning.nf`)
   - `--uniprot_db`    UniProt DIAMOND database (`.dmnd`) for SemiBin2
+  - `--checkm2_db`    CheckM2 database when using the default `--refiners binette`
 
 > [!NOTE]
-> In screening‑only mode (`--noassembly`), `--uniprot_db` is not required because DIAMOND / BlobToolKit / binners are skipped.
+> In screening-only mode (`--noassembly`), `--uniprot_db` is not required because DIAMOND / BlobToolKit / binners are skipped.
 
 
 ## Inputs
@@ -106,7 +111,7 @@ Internally these are merged before assembly.
 
 ### 1. Input: SRA samplesheet (`--sra`)
 
-Prepare a CSV with a single column `sra`, each row representing an SRA project (or study‑level) accession:
+Prepare a CSV with a single column `sra`, each row representing an SRA project, study-level accession, or run accession:
 
 `sra.csv`
 ```csv
@@ -116,8 +121,10 @@ SRPXXXXXX
 ERRXXXXXX
 ```
 
-Each row can be a project, study, or run
+Each row can be a project, study, or run.
 The pipeline will query metadata and expand each project into multiple SRR runs internally.
+
+In SRA + screening mode (`--sra` + `--taxa`), SRA metadata is filtered first. Sandpiper then screens candidate SRR runs, and SingleM is run for downloaded reads that need marker-gene confirmation.
 
 The metadata files are written under:
 ```
@@ -138,12 +145,12 @@ D48	pacbio	d48.fastq.gz
 ```
 
 - `sample`: logical sample identifier.
-- `read_type`: types of reads used for assembler selection. Use descriptive labels below
+- `read_type`: read class used for assembler selection. Use one of:
     - `short`: short paired-end reads (Illumina, BGISEQ, DNBSEQ) (metaSPAdes),
     - `nanopore`: Nanopore reads (metaFlye),
     - `pacbio`: PacBio CLR reads (metaFlye),
     - `hifi`: PacBio HiFi reads (myloasm).
-- `reads`: comma‑separated list of FASTQ paths (absolute or relative); at least one file per row is required. Two or more files are treated as paired‑end for SingleM/metaSPAdes, one as single‑end.
+- `reads`: comma-separated list of FASTQ paths (absolute or relative); at least one file per row is required. Two or more files are treated as paired-end for SingleM/metaSPAdes, one as single-end.
 
 
 In FASTQ + screening mode (`--fastq_tsv` + `--taxa`), each sample is treated as
@@ -157,14 +164,14 @@ read_type = read_type
 assembler = selected assembly tool
 ```
 
-SingleM is run in place of Sandpiper for these samples.
+FASTQ screening does not use Sandpiper. When `--taxa` is set, local FASTQ samples are sent directly to SingleM.
 
-In FASTQ + no‑screening mode (`--fastq_tsv`), reads go straight into assembly and optionally binning.
+In FASTQ + no-screening mode (`--fastq_tsv`), reads go straight into assembly and optionally binning.
 
 
 ### 3. Input: taxa list (`--taxa`)
 
-Provide a CSV of target taxa if you want taxon‑specific screening and contig extraction:
+Provide a CSV of target taxa if you want taxon-specific screening and contig extraction:
 
 `taxa.csv`
 ```csv
@@ -181,8 +188,8 @@ realm,domain,superkingdom,kingdom,phylum,class,order,family,genus,species
 ```
 
 > [!IMPORTANT]
-> - If you do not supply `--taxa`, the pipeline skips SingleM/Sandpiper and taxon‑specific extraction.
-> - If you supply the taxon in GTDB style only (e.g. `p__`, `c__`, …), the pipeline runs SingleM/Sandpiper but skips taxon‑specific extraction
+> - If you do not supply `--taxa`, the pipeline skips SingleM/Sandpiper and taxon-specific extraction.
+> - If you supply the taxon in GTDB style only (for example `p__` or `c__`), the pipeline runs SingleM/Sandpiper but skips taxon-specific extraction.
 
 
 ### 4. Input: standalone binning sheet (`binning.nf --binning_tsv`)
@@ -224,6 +231,7 @@ nextflow run asuq/nf-sra_screen \
   --gtdb_ncbi_map /path/to/ncbi_vs_gtdb_xlsx_dir \
   --sandpiper_db /path/to/sandpiper_db_dir \
   --singlem_db /path/to/singlem_metapackage \
+  --checkm2_db /path/to/checkm2_db \
   --outdir nf-sra_screen_results
 ```
 
@@ -233,6 +241,7 @@ nextflow run binning.nf \
   -profile <docker/singularity/local/slurm/...> \
   --binning_tsv binning.tsv \
   --uniprot_db /path/to/uniprot.dmnd \
+  --checkm2_db /path/to/checkm2_db \
   --outdir nf-sra_screen_binning
 ```
 
@@ -246,13 +255,13 @@ nextflow run binning.nf \
 - `--taxa`           (Optional) CSV with rank,taxa (NCBI or GTDB names). Use it if you want taxonomy screening
 - `--assemblers`     (Optional) Assembly tools: `auto`, `all`, or comma-separated names. Default `auto` uses `metaspades` for short reads, `metaflye` for Nanopore/PacBio CLR, and `myloasm` for HiFi. Supported tools are `metaspades`, `unicycler`, `metaflye`, and `myloasm`; aliases `spades` and `flye` are accepted.
 - `--assembler`      Alias for `--assemblers`.
-- `--gtdb_ncbi_map`  (Required with `--taxa`) Directory with ncbi_vs_gtdb_bacteria.xlsx and ncbi_vs_gtdb_archaea.xlsx. For taxonomy screening
-- `--sandpiper_db`   (Required with `--taxa` and `--sra`) Directory with Sandpiper summary tables. For taxonomy screening
-- `--singlem_db`     (Required with `--taxa`) SingleM metapackage (e.g. S5.4.0.GTDB_r226.metapackage_20250331.smpkg.zb) For taxonomy screening
+- `--gtdb_ncbi_map`  (Required with `--taxa`) Directory with ncbi_vs_gtdb_bacteria.xlsx and ncbi_vs_gtdb_archaea.xlsx for taxonomy screening
+- `--sandpiper_db`   (Required with `--taxa` and `--sra`) Directory with Sandpiper summary tables for SRA taxonomy screening
+- `--singlem_db`     (Required with `--taxa`) SingleM metapackage (e.g. S5.4.0.GTDB_r226.metapackage_20250331.smpkg.zb) for taxonomy screening
 - `--binning`        (Optional) Run BINNING after ASSEMBLY (all read-type-compatible binners + Binette by default)
 - `--binners`        Comma-separated binners (default: `all-compatible`; allowed: `all-compatible,auto,metabat,semibin,rosella,comebin,vamb,lorbin`). `all-compatible` runs all read-type-compatible binners; `auto` is accepted as a compatibility alias. LorBin runs only for HiFi reads.
 - `--refiners`       Comma-separated refiners (default: `binette`; allowed: `dastool,binette`)
-- `--checkm2_db`     CheckM2 DIAMOND database required when `--refiners` includes `binette`
+- `--checkm2_db`     CheckM2 database required when `--refiners` includes `binette`; required for default binning because `binette` is the default refiner
 - `--semibin_environment` SemiBin2 pretrained environment (default: `global`)
 - `--gpu`            Bare flag enabling GPU variants for COMEBin, VAMB, and HiFi-only LorBin; MetaBAT2, SemiBin, and Rosella stay CPU-only
 - `--noassembly`     (Optional) Skip ASSEMBLY and BINNING; run PRE_SCREENING + SUMMARY only. If set, `--binning` is ignored
@@ -384,7 +393,7 @@ execution-reports/
 
 ## Managing storage with `watch_and_transfer.sh`
 
-Long metagenomic runs can fill storage rapidly. The helper script `watch_and_transfer.sh` is designed to stream finished per‑sample output folders off the run directory to a longer‑term storage location and clean up safely.
+Long metagenomic runs can fill storage rapidly. The helper script `watch_and_transfer.sh` streams finished per-sample output folders from the run directory to longer-term storage and cleans up safely.
 
 ### Requirements
 
@@ -393,7 +402,7 @@ Long metagenomic runs can fill storage rapidly. The helper script `watch_and_tra
   - `sacct`
   - a partition suitable for data transfer (the script uses `-p datacp`; change if needed)
 
-The pipeline must be writing summary.tsv to `RUN_DIR/output/summary.tsv`, which is the default when `--outdir` output and you run from `RUN_DIR`.
+The pipeline must write `summary.tsv` to `RUN_DIR/output/summary.tsv`. This is the default when you run from `RUN_DIR` and leave `--outdir` as `output`.
 
 ### What it does
 
@@ -415,7 +424,7 @@ Given:
       - `did not match the criteria`:
       the run was filtered at the metadata stage; it is recorded as processed without any transfer.
 
-    - If `note` is non‑empty and `output/$sra/$srr` does not exist, the run is considered failed/filtered with no outputs and is marked processed.
+    - If `note` is non-empty and `output/$sra/$srr` does not exist, the run is considered failed/filtered with no outputs and is marked processed.
 
     - Otherwise, the run is treated as a completed sample with outputs.
 
@@ -425,7 +434,7 @@ Given:
 
     - followed by: `rm -rf ${RUN_DIR}/output/$sra/$srr`
 
-    - Attempt to rmdir the now‑empty `${RUN_DIR}/output/$sra directory`.
+    - Attempts to remove the now-empty `${RUN_DIR}/output/$sra` directory.
 
 Records (sra,srr,job_id) in .pending_copy_jobs.tsv.
 
@@ -435,7 +444,7 @@ Records (sra,srr,job_id) in .pending_copy_jobs.tsv.
     - Deletes the corresponding `slurm-<jobid>.out` log.
     - Appends `(sra,srr)` to `.processed_summary.tsv`.
     - For jobs in transient states (PENDING/RUNNING/etc.), keeps them pending.
-    - For failed/cancelled/time‑out jobs, removes them from pending; the sample will be re‑submitted in a later cycle.
+    - For failed/cancelled/time-out jobs, removes them from pending; the sample will be re-submitted in a later cycle.
 
 The script runs indefinitely in a loop:
 ```bash
@@ -482,7 +491,7 @@ This will:
 The repository includes an example wrapper `run.sh` showing how to run the pipeline and watcher together on a Slurm cluster.
 
 What `run.sh` does
-1.Defines user‑specific paths:
+1. Defines user-specific paths:
 ```bash
 RUN_DIR='/fast/.../nf-sra_screen_run/outdir'
 DEST_DIR='/long/.../nf-sra_screen_archive'
@@ -522,6 +531,7 @@ nextflow run asuq/nf-sra_screen \
   --gtdb_ncbi_map /path/to/ncbi_vs_gtdb_xlsx_dir \
   --sandpiper_db /path/to/sandpiper_db_dir \
   --singlem_db /path/to/singlem_metapackage \
+  --checkm2_db /path/to/checkm2_db \
   --outdir nf-sra_screen_results \
   -resume
 ```
@@ -540,7 +550,7 @@ To reuse this pattern:
     - `NF_SRA_SCREEN`: path to your clone of this repository.
     - The Nextflow command at the bottom (profile name, database paths, etc.).
     - The Slurm partition used for data copy in `watch_and_transfer.sh` (-p datacp) if your site uses a different name.
-    - Submit `run.sh` itself as a Slurm job or run it on a login node with `tmux` (depending on your site policy). All heavy work is still done by Nextflow processes and the per‑sample transfer jobs.
+    - Submit `run.sh` itself as a Slurm job or run it on a login node with `tmux` (depending on your site policy). All heavy work is still done by Nextflow processes and the per-sample transfer jobs.
 
 </details>
 
