@@ -10,8 +10,11 @@ RUN_DIR='/path/to/running_dir'
 DEST_DIR='/path/to/destination_dir'
 INTERVAL_MIN=10
 NF_SRA_SCREEN='/path/to/nf-sra_screen'
+ENABLE_GWDG_QOS_HELPER=false
+GWDG_QOS_HELPER_OPTS=(--quiet)
 
 WATCH_PID=""
+QOS_HELPER_PID=""
 nf_exit=0
 
 # mamba activate /bucket/HusnikU/Conda-envs/nextflow_v25.04.8
@@ -20,19 +23,25 @@ nf_exit=0
 # ------------------------------------------------------------------
 # Cleanup on normal exit, failure, or Ctrl+C
 # ------------------------------------------------------------------
+stop_background_process() {
+  local name=$1
+  local pid=$2
+
+  if [ -n "${pid:-}" ]; then
+    if kill -0 "${pid}" 2>/dev/null; then
+      echo "Stopping ${name} (PID ${pid})" >&2
+      kill "${pid}" 2>/dev/null || true
+      wait "${pid}" 2>/dev/null || true
+    fi
+  fi
+}
+
 cleanup() {
   # Exit status of the script at the moment the trap fired
   local status=$?
 
-  if [ -n "${WATCH_PID:-}" ]; then
-    if kill -0 "${WATCH_PID}" 2>/dev/null; then
-      echo "Stopping watch_and_transfer (PID ${WATCH_PID})" >&2
-      # Try to terminate gracefully; ignore errors if it is already gone
-      kill "${WATCH_PID}" 2>/dev/null || true
-      # Reap it so it does not become a zombie
-      wait "${WATCH_PID}" 2>/dev/null || true
-    fi
-  fi
+  stop_background_process "gwdg_promote_2h_qos" "${QOS_HELPER_PID}"
+  stop_background_process "watch_and_transfer" "${WATCH_PID}"
 
   # Preserve the original exit status of the script
   return "${status}"
@@ -65,6 +74,25 @@ mkdir -p "${DEST_DIR}"
 WATCH_PID=$!
 echo "watch_and_transfer pid: ${WATCH_PID}"
 printf '%s\n' "${WATCH_PID}" > watch_and_transfer.pid
+
+case "${ENABLE_GWDG_QOS_HELPER}" in
+  true|false)
+    ;;
+  *)
+    echo "ENABLE_GWDG_QOS_HELPER must be true or false" >&2
+    exit 1
+    ;;
+esac
+
+if [ "${ENABLE_GWDG_QOS_HELPER}" = true ]; then
+  "${NF_SRA_SCREEN}/helpers/gwdg_promote_2h_qos.sh" \
+    "${GWDG_QOS_HELPER_OPTS[@]}" \
+    > gwdg_promote_2h_qos.log 2>&1 &
+
+  QOS_HELPER_PID=$!
+  echo "gwdg_promote_2h_qos pid: ${QOS_HELPER_PID}"
+  printf '%s\n' "${QOS_HELPER_PID}" > gwdg_promote_2h_qos.pid
+fi
 
 # ------------------------------------------------------------------
 # Run Nextflow pipeline
