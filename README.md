@@ -14,6 +14,7 @@
 - [Usage](#usage)
 - [Output Structure](#output-structure)
 - [Managing storage with watch_and_transfer.sh](#managing-storage-with-watch_and_transfersh)
+- [Managing GWDG 2h QOS](#managing-gwdg-2h-qos)
 - [Example SLURM wrapper: run.sh](#example-slurm-wrapper-runsh)
 
 
@@ -294,7 +295,8 @@ nextflow run binning.nf \
   - Includes `conf/oist.config` for OIST Deigo HPC settings.
 - `gwdg`
   - Includes `conf/gwdg.config` for the GWDG SCC SLURM environment.
-  - Uses Singularity with SHM-first temporary storage and defaults all queue classes to `scc-cpu`.
+  - Uses Apptainer with SHM-first temporary storage and defaults all CPU queue classes to `scc-cpu`.
+  - Does not assign `QOS=2h` automatically; use `helpers/gwdg_promote_2h_qos.sh` when you want manual short-job promotion.
 - `marmic`
   - Includes `conf/marmic.config` for the Marmic SLURM environment.
   - Uses Apptainer/Singularity cache settings under `/bioinf/home/$USER/nfx_singularity_cache`.
@@ -484,6 +486,30 @@ This will:
 </details>
 
 <details>
+<summary><strong>Managing GWDG 2h QOS</strong></summary>
+
+## Managing GWDG 2h QOS
+
+GWDG allows many normal-QOS submissions, but the `2h` QOS has a small user job cap. The helper `helpers/gwdg_promote_2h_qos.sh` watches for free `2h` slots and promotes eligible pending short jobs into that QOS.
+
+Run it from a login node, ideally in a tmux/screen session:
+
+```bash
+helpers/gwdg_promote_2h_qos.sh --quiet
+```
+
+Useful options:
+
+- `--cap N`: maximum jobs allowed in `QOS=2h` (default: `10`)
+- `--interval SECONDS`: seconds between checks (default: `60`)
+- `--once`: run one check and exit
+- `--quiet`: hide routine status lines, while still printing job updates
+
+The helper can affect all pending short jobs owned by the current user, not only nf-sra_screen jobs. It promotes jobs only when their current QOS is not `2h` and their requested walltime is at most 2 hours.
+
+</details>
+
+<details>
 <summary><strong>Example SLURM wrapper: run.sh</strong></summary>
 
 ## Example SLURM wrapper: `run.sh`
@@ -497,10 +523,13 @@ RUN_DIR='/fast/.../nf-sra_screen_run/outdir'
 DEST_DIR='/long/.../nf-sra_screen_archive'
 INTERVAL_MINS=10
 NF_SRA_SCREEN='/path/to/nf-sra_screen'  # clone of this repo
+ENABLE_GWDG_QOS_HELPER=false
+GWDG_QOS_HELPER_OPTS=(--quiet)
 ```
 
 2. Installs a `trap` so that when the script exits (successfully or not), it:
   - Attempts to stop the background watcher process cleanly.
+  - Attempts to stop the optional GWDG QOS helper cleanly.
   - Preserves the original Nextflow exit status.
 
 3. Changes into `RUN_DIR` so that:
@@ -517,7 +546,17 @@ NF_SRA_SCREEN='/path/to/nf-sra_screen'  # clone of this repo
 ```
 and records its PID in watch_and_transfer.pid.
 
-5. Runs the Nextflow pipeline (with your chosen profile and parameters):
+5. If `ENABLE_GWDG_QOS_HELPER=true`, starts the GWDG QOS helper in the background:
+
+```bash
+"${NF_SRA_SCREEN}/helpers/gwdg_promote_2h_qos.sh" \
+  "${GWDG_QOS_HELPER_OPTS[@]}" \
+  > gwdg_promote_2h_qos.log 2>&1 &
+```
+
+and records its PID in gwdg_promote_2h_qos.pid.
+
+6. Runs the Nextflow pipeline (with your chosen profile and parameters):
 
 ```bash
 nextflow run asuq/nf-sra_screen \
@@ -536,7 +575,7 @@ nextflow run asuq/nf-sra_screen \
   -resume
 ```
 
-6. Exits with the same status code as the Nextflow run, triggering the `EXIT` trap, which in turn stops the watcher.
+7. Exits with the same status code as the Nextflow run, triggering the `EXIT` trap, which in turn stops the watcher and optional QOS helper.
 
 ### Adapting `run.sh` for your cluster
 
@@ -548,6 +587,8 @@ To reuse this pattern:
     - `RUN_DIR`: a scratch or fast filesystem path for the actual run.
     - `DEST_DIR`: slower / archival filesystem for final results.
     - `NF_SRA_SCREEN`: path to your clone of this repository.
+    - `ENABLE_GWDG_QOS_HELPER`: set to `true` only on GWDG when you want short pending jobs promoted into free `2h` QOS slots.
+    - `GWDG_QOS_HELPER_OPTS`: options for `helpers/gwdg_promote_2h_qos.sh`, such as `--quiet`, `--cap`, or `--interval`.
     - The Nextflow command at the bottom (profile name, database paths, etc.).
     - The Slurm partition used for data copy in `watch_and_transfer.sh` (-p datacp) if your site uses a different name.
     - Submit `run.sh` itself as a Slurm job or run it on a login node with `tmux` (depending on your site policy). All heavy work is still done by Nextflow processes and the per-sample transfer jobs.
