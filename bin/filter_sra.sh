@@ -79,16 +79,16 @@ if [[ $header == Run,Center,ReleaseDate,FileType,FileName,FileSize,Download_path
     # Extract instrument_model if possible; otherwise set to N/A
     model="N/A"
     if (plat=="ILLUMINA") {
-      m = extract(platform_raw, /(NovaSeq [0-9]+|HiSeq X Ten|HiSeq [0-9]+|MiSeq|MiniSeq|NextSeq [0-9]+|NextSeq CN500|HiScanSQ|Genome Analyzer IIx|Genome Analyzer II|Genome Analyzer)/)
+      m = extract(platform_raw, "NovaSeq [0-9]+|HiSeq X Ten|HiSeq [0-9]+|MiSeq|MiniSeq|NextSeq [0-9]+|NextSeq CN500|HiScanSQ|Genome Analyzer IIx|Genome Analyzer II|Genome Analyzer")
       if (m!="") model=m
     } else if (plat=="DNBSEQ" || plat=="BGISEQ") {
-      m = extract(platform_raw, /(DNBSEQ-[A-Za-z0-9]+|MGISEQ-[A-Za-z0-9]+|BGISEQ-[0-9A-Za-z]+)/)
+      m = extract(platform_raw, "DNBSEQ-[A-Za-z0-9]+|MGISEQ-[A-Za-z0-9]+|BGISEQ-[0-9A-Za-z]+")
       if (m!="") model=m
     } else if (plat=="OXFORD_NANOPORE") {
-      m = extract(platform_raw, /(PromethION|GridION|MinION)/)
+      m = extract(platform_raw, "PromethION|GridION|MinION")
       if (m!="") model=m
     } else if (plat=="PACBIO_SMRT") {
-      m = extract(platform_raw, /(Revio|Sequel IIe|Sequel II|Sequel|RS II|RS)/)
+      m = extract(platform_raw, "Revio|Sequel IIe|Sequel II|Sequel 2|Sequel|RS II|RS")
       if (m!="") model=m
     }
 
@@ -106,7 +106,7 @@ if [[ $header == Run,Center,ReleaseDate,FileType,FileName,FileSize,Download_path
         } else {
           lm2=tolower(model); gsub(/[[:space:]]+/, " ", lm2); lm2=trim(lm2)
           if (lm2 ~ /(^|[^a-z])rs($|[^a-z])|(^|[^a-z])rs[[:space:]]*ii($|[^a-z])|(^|[^a-z])sequel($|[^a-z])/ &&
-              lm2 !~ /sequel[[:space:]]*ii|sequel[[:space:]]*2|iie|revio/) asm="pacbio"
+              lm2 !~ /iie|revio/) asm="pacbio"
           else asm="hifi"
         }
       } else asm="unknown"
@@ -224,7 +224,7 @@ NR==1{
       } else {
         lm2=tolower(model); gsub(/[[:space:]]+/, " ", lm2); lm2=trim(lm2)
         if (lm2 ~ /(^|[^a-z])rs($|[^a-z])|(^|[^a-z])rs[[:space:]]*ii($|[^a-z])|(^|[^a-z])sequel($|[^a-z])/ &&
-            lm2 !~ /sequel[[:space:]]*ii|sequel[[:space:]]*2|iie|revio/) asm="pacbio"
+            lm2 !~ /iie|revio/) asm="pacbio"
         else asm="hifi"
       }
     } else asm="unknown"
