@@ -483,6 +483,30 @@ This will:
   - `RUN_DIR/.pending_copy_jobs.tsv`
   - `RUN_DIR/.watch_and_transfer.lock`
 
+### Cleaning processed work directories
+
+`watch_and_transfer.sh` does not delete Nextflow `work/` directories. After a sample has been transferred and recorded in `RUN_DIR/.processed_summary.tsv`, you can clean its matching per-SRR work directories with:
+
+```bash
+helpers/cleanup_processed_sra_workdirs.sh RUN_DIR
+```
+
+The helper reads processed `(sra,srr)` pairs from `RUN_DIR/.processed_summary.tsv`, matches them to `tag` and `workdir` columns in the Nextflow trace file, and deletes only paths safely fenced under `RUN_DIR/work/`. By default it looks for `RUN_DIR/execution-reports/trace.tsv`, then `RUN_DIR/trace.tsv`.
+
+Preview the cleanup without deleting anything:
+
+```bash
+helpers/cleanup_processed_sra_workdirs.sh RUN_DIR --dry-run
+```
+
+Use explicit paths when needed:
+
+```bash
+helpers/cleanup_processed_sra_workdirs.sh RUN_DIR \
+  --trace RUN_DIR/execution-reports/trace.tsv \
+  --state-file RUN_DIR/.processed_summary.tsv
+```
+
 </details>
 
 <details>
