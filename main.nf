@@ -100,10 +100,6 @@ workflow {
       exit 0
     }
 
-    if (params.gpu?.toString()?.toBoolean()) {
-      error "GPU mode is planned but not implemented yet for the current binning selection workflow"
-    }
-
     def sraMode   = params.sra != null
     def fastqMode = params.fastq_tsv != null
 
