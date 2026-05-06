@@ -308,13 +308,20 @@ workflow STANDALONE_BINNING {
       .map { sra, srr, platform, model, strategy, read_type, assembler, summary_csv, note ->
         tuple([sra, srr, platform, model, strategy, read_type, assembler], [summary_csv, note])
       }
-      .join(binning_notes_by_sample_channel.map { sra, srr, platform, model, strategy, read_type, assembler, note ->
+      .mix(binning_notes_by_sample_channel.map { sra, srr, platform, model, strategy, read_type, assembler, note ->
         tuple([sra, srr, platform, model, strategy, read_type, assembler], note)
       })
-      .map { sample_key, summary_payload, binning_note ->
+      .groupTuple()
+      .map { sample_key, grouped_payloads ->
         def (sra, srr, platform, model, strategy, read_type, assembler) = sample_key
+        def summary_payload = grouped_payloads.find { payload -> payload instanceof List && payload.size() == 2 }
+        if (!summary_payload) {
+          return null
+        }
+
         def summary_csv = summary_payload[0]
         def base_note = summary_payload[1] ?: ''
+        def binning_note = grouped_payloads.find { payload -> !(payload instanceof List) } as String
         def extra_note = (binning_note ?: '').trim()
         def final_note = base_note
         if (extra_note) {
@@ -322,6 +329,7 @@ workflow STANDALONE_BINNING {
         }
         tuple(sra, srr, platform, model, strategy, read_type, assembler, summary_csv, final_note)
       }
+      .filter { row -> row != null }
 
     def mapping_errors = mapping_failure_note_channel.map { sra, srr, platform, model, strategy, read_type, assembler, note_path ->
       def note = file(note_path).text.trim()

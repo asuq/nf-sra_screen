@@ -168,11 +168,13 @@ workflow SUMMARY {
         def (sra, srr, platform, model, strategy, read_type, assembler) =
           [sample_key.sra, sample_key.srr, sample_key.platform, sample_key.model, sample_key.strategy, sample_key.read_type, sample_key.assembler]
 
-        def note_texts = note_entries.collect { note_entry ->
-          def (tool, note_path) = note_entry
-          def note_text = file(note_path as String).text.trim()
-          note_text ? "${tool}: ${note_text}" : null
-        }.findAll { token -> token }
+        def note_texts = note_entries
+          .sort { left, right -> left[0] <=> right[0] }
+          .collect { note_entry ->
+            def (tool, note_path) = note_entry
+            def note_text = file(note_path as String).text.trim()
+            note_text ? "${tool}: ${note_text}" : null
+          }.findAll { token -> token }
 
         def joined_note_text = note_texts ? note_texts.join('; ') : ''
         tuple(sra, srr, platform, model, strategy, read_type, assembler, joined_note_text)
@@ -184,20 +186,16 @@ workflow SUMMARY {
     def final_success_rows_channel = summary_rows_with_taxa_notes_channel
 
     if( doBinning ) {
-      def success_group_size = 2
-
       successful_summary_by_binning_key = summary_rows_with_taxa_notes_channel.map { sra, srr, platform, model, strategy, read_type, assembler, summary_csv, base_note ->
         def sample_key_map = [sra: sra, srr: srr, platform: platform,
                               model: model, strategy: strategy, read_type: read_type, assembler: assembler]
-        def grouped_sample_key = groupKey(sample_key_map, success_group_size)
-        tuple(grouped_sample_key, [summary_csv, base_note])
+        tuple(sample_key_map, [summary_csv, base_note])
       }
 
       binning_note_by_success_key = binning_notes_by_sample_channel.map { sra, srr, platform, model, strategy, read_type, assembler, binning_note ->
         def sample_key_map = [sra: sra, srr: srr, platform: platform,
                               model: model, strategy: strategy, read_type: read_type, assembler: assembler]
-        def grouped_sample_key = groupKey(sample_key_map, success_group_size)
-        tuple(grouped_sample_key, binning_note)
+        tuple(sample_key_map, binning_note)
       }
 
       success_and_binning_notes_channel = channel.empty()
@@ -207,7 +205,7 @@ workflow SUMMARY {
 
       final_success_rows_channel = success_and_binning_notes_channel
         .map { grouped_sample_key, grouped_payloads ->
-          def sample_key = grouped_sample_key.target as Map
+          def sample_key = grouped_sample_key as Map
           def (sra, srr, platform, model, strategy, read_type, assembler) =
             [sample_key.sra, sample_key.srr, sample_key.platform, sample_key.model, sample_key.strategy, sample_key.read_type, sample_key.assembler]
 
@@ -269,4 +267,3 @@ workflow SUMMARY {
   emit:
     global_summary = summary_result.global_summary
 }
-
