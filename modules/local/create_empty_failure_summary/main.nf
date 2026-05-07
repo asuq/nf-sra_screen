@@ -1,5 +1,6 @@
 process CREATE_EMPTY_FAILURE_SUMMARY {
     tag "${sra}:${srr}:${read_type}:${assembler}"
+    label 'run_local'
 
     input:
     tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler), val(note)
@@ -12,4 +13,3 @@ process CREATE_EMPTY_FAILURE_SUMMARY {
     echo 'rank,ncbi_taxa,n_contigs,output_ids_csv,output_fasta' > empty_summary.csv
     """
 }
-

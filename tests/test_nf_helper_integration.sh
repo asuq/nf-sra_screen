@@ -24,6 +24,13 @@ assert_path_missing() {
     [ ! -e "$1" ] || fail "expected path to be absent: $1"
 }
 
+assert_local_module_run_local() {
+    # Assert that a local helper module opts into nf-helper login-node policy.
+    local module_file=$1
+
+    assert_file_contains "$module_file" "label 'run_local'"
+}
+
 assert_file_contains "$REPO_ROOT/.gitmodules" "path = external/nf-helper"
 assert_file_contains "$REPO_ROOT/.gitmodules" "url = https://github.com/asuq/nf-helper.git"
 assert_path_exists "$REPO_ROOT/external/nf-helper/conf/sites/oist.config"
@@ -39,6 +46,10 @@ assert_file_contains "$REPO_ROOT/conf/marmic.config" "external/nf-helper/conf/si
 assert_file_contains "$REPO_ROOT/nextflow.config" "includeConfig \"\${projectDir}/conf/oist.config\""
 assert_file_contains "$REPO_ROOT/nextflow.config" "includeConfig \"\${projectDir}/conf/gwdg.config\""
 assert_file_contains "$REPO_ROOT/nextflow.config" "includeConfig \"\${projectDir}/conf/marmic.config\""
+assert_local_module_run_local "$REPO_ROOT/modules/local/create_empty_summary/main.nf"
+assert_local_module_run_local "$REPO_ROOT/modules/local/create_empty_failure_summary/main.nf"
+assert_local_module_run_local "$REPO_ROOT/modules/local/create_assembler_selection_note/main.nf"
+assert_local_module_run_local "$REPO_ROOT/modules/local/append_summary/main.nf"
 
 bash -n "$REPO_ROOT/helpers/cleanup_processed_sample_workdirs.sh"
 bash -n "$REPO_ROOT/helpers/gwdg_promote_2h_qos.sh"

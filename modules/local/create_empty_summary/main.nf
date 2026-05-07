@@ -1,5 +1,6 @@
 process CREATE_EMPTY_SUMMARY {
   tag "${sra}:${srr}:${read_type}:${assembler}"
+  label 'run_local'
 
   input:
   tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler), val(note)
