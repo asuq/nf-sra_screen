@@ -38,14 +38,16 @@ assert_file_contains() {
 write_fake_comebin() {
     # Write a fake COMEBin executable that always fails.
     local fake_bin=$1
+    local exit_code=${2:-42}
 
     mkdir -p "$fake_bin"
     cat > "$fake_bin/run_comebin.sh" <<'EOF'
 #!/usr/bin/env bash
 printf 'fake COMEBin failure\n' >&2
-exit 42
+exit "${FAKE_COMEBIN_EXIT:-42}"
 EOF
     chmod +x "$fake_bin/run_comebin.sh"
+    printf '%s\n' "$exit_code" > "$fake_bin/exit_code"
 }
 
 run_comebin_attempt() {
@@ -60,6 +62,7 @@ run_comebin_attempt() {
 
     (
         cd "$work_dir"
+        FAKE_COMEBIN_EXIT="$(cat "$fake_bin/exit_code")" \
         PATH="$fake_bin:$REPO_ROOT/bin:$PATH" \
             run_comebin_nf.sh \
                 --assembly assembly.fasta \
@@ -91,6 +94,21 @@ test_comebin_retries_before_soft_failure() {
     assert_dir_exists "$final_work/comebin"
     assert_file_empty "$final_work/comebin.contig2bin.tsv"
     assert_file_contains "$final_work/comebin.note" "COMEBin: run_comebin.sh failed"
+}
+
+test_comebin_timeout_exit_stays_hard_failure() {
+    # Scheduler-style timeout exits should not be converted into soft outputs.
+    local fake_bin="$TMP_ROOT/fake_timeout_bin"
+    local timeout_work="$TMP_ROOT/comebin_timeout"
+
+    write_fake_comebin "$fake_bin" 143
+
+    if run_comebin_attempt 2 "$timeout_work" "$fake_bin" > "$timeout_work.log" 2>&1; then
+        fail "COMEBin timeout attempt unexpectedly soft-succeeded"
+    fi
+
+    [ ! -d "$timeout_work/comebin" ] || fail "timeout produced a soft COMEBin directory"
+    assert_file_empty "$timeout_work/comebin.contig2bin.tsv"
 }
 
 write_partial_group_fixture() {
@@ -184,6 +202,7 @@ main() {
     trap 'rm -rf "$TMP_ROOT"' EXIT
 
     test_comebin_retries_before_soft_failure
+    test_comebin_timeout_exit_stays_hard_failure
     test_partial_binner_group_reaches_refiner_input
 
     printf 'PASS: binning soft-failure recovery tests\n'
