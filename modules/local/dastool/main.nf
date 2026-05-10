@@ -2,6 +2,7 @@ include { assemblerPublishDir } from '../../../lib/workflow_helpers.nf'
 
 process DASTOOL {
     tag "${sra}:${srr}:${assembler}"
+    label 'binning'
     publishDir { "${assemblerPublishDir(sra, srr, assembler)}/binning" },
       mode: 'copy',
       overwrite: true

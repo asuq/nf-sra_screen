@@ -3,6 +3,7 @@ include { assemblerPublishDir } from '../../../lib/workflow_helpers.nf'
 process LORBIN_GPU {
     tag "${sra}:${srr}:${assembler}"
     label 'gpu'
+    label 'binning'
     publishDir { "${assemblerPublishDir(sra, srr, assembler)}/binning" },
       mode: 'copy',
       overwrite: true
