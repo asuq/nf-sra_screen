@@ -54,10 +54,18 @@ record_soft_failure() {
   printf '%s\n' "$msg" > "$note_file"
 }
 
+is_scheduler_failure_exit() {
+  local exit_code="$1"
+  case "$exit_code" in
+    137|139|140|143) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 handle_unexpected_exit() {
   local exit_code=$?
 
-  if (( exit_code == 0 || attempt <= max_retries )); then
+  if (( exit_code == 0 || attempt <= max_retries )) || is_scheduler_failure_exit "$exit_code"; then
     return
   fi
 
@@ -69,7 +77,11 @@ trap handle_unexpected_exit EXIT
 
 fail() {
   local msg="$1"
+  local exit_code="${2:-1}"
   echo "$msg" >&2
+  if is_scheduler_failure_exit "$exit_code"; then
+    exit "$exit_code"
+  fi
   if (( attempt <= max_retries )); then
     exit 1
   fi
@@ -109,12 +121,16 @@ PY
 }
 
 if [[ "$require_cuda" == true ]]; then
-  require_pytorch_cuda || fail "LorBin: GPU mode requested but CUDA preflight failed"
+  if require_pytorch_cuda; then
+    :
+  else
+    fail "LorBin: GPU mode requested but CUDA preflight failed" "$?"
+  fi
 fi
 
 mkdir -p "$tmp_dir"
 
-if ! python - "$tmp_dir" "$assembly" "$bam" "$cpus" <<'PY'; then
+if python - "$tmp_dir" "$assembly" "$bam" "$cpus" <<'PY'
 """Run LorBin with numeric thread arguments restored."""
 import sys
 
@@ -154,7 +170,10 @@ sys.argv = [
 ]
 lorbin.main()
 PY
-  fail "LorBin: bin command failed"
+then
+  :
+else
+  fail "LorBin: bin command failed" "$?"
 fi
 
 bins_src="${tmp_dir}/output_bins"

@@ -59,10 +59,18 @@ record_soft_failure() {
   printf '%s\n' "$msg" > "$note_file"
 }
 
+is_scheduler_failure_exit() {
+  local exit_code="$1"
+  case "$exit_code" in
+    137|139|140|143) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 handle_unexpected_exit() {
   local exit_code=$?
 
-  if (( exit_code == 0 || attempt <= max_retries )); then
+  if (( exit_code == 0 || attempt <= max_retries )) || is_scheduler_failure_exit "$exit_code"; then
     return
   fi
 
@@ -74,7 +82,11 @@ trap handle_unexpected_exit EXIT
 
 fail() {
   local msg="$1"
+  local exit_code="${2:-1}"
   echo "$msg" >&2
+  if is_scheduler_failure_exit "$exit_code"; then
+    exit "$exit_code"
+  fi
   if (( attempt <= max_retries )); then
     exit 1
   fi
@@ -114,7 +126,11 @@ PY
 }
 
 if [[ "$require_cuda" == true ]]; then
-  require_pytorch_cuda || fail "VAMB: GPU mode requested but CUDA preflight failed"
+  if require_pytorch_cuda; then
+    :
+  else
+    fail "VAMB: GPU mode requested but CUDA preflight failed" "$?"
+  fi
 fi
 
 ln -s "$(realpath "$bam")" "${bam_dir}/$(basename "$bam")"
@@ -137,8 +153,10 @@ if [[ "$use_cuda" == true ]]; then
   vamb_args+=(--cuda)
 fi
 
-if ! "${vamb_args[@]}"; then
-  fail "VAMB: bin default failed"
+if "${vamb_args[@]}"; then
+  :
+else
+  fail "VAMB: bin default failed" "$?"
 fi
 
 cluster_file=""

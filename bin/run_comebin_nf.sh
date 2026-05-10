@@ -56,10 +56,18 @@ record_soft_failure() {
   printf '%s\n' "$msg" > "$note_file"
 }
 
+is_scheduler_failure_exit() {
+  local exit_code="$1"
+  case "$exit_code" in
+    137|139|140|143) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 handle_unexpected_exit() {
   local exit_code=$?
 
-  if (( exit_code == 0 || attempt <= max_retries )); then
+  if (( exit_code == 0 || attempt <= max_retries )) || is_scheduler_failure_exit "$exit_code"; then
     return
   fi
 
@@ -71,7 +79,11 @@ trap handle_unexpected_exit EXIT
 
 fail() {
   local msg="$1"
+  local exit_code="${2:-1}"
   echo "$msg" >&2
+  if is_scheduler_failure_exit "$exit_code"; then
+    exit "$exit_code"
+  fi
   if (( attempt <= max_retries )); then
     exit 1
   fi
@@ -111,21 +123,27 @@ PY
 }
 
 if [[ "$require_cuda" == true ]]; then
-  require_pytorch_cuda || fail "COMEBin: GPU mode requested but CUDA preflight failed"
+  if require_pytorch_cuda; then
+    :
+  else
+    fail "COMEBin: GPU mode requested but CUDA preflight failed" "$?"
+  fi
 fi
 
 # Symlink the BAM into a directory, as COMEBin expects a bam directory (-p)
 ln -s "$(realpath "$bam")" "${bam_dir}/$(basename "$bam")"
 
 # Run COMEBin (CPU mode)
-if ! run_comebin.sh \
+if run_comebin.sh \
       -a "$assembly" \
       -p "$bam_dir" \
       -o "$tmp_out" \
       -n 6 \
       -t "$cpus"
 then
-  fail "COMEBin: run_comebin.sh failed"
+  :
+else
+  fail "COMEBin: run_comebin.sh failed" "$?"
 fi
 
 bins_src="${tmp_out}/comebin_res/comebin_res_bins"

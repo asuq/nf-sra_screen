@@ -71,10 +71,18 @@ record_soft_failure() {
   printf '%s\n' "$msg" > "$note_file"
 }
 
+is_scheduler_failure_exit() {
+  local exit_code="$1"
+  case "$exit_code" in
+    137|139|140|143) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 handle_unexpected_exit() {
   local exit_code=$?
 
-  if (( exit_code == 0 || attempt <= max_retries )); then
+  if (( exit_code == 0 || attempt <= max_retries )) || is_scheduler_failure_exit "$exit_code"; then
     return
   fi
 
@@ -86,7 +94,11 @@ trap handle_unexpected_exit EXIT
 
 fail() {
   local msg="$1"
+  local exit_code="${2:-1}"
   echo "$msg" >&2
+  if is_scheduler_failure_exit "$exit_code"; then
+    exit "$exit_code"
+  fi
   if (( attempt <= max_retries )); then
     exit 1
   fi
@@ -110,14 +122,16 @@ if (( ${#bins_list[@]} == 0 )); then
   exit 0
 fi
 
-if ! binette \
+if binette \
       --contig2bin_tables "${bins_list[@]}" \
       --contigs "$assembly" \
       --checkm2_db "$resolved_checkm2_db" \
       --outdir "$tmp_dir" \
       --prefix binette \
       --threads "$cpus"; then
-  fail "Binette: refinement failed"
+  :
+else
+  fail "Binette: refinement failed" "$?"
 fi
 
 if [[ ! -d "${tmp_dir}/final_bins" && ! -f "${tmp_dir}/final_contig_to_bin.tsv" ]]; then

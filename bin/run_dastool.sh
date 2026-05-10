@@ -64,10 +64,18 @@ record_soft_failure() {
   printf '%s\n' "$msg" > "$note_file"
 }
 
+is_scheduler_failure_exit() {
+  local exit_code="$1"
+  case "$exit_code" in
+    137|139|140|143) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 handle_unexpected_exit() {
   local exit_code=$?
 
-  if (( exit_code == 0 || attempt <= max_retries )); then
+  if (( exit_code == 0 || attempt <= max_retries )) || is_scheduler_failure_exit "$exit_code"; then
     return
   fi
 
@@ -79,7 +87,11 @@ trap handle_unexpected_exit EXIT
 
 fail() {
   local msg="$1"
+  local exit_code="${2:-1}"
   echo "$msg" >&2
+  if is_scheduler_failure_exit "$exit_code"; then
+    exit "$exit_code"
+  fi
   if (( attempt <= max_retries )); then
     exit 1
   fi
@@ -170,7 +182,7 @@ fi
 bins_arg=$(IFS=,; echo "${bins_list[*]}")
 
 dastool_log="${tmp_dir}/dastool.log"
-if ! DAS_Tool \
+if DAS_Tool \
       --bins "$bins_arg" \
       --contigs "$assembly" \
       --outputbasename "${tmp_dir}/dastool" \
@@ -178,6 +190,9 @@ if ! DAS_Tool \
       --write_bins \
       --threads "$cpus" \
       >"$dastool_log" 2>&1; then
+  :
+else
+  dastool_exit=$?
 
   # Special case: no high-quality bins - not a real error for our pipeline
   if grep -q "No bins with bin-score >0.5 found" "$dastool_log"; then
@@ -188,7 +203,7 @@ if ! DAS_Tool \
   fi
 
   # Any other DASTool failure is treated as a genuine error
-  fail "DASTool: refinement failed"
+  fail "DASTool: refinement failed" "$dastool_exit"
 fi
 
 if [[ ! -d "${tmp_dir}/dastool_DASTool_bins" ]]; then

@@ -53,10 +53,18 @@ record_soft_failure() {
   printf '%s\n' "$msg" > "$note_file"
 }
 
+is_scheduler_failure_exit() {
+  local exit_code="$1"
+  case "$exit_code" in
+    137|139|140|143) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 handle_unexpected_exit() {
   local exit_code=$?
 
-  if (( exit_code == 0 || attempt <= max_retries )); then
+  if (( exit_code == 0 || attempt <= max_retries )) || is_scheduler_failure_exit "$exit_code"; then
     return
   fi
 
@@ -68,7 +76,11 @@ trap handle_unexpected_exit EXIT
 
 fail() {
   local msg="$1"
+  local exit_code="${2:-1}"
   echo "$msg" >&2
+  if is_scheduler_failure_exit "$exit_code"; then
+    exit "$exit_code"
+  fi
   if (( attempt <= max_retries )); then
     exit 1
   fi
@@ -77,15 +89,19 @@ fail() {
 }
 
 
-if ! jgi_summarize_bam_contig_depths --outputDepth "depth.txt" "$bam"; then
-  fail "Metabat: jgi_summarize_bam_contig_depths failed"
+if jgi_summarize_bam_contig_depths --outputDepth "depth.txt" "$bam"; then
+  :
+else
+  fail "Metabat: jgi_summarize_bam_contig_depths failed" "$?"
 fi
 
-if ! metabat2 --inFile "$assembly" \
+if metabat2 --inFile "$assembly" \
               --abdFile "depth.txt" \
               --outFile "${tmp_dir}/metabatbin" \
               --numThreads "$cpus"; then
-  fail "Metabat: metabat2 failed"
+  :
+else
+  fail "Metabat: metabat2 failed" "$?"
 fi
 
 mv "$tmp_dir" "$final_dir"

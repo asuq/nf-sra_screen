@@ -58,10 +58,18 @@ record_soft_failure() {
   printf '%s\n' "$msg" > "$note_file"
 }
 
+is_scheduler_failure_exit() {
+  local exit_code="$1"
+  case "$exit_code" in
+    137|139|140|143) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 handle_unexpected_exit() {
   local exit_code=$?
 
-  if (( exit_code == 0 || attempt <= max_retries )); then
+  if (( exit_code == 0 || attempt <= max_retries )) || is_scheduler_failure_exit "$exit_code"; then
     return
   fi
 
@@ -73,7 +81,11 @@ trap handle_unexpected_exit EXIT
 
 fail() {
   local msg="$1"
+  local exit_code="${2:-1}"
   echo "$msg" >&2
+  if is_scheduler_failure_exit "$exit_code"; then
+    exit "$exit_code"
+  fi
   if (( attempt <= max_retries )); then
     exit 1
   fi
@@ -118,12 +130,15 @@ publish_rosella_bins() {
 }
 
 
-if ! rosella recover \
+if rosella recover \
         --assembly "$assembly" \
         --output-directory "$tmp_dir" \
         --bam-files "$bam" \
         --threads "$cpus" \
         &> "$log_file"; then
+  :
+else
+  rosella_exit=$?
 
   # Special-case: known Rosella bug when there are 0 bins to refine
   if grep -q "attempt to divide by zero" "$log_file"; then
@@ -144,7 +159,7 @@ if ! rosella recover \
     exit 0
   fi
 
-  fail "Rosella: recover failed"
+  fail "Rosella: recover failed" "$rosella_exit"
 fi
 
 if ! publish_rosella_bins; then

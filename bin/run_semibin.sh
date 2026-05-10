@@ -90,10 +90,18 @@ record_soft_failure() {
   printf '%s\n' "$msg" > "$note_file"
 }
 
+is_scheduler_failure_exit() {
+  local exit_code="$1"
+  case "$exit_code" in
+    137|139|140|143) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 handle_unexpected_exit() {
   local exit_code=$?
 
-  if (( exit_code == 0 || attempt <= max_retries )); then
+  if (( exit_code == 0 || attempt <= max_retries )) || is_scheduler_failure_exit "$exit_code"; then
     return
   fi
 
@@ -105,7 +113,11 @@ trap handle_unexpected_exit EXIT
 
 fail() {
   local msg="$1"
+  local exit_code="${2:-1}"
   echo "$msg" >&2
+  if is_scheduler_failure_exit "$exit_code"; then
+    exit "$exit_code"
+  fi
   if (( attempt <= max_retries )); then
     exit 1
   fi
@@ -113,7 +125,7 @@ fail() {
   exit 0
 }
 
-if ! SemiBin2 single_easy_bin \
+if SemiBin2 single_easy_bin \
       --input-fasta "$assembly" \
       --input-bam "$bam" \
       --environment "$environment_lc" \
@@ -121,7 +133,9 @@ if ! SemiBin2 single_easy_bin \
       --engine cpu \
       --output "$tmp_dir" \
       --threads "$cpus"; then
-  fail "SemiBin2: single_easy_bin failed"
+  :
+else
+  fail "SemiBin2: single_easy_bin failed" "$?"
 fi
 
 if [[ ! -f "${tmp_dir}/contig_bins.tsv" ]]; then
@@ -147,7 +161,7 @@ if [[ "${#bins[@]}" -ne 0 ]]; then
   if [[ "${#gz_files[@]}" -gt 0 ]]; then
     printf '%s\0' "${gz_files[@]}" \
       | xargs -0 -n 1 -P "${cpus}" gunzip -v \
-      || fail "SemiBin2: gunzip failed"
+      || fail "SemiBin2: gunzip failed" "$?"
   fi
 fi
 
