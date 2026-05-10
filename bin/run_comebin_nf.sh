@@ -40,8 +40,12 @@ fi
 tmp_out="tmp_comebin"
 bam_dir="comebin_bam"
 final_dir="comebin"
-note_file="comebin.note"
+note_file="FAIL.note"
 map_file="comebin.contig2bin.tsv"
+min_contig_len=1000
+max_batch_size=1024
+filtered_assembly="${tmp_out}/assembly.comebin.min1001.fasta"
+filter_stats="${tmp_out}/assembly.comebin.filter.tsv"
 
 rm -rf "$tmp_out" "$final_dir" "$note_file" "$map_file" "$bam_dir"
 mkdir -p "$tmp_out" "$bam_dir"
@@ -130,16 +134,47 @@ if [[ "$require_cuda" == true ]]; then
   fi
 fi
 
+if filter_comebin_fasta.py \
+      --input "$assembly" \
+      --output "$filtered_assembly" \
+      --stats "$filter_stats" \
+      --min-length "$min_contig_len"
+then
+  :
+else
+  fail "COMEBin: failed to filter assembly for contigs longer than ${min_contig_len} bp" "$?"
+fi
+
+total_contigs="$(awk '$1 == "total" { print $2 }' "$filter_stats")"
+eligible_contigs="$(awk '$1 == "kept" { print $2 }' "$filter_stats")"
+
+if [[ -z "$total_contigs" || -z "$eligible_contigs" ]]; then
+  fail "COMEBin: failed to read filtered assembly counts"
+fi
+
+if (( eligible_contigs < 2 )); then
+  record_soft_failure "COMEBin: skipped because only ${eligible_contigs} contig(s) are longer than ${min_contig_len} bp (total contigs: ${total_contigs}); at least 2 eligible contigs are required for training"
+  exit 0
+fi
+
+batch_size="$eligible_contigs"
+if (( batch_size > max_batch_size )); then
+  batch_size="$max_batch_size"
+fi
+
+echo "COMEBin: using ${eligible_contigs}/${total_contigs} contigs longer than ${min_contig_len} bp with batch size ${batch_size}" >&2
+
 # Symlink the BAM into a directory, as COMEBin expects a bam directory (-p)
 ln -s "$(realpath "$bam")" "${bam_dir}/$(basename "$bam")"
 
 # Run COMEBin (CPU mode)
 if run_comebin.sh \
-      -a "$assembly" \
+      -a "$filtered_assembly" \
       -p "$bam_dir" \
       -o "$tmp_out" \
       -n 6 \
-      -t "$cpus"
+      -t "$cpus" \
+      -b "$batch_size"
 then
   :
 else

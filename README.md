@@ -378,7 +378,7 @@ This keeps large intermediate task data in Lustre-backed `work/` storage while f
       semibin.contig2bin.tsv
       rosella.contig2bin.tsv
       metabat.note                 # if failed
-      comebin.note                 # if failed
+      FAIL.note                    # COMEBin failure/skip note
       vamb.note                    # if failed
       lorbin.note                  # if failed
       semibin.note                 # if failed

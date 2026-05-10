@@ -32,7 +32,63 @@ assert_file_contains() {
     local file=$1
     local expected=$2
 
-    grep -Fq "$expected" "$file" || fail "expected '$expected' in $file"
+    grep -Fq -- "$expected" "$file" || fail "expected '$expected' in $file"
+}
+
+assert_file_has_line() {
+    # Assert that a file contains an exact line.
+    local file=$1
+    local expected=$2
+
+    grep -Fxq -- "$expected" "$file" || fail "expected line '$expected' in $file"
+}
+
+assert_file_missing() {
+    # Assert that a file does not exist.
+    [ ! -e "$1" ] || fail "expected file to be absent: $1"
+}
+
+append_fasta_record() {
+    # Append one synthetic FASTA record of the requested length.
+    local file=$1
+    local record_id=$2
+    local length=$3
+
+    printf '>%s\n' "$record_id" >> "$file"
+    awk -v n="$length" 'BEGIN {
+      for (i = 0; i < n; i++) {
+        printf "A"
+      }
+      printf "\n"
+    }' >> "$file"
+}
+
+write_eligible_comebin_assembly() {
+    # Write a tiny assembly with enough COMEBin-eligible contigs.
+    local assembly=$1
+
+    : > "$assembly"
+    append_fasta_record "$assembly" "contig1" 1001
+    append_fasta_record "$assembly" "contig2" 1001
+}
+
+write_mixed_comebin_assembly() {
+    # Write an assembly with eligible and short contigs.
+    local assembly=$1
+
+    : > "$assembly"
+    append_fasta_record "$assembly" "kept1" 1001
+    append_fasta_record "$assembly" "short1" 500
+    append_fasta_record "$assembly" "kept2" 1002
+}
+
+write_insufficient_comebin_assembly() {
+    # Write an assembly with fewer than two COMEBin-eligible contigs.
+    local assembly=$1
+
+    : > "$assembly"
+    append_fasta_record "$assembly" "kept1" 1001
+    append_fasta_record "$assembly" "short1" 500
 }
 
 write_fake_comebin() {
@@ -43,11 +99,52 @@ write_fake_comebin() {
     mkdir -p "$fake_bin"
     cat > "$fake_bin/run_comebin.sh" <<'EOF'
 #!/usr/bin/env bash
+if [[ -n "${FAKE_COMEBIN_ARGS:-}" ]]; then
+  printf '%s\n' "$@" > "$FAKE_COMEBIN_ARGS"
+fi
+
+output_dir=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -o) output_dir="$2"; shift 2 ;;
+    *) shift ;;
+  esac
+done
+
+if [[ "${FAKE_COMEBIN_EXIT:-42}" == "0" ]]; then
+  mkdir -p "${output_dir}/comebin_res/comebin_res_bins"
+  printf '>kept1\nACGT\n' > "${output_dir}/comebin_res/comebin_res_bins/bin.1.fa"
+  exit 0
+fi
+
 printf 'fake COMEBin failure\n' >&2
 exit "${FAKE_COMEBIN_EXIT:-42}"
 EOF
     chmod +x "$fake_bin/run_comebin.sh"
     printf '%s\n' "$exit_code" > "$fake_bin/exit_code"
+}
+
+run_comebin_in_workdir() {
+    # Run run_comebin_nf.sh in an isolated directory with an existing assembly.
+    local attempt=$1
+    local work_dir=$2
+    local fake_bin=$3
+
+    mkdir -p "$work_dir"
+    : > "$work_dir/assembly.bam"
+
+    (
+        cd "$work_dir"
+        FAKE_COMEBIN_EXIT="$(cat "$fake_bin/exit_code")" \
+        FAKE_COMEBIN_ARGS="${FAKE_COMEBIN_ARGS:-}" \
+        PATH="$fake_bin:$REPO_ROOT/bin:$PATH" \
+            run_comebin_nf.sh \
+                --assembly assembly.fasta \
+                --bam assembly.bam \
+                --cpus 1 \
+                --attempt "$attempt" \
+                --max-retries 1
+    )
 }
 
 run_comebin_attempt() {
@@ -57,20 +154,8 @@ run_comebin_attempt() {
     local fake_bin=$3
 
     mkdir -p "$work_dir"
-    printf '>contig1\nACGT\n' > "$work_dir/assembly.fasta"
-    : > "$work_dir/assembly.bam"
-
-    (
-        cd "$work_dir"
-        FAKE_COMEBIN_EXIT="$(cat "$fake_bin/exit_code")" \
-        PATH="$fake_bin:$REPO_ROOT/bin:$PATH" \
-            run_comebin_nf.sh \
-                --assembly assembly.fasta \
-                --bam assembly.bam \
-                --cpus 1 \
-                --attempt "$attempt" \
-                --max-retries 1
-    )
+    write_eligible_comebin_assembly "$work_dir/assembly.fasta"
+    run_comebin_in_workdir "$attempt" "$work_dir" "$fake_bin"
 }
 
 test_comebin_retries_before_soft_failure() {
@@ -93,7 +178,7 @@ test_comebin_retries_before_soft_failure() {
 
     assert_dir_exists "$final_work/comebin"
     assert_file_empty "$final_work/comebin.contig2bin.tsv"
-    assert_file_contains "$final_work/comebin.note" "COMEBin: run_comebin.sh failed"
+    assert_file_contains "$final_work/FAIL.note" "COMEBin: run_comebin.sh failed"
 }
 
 test_comebin_timeout_exit_stays_hard_failure() {
@@ -109,6 +194,49 @@ test_comebin_timeout_exit_stays_hard_failure() {
 
     [ ! -d "$timeout_work/comebin" ] || fail "timeout produced a soft COMEBin directory"
     assert_file_empty "$timeout_work/comebin.contig2bin.tsv"
+}
+
+test_comebin_batch_uses_filtered_contigs() {
+    # COMEBin should receive a batch size based on eligible contigs only.
+    local fake_bin="$TMP_ROOT/fake_success_bin"
+    local work_dir="$TMP_ROOT/comebin_filtered_batch"
+    local args_log="$TMP_ROOT/comebin_args.log"
+
+    write_fake_comebin "$fake_bin" 0
+    mkdir -p "$work_dir"
+    write_mixed_comebin_assembly "$work_dir/assembly.fasta"
+
+    if ! FAKE_COMEBIN_ARGS="$args_log" run_comebin_in_workdir 1 "$work_dir" "$fake_bin" > "$work_dir.log" 2>&1; then
+        sed -n '1,160p' "$work_dir.log" >&2
+        fail "COMEBin filtered batch run failed"
+    fi
+
+    assert_file_contains "$work_dir.log" "COMEBin: using 2/3 contigs longer than 1000 bp with batch size 2"
+    assert_file_has_line "$args_log" "-b"
+    assert_file_has_line "$args_log" "2"
+    assert_file_empty "$work_dir/FAIL.note"
+    assert_file_contains "$work_dir/comebin.contig2bin.tsv" "kept1"
+}
+
+test_comebin_skips_insufficient_eligible_contigs() {
+    # COMEBin should skip deterministically when too few eligible contigs remain.
+    local fake_bin="$TMP_ROOT/fake_skip_bin"
+    local work_dir="$TMP_ROOT/comebin_skip"
+    local args_log="$TMP_ROOT/comebin_skip_args.log"
+
+    write_fake_comebin "$fake_bin" 0
+    mkdir -p "$work_dir"
+    write_insufficient_comebin_assembly "$work_dir/assembly.fasta"
+
+    if ! FAKE_COMEBIN_ARGS="$args_log" run_comebin_in_workdir 1 "$work_dir" "$fake_bin" > "$work_dir.log" 2>&1; then
+        sed -n '1,160p' "$work_dir.log" >&2
+        fail "COMEBin insufficient-contig skip failed"
+    fi
+
+    assert_dir_exists "$work_dir/comebin"
+    assert_file_empty "$work_dir/comebin.contig2bin.tsv"
+    assert_file_contains "$work_dir/FAIL.note" "COMEBin: skipped because only 1 contig(s) are longer than 1000 bp"
+    assert_file_missing "$args_log"
 }
 
 write_partial_group_fixture() {
@@ -203,6 +331,8 @@ main() {
 
     test_comebin_retries_before_soft_failure
     test_comebin_timeout_exit_stays_hard_failure
+    test_comebin_batch_uses_filtered_contigs
+    test_comebin_skips_insufficient_eligible_contigs
     test_partial_binner_group_reaches_refiner_input
 
     printf 'PASS: binning soft-failure recovery tests\n'

@@ -12,7 +12,7 @@ process COMEBIN {
 
     output:
     tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler),
-          val("comebin"), path("comebin"), path("comebin.contig2bin.tsv"), path("comebin.note"),             emit: result
+          val("comebin"), path("comebin"), path("comebin.contig2bin.tsv"), path("FAIL.note"),                emit: result
 
     script:
     """
@@ -28,6 +28,6 @@ process COMEBIN {
     """
     mkdir -p comebin
     : > comebin.contig2bin.tsv
-    : > comebin.note
+    : > FAIL.note
     """
 }
