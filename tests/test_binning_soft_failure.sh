@@ -151,6 +151,7 @@ test_partial_binner_group_reaches_refiner_input() {
     local fixture_file="$TMP_ROOT/partial_group_fixture.nf"
     local workdir="$TMP_ROOT/partial_group_work"
     local log_file="$TMP_ROOT/partial_group.log"
+    local empty_config="$TMP_ROOT/empty_nextflow.config"
     local metabat_dir="$TMP_ROOT/metabat"
     local metabat_map="$TMP_ROOT/metabat.contig2bin.tsv"
     local metabat_note="$TMP_ROOT/metabat.note"
@@ -158,9 +159,10 @@ test_partial_binner_group_reaches_refiner_input() {
     mkdir -p "$metabat_dir"
     printf 'contig1\tmetabatbin.1.fa\n' > "$metabat_map"
     : > "$metabat_note"
+    : > "$empty_config"
     write_partial_group_fixture "$fixture_file"
 
-    if ! nextflow run "$fixture_file" \
+    if ! NXF_OFFLINE=true nextflow -C "$empty_config" run "$fixture_file" \
         -ansi-log false \
         -work-dir "$workdir" \
         --metabat_dir "$metabat_dir" \

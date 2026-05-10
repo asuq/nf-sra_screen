@@ -237,7 +237,7 @@ workflow STANDALONE_BINNING {
       }
       .combine(binner_plan_by_sample, by: 0)
       .map { sample_join_key, binner_map_payload, expectedCount -> tuple(groupKey(sample_join_key, expectedCount as int), binner_map_payload) }
-      .groupTuple()
+      .groupTuple(remainder: true)
       .map { grouped_sample_key, binner_map_entries -> tuple(grouped_sample_key.target, binner_map_entries) }
 
     def dastool_join = dastool_base_by.join(binner_maps_by_sample)

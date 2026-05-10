@@ -51,16 +51,34 @@ mkdir -p "$bam_dir"
 : > "$note_file"
 : > "$map_file"
 
-fail() {
+record_soft_failure() {
   local msg="$1"
-  echo "$msg" >&2
-  if [[ "$attempt" -lt "$max_retries" ]]; then
-    exit 1
-  fi
   rm -rf "$final_dir"
   mkdir -p "$final_dir"
   : > "$map_file"
   printf '%s\n' "$msg" > "$note_file"
+}
+
+handle_unexpected_exit() {
+  local exit_code=$?
+
+  if (( exit_code == 0 || attempt <= max_retries )); then
+    return
+  fi
+
+  record_soft_failure "VAMB: unexpected failure (exit ${exit_code})"
+  exit 0
+}
+
+trap handle_unexpected_exit EXIT
+
+fail() {
+  local msg="$1"
+  echo "$msg" >&2
+  if (( attempt <= max_retries )); then
+    exit 1
+  fi
+  record_soft_failure "$msg"
   exit 0
 }
 
