@@ -12,7 +12,7 @@ process ROSELLA {
 
     output:
     tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler),
-          val("rosella"), path("rosella"), path("rosella.contig2bin.tsv"), path("rosella.note"),             emit: result
+          val("rosella"), path("rosella.tar.gz"), path("rosella.contig2bin.tsv"), path("rosella.note"),      emit: result
 
     script:
     """
@@ -27,6 +27,7 @@ process ROSELLA {
     stub:
     """
     mkdir -p rosella
+    archive_binner_dir.sh --dir rosella
     : > rosella.contig2bin.tsv
     : > rosella.note
     """

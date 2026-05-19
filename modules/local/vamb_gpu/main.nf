@@ -13,7 +13,7 @@ process VAMB_GPU {
 
     output:
     tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler),
-          val("vamb"), path("vamb"), path("vamb.contig2bin.tsv"), path("vamb.note"),                         emit: result
+          val("vamb"), path("vamb.tar.gz"), path("vamb.contig2bin.tsv"), path("vamb.note"),                  emit: result
 
     script:
     """
@@ -30,6 +30,7 @@ process VAMB_GPU {
     stub:
     """
     mkdir -p vamb
+    archive_binner_dir.sh --dir vamb
     : > vamb.contig2bin.tsv
     : > vamb.note
     """

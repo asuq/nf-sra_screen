@@ -48,6 +48,15 @@ assert_file_missing() {
     [ ! -e "$1" ] || fail "expected file to be absent: $1"
 }
 
+assert_tar_contains() {
+    # Assert that a gzip tar archive contains a path.
+    local archive=$1
+    local expected=$2
+
+    tar -tzf "$archive" | grep -Fxq -- "$expected" || \
+        fail "expected archive $archive to contain $expected"
+}
+
 append_fasta_record() {
     # Append one synthetic FASTA record of the requested length.
     local file=$1
@@ -89,6 +98,40 @@ write_insufficient_comebin_assembly() {
     : > "$assembly"
     append_fasta_record "$assembly" "kept1" 1001
     append_fasta_record "$assembly" "short1" 500
+}
+
+test_archive_binner_dir_populated() {
+    # The archive helper should preserve the top-level directory.
+    local work_dir="$TMP_ROOT/archive_populated"
+
+    mkdir -p "$work_dir/metabat"
+    printf '>contig1\nACGT\n' > "$work_dir/metabat/bin.1.fa"
+
+    (
+        cd "$work_dir"
+        "$REPO_ROOT/bin/archive_binner_dir.sh" --dir metabat
+    )
+
+    assert_file_exists "$work_dir/metabat.tar.gz"
+    assert_file_missing "$work_dir/metabat"
+    assert_tar_contains "$work_dir/metabat.tar.gz" "metabat/"
+    assert_tar_contains "$work_dir/metabat.tar.gz" "metabat/bin.1.fa"
+}
+
+test_archive_binner_dir_empty() {
+    # Empty raw-binner output directories should still become archives.
+    local work_dir="$TMP_ROOT/archive_empty"
+
+    mkdir -p "$work_dir/comebin"
+
+    (
+        cd "$work_dir"
+        "$REPO_ROOT/bin/archive_binner_dir.sh" --dir comebin
+    )
+
+    assert_file_exists "$work_dir/comebin.tar.gz"
+    assert_file_missing "$work_dir/comebin"
+    assert_tar_contains "$work_dir/comebin.tar.gz" "comebin/"
 }
 
 write_fake_comebin() {
@@ -176,7 +219,9 @@ test_comebin_retries_before_soft_failure() {
         fail "COMEBin final soft-failure attempt failed"
     fi
 
-    assert_dir_exists "$final_work/comebin"
+    assert_file_exists "$final_work/comebin.tar.gz"
+    assert_file_missing "$final_work/comebin"
+    assert_tar_contains "$final_work/comebin.tar.gz" "comebin/"
     assert_file_empty "$final_work/comebin.contig2bin.tsv"
     assert_file_contains "$final_work/FAIL.note" "COMEBin: run_comebin.sh failed"
 }
@@ -193,6 +238,7 @@ test_comebin_timeout_exit_stays_hard_failure() {
     fi
 
     [ ! -d "$timeout_work/comebin" ] || fail "timeout produced a soft COMEBin directory"
+    assert_file_missing "$timeout_work/comebin.tar.gz"
     assert_file_empty "$timeout_work/comebin.contig2bin.tsv"
 }
 
@@ -216,6 +262,9 @@ test_comebin_batch_uses_filtered_contigs() {
     assert_file_has_line "$args_log" "2"
     assert_file_empty "$work_dir/FAIL.note"
     assert_file_contains "$work_dir/comebin.contig2bin.tsv" "kept1"
+    assert_file_exists "$work_dir/comebin.tar.gz"
+    assert_file_missing "$work_dir/comebin"
+    assert_tar_contains "$work_dir/comebin.tar.gz" "comebin/bin.1.fa"
 }
 
 test_comebin_skips_insufficient_eligible_contigs() {
@@ -233,7 +282,9 @@ test_comebin_skips_insufficient_eligible_contigs() {
         fail "COMEBin insufficient-contig skip failed"
     fi
 
-    assert_dir_exists "$work_dir/comebin"
+    assert_file_exists "$work_dir/comebin.tar.gz"
+    assert_file_missing "$work_dir/comebin"
+    assert_tar_contains "$work_dir/comebin.tar.gz" "comebin/"
     assert_file_empty "$work_dir/comebin.contig2bin.tsv"
     assert_file_contains "$work_dir/FAIL.note" "COMEBin: skipped because only 1 contig(s) are longer than 1000 bp"
     assert_file_missing "$args_log"
@@ -329,6 +380,8 @@ main() {
     TMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/nf-sra-binning-soft-failure.XXXXXX")"
     trap 'rm -rf "$TMP_ROOT"' EXIT
 
+    test_archive_binner_dir_populated
+    test_archive_binner_dir_empty
     test_comebin_retries_before_soft_failure
     test_comebin_timeout_exit_stays_hard_failure
     test_comebin_batch_uses_filtered_contigs

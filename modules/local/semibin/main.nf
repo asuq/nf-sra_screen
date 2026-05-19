@@ -13,7 +13,7 @@ process SEMIBIN {
 
     output:
     tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler),
-          val("semibin"), path("semibin"), path("semibin.contig2bin.tsv"), path("semibin.note"),             emit: result
+          val("semibin"), path("semibin.tar.gz"), path("semibin.contig2bin.tsv"), path("semibin.note"),      emit: result
 
     script:
     """
@@ -32,6 +32,7 @@ process SEMIBIN {
     """
     mkdir -p semibin
     printf 'contig\tbin\n' > semibin/contig_bins.tsv
+    archive_binner_dir.sh --dir semibin
     : > semibin.contig2bin.tsv
     : > semibin.note
     """

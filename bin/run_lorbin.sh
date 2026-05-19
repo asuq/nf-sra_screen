@@ -39,10 +39,11 @@ fi
 
 tmp_dir="tmp_lorbin"
 final_dir="lorbin"
+archive_file="${final_dir}.tar.gz"
 note_file="lorbin.note"
 map_file="lorbin.contig2bin.tsv"
 
-rm -rf "$tmp_dir" "$final_dir" "$note_file" "$map_file"
+rm -rf "$tmp_dir" "$final_dir" "$archive_file" "$note_file" "$map_file"
 : > "$note_file"
 : > "$map_file"
 
@@ -52,6 +53,7 @@ record_soft_failure() {
   mkdir -p "$final_dir"
   : > "$map_file"
   printf '%s\n' "$msg" > "$note_file"
+  archive_binner_dir.sh --dir "$final_dir" --archive "$archive_file"
 }
 
 is_scheduler_failure_exit() {
@@ -195,3 +197,5 @@ for f in "$bins_src"/*; do
   ' "$f" >> "$map_file"
 done
 shopt -u nullglob
+
+archive_binner_dir.sh --dir "$final_dir" --archive "$archive_file"

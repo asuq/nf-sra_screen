@@ -363,12 +363,12 @@ This keeps large intermediate task data in Lustre-backed `work/` storage while f
 
     # Binning (if --binning)
     binning/
-      metabat/
-      comebin/
-      vamb/
-      lorbin/
-      semibin/
-      rosella/
+      metabat.tar.gz
+      comebin.tar.gz
+      vamb.tar.gz
+      lorbin.tar.gz
+      semibin.tar.gz
+      rosella.tar.gz
       dastool/
       binette/
       metabat.contig2bin.tsv

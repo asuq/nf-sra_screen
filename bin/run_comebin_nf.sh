@@ -40,6 +40,7 @@ fi
 tmp_out="tmp_comebin"
 bam_dir="comebin_bam"
 final_dir="comebin"
+archive_file="${final_dir}.tar.gz"
 note_file="FAIL.note"
 map_file="comebin.contig2bin.tsv"
 min_contig_len=1000
@@ -47,7 +48,7 @@ max_batch_size=1024
 filtered_assembly="${tmp_out}/assembly.comebin.min1001.fasta"
 filter_stats="${tmp_out}/assembly.comebin.filter.tsv"
 
-rm -rf "$tmp_out" "$final_dir" "$note_file" "$map_file" "$bam_dir"
+rm -rf "$tmp_out" "$final_dir" "$archive_file" "$note_file" "$map_file" "$bam_dir"
 mkdir -p "$tmp_out" "$bam_dir"
 : > "$note_file"
 : > "$map_file"
@@ -58,6 +59,7 @@ record_soft_failure() {
   mkdir -p "$final_dir"
   : > "$map_file"
   printf '%s\n' "$msg" > "$note_file"
+  archive_binner_dir.sh --dir "$final_dir" --archive "$archive_file"
 }
 
 is_scheduler_failure_exit() {
@@ -201,3 +203,5 @@ for f in "$final_dir"/*; do
   ' "$f" >> "$map_file"
 done
 shopt -u nullglob
+
+archive_binner_dir.sh --dir "$final_dir" --archive "$archive_file"

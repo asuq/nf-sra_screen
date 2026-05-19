@@ -13,7 +13,7 @@ process COMEBIN_GPU {
 
     output:
     tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler),
-          val("comebin"), path("comebin"), path("comebin.contig2bin.tsv"), path("FAIL.note"),                emit: result
+          val("comebin"), path("comebin.tar.gz"), path("comebin.contig2bin.tsv"), path("FAIL.note"),         emit: result
 
     script:
     """
@@ -29,6 +29,7 @@ process COMEBIN_GPU {
     stub:
     """
     mkdir -p comebin
+    archive_binner_dir.sh --dir comebin
     : > comebin.contig2bin.tsv
     : > FAIL.note
     """

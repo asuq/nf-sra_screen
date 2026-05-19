@@ -73,10 +73,11 @@ esac
 
 tmp_dir="tmp_semibin"
 final_dir="semibin"
+archive_file="${final_dir}.tar.gz"
 note_file="semibin.note"
 map_file="semibin.contig2bin.tsv"
 
-rm -rf "$tmp_dir" "$final_dir" "$note_file" "$map_file"
+rm -rf "$tmp_dir" "$final_dir" "$archive_file" "$note_file" "$map_file"
 mkdir -p "$tmp_dir" "$final_dir"
 : > "$note_file"
 : > "$map_file"
@@ -88,6 +89,7 @@ record_soft_failure() {
   touch "$final_dir/contig_bins.tsv"
   : > "$map_file"
   printf '%s\n' "$msg" > "$note_file"
+  archive_binner_dir.sh --dir "$final_dir" --archive "$archive_file"
 }
 
 is_scheduler_failure_exit() {
@@ -166,3 +168,5 @@ if [[ "${#bins[@]}" -ne 0 ]]; then
 fi
 
 shopt -u nullglob
+
+archive_binner_dir.sh --dir "$final_dir" --archive "$archive_file"

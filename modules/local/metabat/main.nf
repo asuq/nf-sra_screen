@@ -12,7 +12,7 @@ process METABAT {
 
     output:
     tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler),
-          val("metabat"), path("metabat"), path("metabat.contig2bin.tsv"), path("metabat.note"),             emit: result
+          val("metabat"), path("metabat.tar.gz"), path("metabat.contig2bin.tsv"), path("metabat.note"),      emit: result
 
     script:
     """
@@ -27,6 +27,7 @@ process METABAT {
     stub:
     """
     mkdir -p metabat
+    archive_binner_dir.sh --dir metabat
     : > metabat.contig2bin.tsv
     : > metabat.note
     """

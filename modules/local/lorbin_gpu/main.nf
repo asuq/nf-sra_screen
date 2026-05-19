@@ -13,7 +13,7 @@ process LORBIN_GPU {
 
     output:
     tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler),
-          val("lorbin"), path("lorbin"), path("lorbin.contig2bin.tsv"), path("lorbin.note"),                  emit: result
+          val("lorbin"), path("lorbin.tar.gz"), path("lorbin.contig2bin.tsv"), path("lorbin.note"),           emit: result
 
     script:
     """
@@ -29,6 +29,7 @@ process LORBIN_GPU {
     stub:
     """
     mkdir -p lorbin
+    archive_binner_dir.sh --dir lorbin
     : > lorbin.contig2bin.tsv
     : > lorbin.note
     """

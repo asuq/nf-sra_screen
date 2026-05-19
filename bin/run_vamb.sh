@@ -43,10 +43,11 @@ fi
 tmp_dir="tmp_vamb"
 bam_dir="vamb_bam"
 final_dir="vamb"
+archive_file="${final_dir}.tar.gz"
 note_file="vamb.note"
 map_file="vamb.contig2bin.tsv"
 
-rm -rf "$tmp_dir" "$bam_dir" "$final_dir" "$note_file" "$map_file"
+rm -rf "$tmp_dir" "$bam_dir" "$final_dir" "$archive_file" "$note_file" "$map_file"
 mkdir -p "$bam_dir"
 : > "$note_file"
 : > "$map_file"
@@ -57,6 +58,7 @@ record_soft_failure() {
   mkdir -p "$final_dir"
   : > "$map_file"
   printf '%s\n' "$msg" > "$note_file"
+  archive_binner_dir.sh --dir "$final_dir" --archive "$archive_file"
 }
 
 is_scheduler_failure_exit() {
@@ -186,3 +188,5 @@ if [[ -d "${tmp_dir}/bins" ]]; then
   done
   shopt -u nullglob
 fi
+
+archive_binner_dir.sh --dir "$final_dir" --archive "$archive_file"

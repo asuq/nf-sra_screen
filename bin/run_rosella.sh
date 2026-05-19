@@ -41,11 +41,12 @@ fi
 
 tmp_dir="tmp_rosella"
 final_dir="rosella"
+archive_file="${final_dir}.tar.gz"
 log_file="${tmp_dir}/rosella_recover.log"
 note_file="rosella.note"
 map_file="rosella.contig2bin.tsv"
 
-rm -rf "$tmp_dir" "$final_dir" "$note_file" "$map_file"
+rm -rf "$tmp_dir" "$final_dir" "$archive_file" "$note_file" "$map_file"
 mkdir -p "$tmp_dir" "$final_dir"
 : > "$note_file"
 : > "$map_file"
@@ -56,6 +57,7 @@ record_soft_failure() {
   mkdir -p "$final_dir"
   : > "$map_file"
   printf '%s\n' "$msg" > "$note_file"
+  archive_binner_dir.sh --dir "$final_dir" --archive "$archive_file"
 }
 
 is_scheduler_failure_exit() {
@@ -145,6 +147,7 @@ else
     echo "Rosella: no bins were generated" >&2
     mkdir -p "$final_dir"
     : > "$map_file"
+    archive_binner_dir.sh --dir "$final_dir" --archive "$archive_file"
     exit 0
   fi
 
@@ -156,6 +159,7 @@ else
     fi
     publish_rosella_bins
     printf '%s\n' "$msg" > "$note_file"
+    archive_binner_dir.sh --dir "$final_dir" --archive "$archive_file"
     exit 0
   fi
 
@@ -165,3 +169,5 @@ fi
 if ! publish_rosella_bins; then
   echo "Rosella: no rosella_*.fna bins produced" >&2
 fi
+
+archive_binner_dir.sh --dir "$final_dir" --archive "$archive_file"

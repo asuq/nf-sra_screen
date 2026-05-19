@@ -17,6 +17,16 @@ assert_file_exists() {
     [ -f "$1" ] || fail "expected file to exist: $1"
 }
 
+assert_dir_exists() {
+    # Assert that a directory exists.
+    [ -d "$1" ] || fail "expected directory to exist: $1"
+}
+
+assert_path_missing() {
+    # Assert that a path does not exist.
+    [ ! -e "$1" ] || fail "expected path to be absent: $1"
+}
+
 assert_summary_header() {
     # Assert that summary.tsv keeps the expected column order.
     local summary_file=$1
@@ -235,6 +245,8 @@ run_standalone_stub() {
     local workdir="$TMP_ROOT/standalone_work"
     local log_file="$TMP_ROOT/standalone.log"
     local summary_file="$outdir/summary.tsv"
+    local short_binning_dir="$outdir/short_sample/short_sample/binning"
+    local hifi_binning_dir="$outdir/hifi_sample/hifi_sample/binning"
 
     {
         printf 'sample\tread_type\treads\tassembly_fasta\n'
@@ -263,6 +275,12 @@ run_standalone_stub() {
     assert_key_row_count "$summary_file" hifi_sample hifi_sample hifi provided 1
     assert_key_note_blank "$summary_file" short_sample short_sample short provided
     assert_key_note_blank "$summary_file" hifi_sample hifi_sample hifi provided
+    assert_file_exists "$short_binning_dir/metabat.tar.gz"
+    assert_path_missing "$short_binning_dir/metabat"
+    assert_dir_exists "$short_binning_dir/dastool"
+    assert_file_exists "$hifi_binning_dir/metabat.tar.gz"
+    assert_path_missing "$hifi_binning_dir/metabat"
+    assert_dir_exists "$hifi_binning_dir/dastool"
 }
 
 main() {
