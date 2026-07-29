@@ -44,6 +44,7 @@ env/
 *.iml
 
 # Logs and temp
+.pixi/
 *.log
 *.out
 *.err
