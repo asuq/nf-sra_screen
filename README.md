@@ -299,12 +299,44 @@ nextflow run binning.nf \
   - Includes `conf/marmic.config` for the Marmic SLURM environment.
   - Uses Apptainer/Singularity cache settings under `/bioinf/home/$USER/nfx_singularity_cache`.
   - Keep database paths as command-line parameters, for example `--taxdump` and `--uniprot_db`.
+- `viper-cpu`
+  - MPCDF Viper CPU profile; launch from `viper05i`.
+  - Compute tasks use Slurm. SRA metadata resolution and both `DOWNLOAD_SRR`
+    uses run locally with one CPU and at most 16 GB each; no more than two run
+    at once.
 - `debug`
   - docker.enabled = true
   - `executor.queueSize = 1`
   - Extended trace.fields for debugging.
 - `test`
   - For small regression tests.
+
+### MPCDF Viper storage and launch
+
+```bash
+export NXF_APPTAINER_CACHEDIR="/ptmp/$USER/apptainer-cache"
+
+nextflow run asuq/nf-sra_screen \
+  -profile viper-cpu \
+  -w "/ptmp/$USER/nf-sra_screen-work" \
+  --sra sra.csv \
+  --taxdump /path/to/ncbi_taxdump_dir \
+  --uniprot_db /path/to/uniprot.dmnd \
+  --outdir "/ptmp/$USER/nf-sra_screen-results"
+```
+
+The profile does not fix a Slurm partition, account, or QoS. Override the
+container cache with `--apptainer_cache_dir` and the default
+`apptainer/1.4.3` module with `--viper_apptainer_module <module/name>` when
+necessary. Both the `-w` directory and Apptainer cache must be shared `/ptmp`
+paths. `/ptmp` is not backed up and inactive files are subject to retention
+cleanup, so preserve final results elsewhere when required. `/r` is available
+only on login nodes; `/tmp` and generic `$TMPDIR` are unsuitable for Nextflow
+work or shared container caches. The reusable `needs_internet` label and
+opt-in `process_local_scratch` label are available; the latter uses
+`$JOB_TMPDIR`.
+
+Run the dependency-locked development test suite with `pixi run test`.
 
 ### Lustre/NFS storage layout
 

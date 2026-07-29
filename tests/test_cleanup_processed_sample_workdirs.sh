@@ -206,7 +206,7 @@ EOF
         fail "malformed trace command unexpectedly succeeded"
     fi
 
-    assert_file_contains "$log_file" "trace TSV must include tag, status, and workdir headers"
+    assert_file_contains "$log_file" "trace TSV must include status plus either tag/workdir or name/hash headers"
 }
 
 main() {
