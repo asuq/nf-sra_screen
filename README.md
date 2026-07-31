@@ -304,6 +304,8 @@ nextflow run binning.nf \
   - Compute tasks use Slurm. SRA metadata resolution and both `DOWNLOAD_SRR`
     uses run locally with one CPU and at most 16 GB each; no more than two run
     at once.
+  - `VALIDATE_TAXA` receives 16 GB because loading the complete NCBI taxdump
+    JSON creates several large in-memory Python indexes.
 - `debug`
   - docker.enabled = true
   - `executor.queueSize = 1`

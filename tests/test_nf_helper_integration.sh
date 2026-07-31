@@ -53,6 +53,8 @@ assert_file_contains "$REPO_ROOT/conf/gwdg.config" "external/nf-helper/conf/site
 assert_file_contains "$REPO_ROOT/conf/marmic.config" "external/nf-helper/conf/sites/marmic.config"
 assert_file_contains "$REPO_ROOT/conf/viper-cpu.config" "external/nf-helper/conf/sites/viper-cpu.config"
 assert_file_contains "$REPO_ROOT/conf/viper-cpu.config" "'viper-cpu' {"
+assert_file_contains "$REPO_ROOT/conf/viper-cpu.config" "withName: VALIDATE_TAXA"
+assert_file_contains "$REPO_ROOT/conf/viper-cpu.config" "memory = 16.GB"
 assert_file_contains "$REPO_ROOT/conf/viper-cpu.config" "DOWNLOAD_SRA_METADATA"
 assert_file_contains "$REPO_ROOT/conf/viper-cpu.config" "RESOLVE_SRR_METADATA"
 assert_file_contains "$REPO_ROOT/conf/viper-cpu.config" "DOWNLOAD_SRR"
