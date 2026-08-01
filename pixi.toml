@@ -5,7 +5,6 @@ platforms = ["osx-arm64", "linux-64"]
 
 [dependencies]
 nextflow = "26.04.*"
-pigz = "2.8.*"
 python = "3.12.*"
 
 [tasks]
