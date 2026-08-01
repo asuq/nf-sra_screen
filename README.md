@@ -306,6 +306,10 @@ nextflow run binning.nf \
     at once.
   - `VALIDATE_TAXA` receives 16 GB because loading the complete NCBI taxdump
     JSON creates several large in-memory Python indexes.
+  - Nextflow keeps at most 250 Slurm tasks outstanding by default, leaving
+    headroom below Viper's default 300-job per-user submission limit. Lower
+    this with `--viper_slurm_queue_size` when other jobs or workflow launches
+    share that limit.
 - `debug`
   - docker.enabled = true
   - `executor.queueSize = 1`

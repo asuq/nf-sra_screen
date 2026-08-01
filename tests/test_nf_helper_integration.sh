@@ -47,6 +47,8 @@ assert_path_exists "$REPO_ROOT/external/nf-helper/conf/sites/viper-cpu.config"
 assert_path_exists "$REPO_ROOT/external/nf-helper/helpers/cleanup_processed_sample_workdirs.sh"
 assert_path_exists "$REPO_ROOT/external/nf-helper/helpers/gwdg_promote_2h_qos.sh"
 assert_path_missing "$REPO_ROOT/helpers/cleanup_processed_sra_workdirs.sh"
+assert_file_contains "$REPO_ROOT/external/nf-helper/conf/sites/viper-cpu.config" "viper_slurm_queue_size = 250"
+assert_file_contains "$REPO_ROOT/external/nf-helper/conf/sites/viper-cpu.config" "queueSize = params.viper_slurm_queue_size as int"
 
 assert_file_contains "$REPO_ROOT/conf/oist.config" "external/nf-helper/conf/sites/oist.config"
 assert_file_contains "$REPO_ROOT/conf/gwdg.config" "external/nf-helper/conf/sites/gwdg.config"
