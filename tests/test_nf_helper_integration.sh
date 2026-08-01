@@ -13,7 +13,7 @@ assert_file_contains() {
     local file=$1
     local pattern=$2
 
-    grep -F "$pattern" "$file" >/dev/null 2>&1 || fail "expected $file to contain $pattern"
+    grep -F -- "$pattern" "$file" >/dev/null 2>&1 || fail "expected $file to contain $pattern"
 }
 
 assert_path_exists() {
@@ -28,7 +28,7 @@ assert_file_omits() {
     local file=$1
     local pattern=$2
 
-    ! grep -F "$pattern" "$file" >/dev/null 2>&1 || fail "expected $file to omit $pattern"
+    ! grep -F -- "$pattern" "$file" >/dev/null 2>&1 || fail "expected $file to omit $pattern"
 }
 
 assert_local_module_run_local() {
@@ -71,11 +71,23 @@ assert_site_local_checks "$REPO_ROOT/conf/marmic.config"
 assert_file_contains "$REPO_ROOT/conf/viper-cpu.config" "'viper-cpu' {"
 assert_file_contains "$REPO_ROOT/conf/viper-cpu.config" "withName: VALIDATE_TAXA"
 assert_file_contains "$REPO_ROOT/conf/viper-cpu.config" "memory = 16.GB"
+assert_file_contains "$REPO_ROOT/conf/viper-cpu.config" "withName: SINGLEM"
+assert_file_contains "$REPO_ROOT/conf/viper-cpu.config" "clusterOptions = '--export=ALL --ntasks-per-core=2'"
+assert_file_contains "$REPO_ROOT/conf/viper-cpu.config" "cpus = { Math.min(64 * task.attempt, params.max_cpus as int) }"
+assert_file_contains "$REPO_ROOT/conf/viper-cpu.config" "def requestedTime = task.attempt == 1 ? 4.h : task.attempt == 2 ? 12.h : 24.h"
+assert_file_contains "$REPO_ROOT/conf/viper-cpu.config" "[requestedTime, params.resource_time_limit()].min()"
+assert_file_contains "$REPO_ROOT/modules/local/singlem/main.nf" '--cpus ${task.cpus}'
+assert_file_contains "$REPO_ROOT/bin/run_singlem.sh" '--threads "$cpus"'
 assert_file_contains "$REPO_ROOT/conf/viper-cpu.config" "DOWNLOAD_SRA_METADATA"
 assert_file_contains "$REPO_ROOT/conf/viper-cpu.config" "RESOLVE_SRR_METADATA"
 assert_file_contains "$REPO_ROOT/conf/viper-cpu.config" "SANDPIPER"
-assert_file_contains "$REPO_ROOT/conf/viper-cpu.config" "DOWNLOAD_SRR"
+assert_file_contains "$REPO_ROOT/conf/viper-cpu.config" "withName: DOWNLOAD_SRR"
 assert_file_contains "$REPO_ROOT/conf/viper-cpu.config" "executor = 'local'"
+assert_file_contains "$REPO_ROOT/nextflow.config" "download_srr_max_forks = 2"
+assert_file_contains "$REPO_ROOT/nextflow.config" "maxForks = params.download_srr_max_forks as int"
+assert_file_contains "$REPO_ROOT/nextflow.config" "cpus   = 1"
+assert_file_contains "$REPO_ROOT/nextflow.config" "memory = { [ 8.GB, params.resource_memory_limit() ].min() }"
+assert_file_contains "$REPO_ROOT/nextflow.config" "time   = { params.resource_time_limit() }"
 assert_file_contains "$REPO_ROOT/nextflow.config" "includeConfig \"\${projectDir}/conf/oist.config\""
 assert_file_contains "$REPO_ROOT/nextflow.config" "includeConfig \"\${projectDir}/conf/gwdg.config\""
 assert_file_contains "$REPO_ROOT/nextflow.config" "includeConfig \"\${projectDir}/conf/marmic.config\""

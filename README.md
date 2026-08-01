@@ -266,6 +266,8 @@ nextflow run binning.nf \
 - `--noassembly`     (Optional) Skip ASSEMBLY and BINNING; run PRE_SCREENING + SUMMARY only. If set, `--binning` is ignored
 - `--outdir`         Output directory (default: ./output)
 - `--max_retries`    Maximum number of retries per process (default: 3)
+- `--download_srr_max_forks` Maximum simultaneous `DOWNLOAD_SRR` transfers
+  (default: 2). This controls I/O concurrency independently of CPU allocation.
 - `--queue_short`    Optional scheduler queue for short jobs
 - `--queue_standard` Optional scheduler queue for standard jobs
 - `--queue_highmem`  Optional scheduler queue for high-memory retries
@@ -279,6 +281,11 @@ nextflow run binning.nf \
 - `--gpus`           GPU count for typed SLURM requests on GWDG (default: `1`)
 - `--gpu_container_options` Optional container runtime options for GPU jobs (GWDG default: `--nv`)
 - `--help`           Print the pipeline help message and exit.
+
+Across all profiles, `DOWNLOAD_SRR` requests one CPU, up to 8 GB of memory, and
+the configured `--max_time` from its first attempt. Retries keep the same
+allocation. This is intentionally an I/O-oriented policy; the SRA conversion and
+compression fallbacks therefore also run with one thread.
 
 ### Profiles
 - `local`
@@ -305,11 +312,18 @@ nextflow run binning.nf \
   - Keep database paths as command-line parameters, for example `--taxdump` and `--uniprot_db`.
 - `viper-cpu`
   - MPCDF Viper CPU profile; launch from `viper05i`.
-  - Compute tasks use Slurm. SRA metadata resolution, Sandpiper, and both
-    `DOWNLOAD_SRR` uses run locally with one CPU and at most 16 GB each; no more
-    than two run at once.
+  - Compute tasks use Slurm. SRA metadata resolution and Sandpiper run locally
+    with one CPU and at most 16 GB each.
+  - `DOWNLOAD_SRR` uses the pipeline-wide download policy but runs locally
+    because Viper compute nodes have no internet access. The existing local
+    executor pool provides an additional two-task safety ceiling.
   - `VALIDATE_TAXA` receives 16 GB because loading the complete NCBI taxdump
     JSON creates several large in-memory Python indexes.
+  - `SINGLEM` explicitly enables two SMT threads per physical core. It requests
+    64 logical threads on the first attempt and at most 128 logical threads on
+    later attempts, corresponding to 32 and 64 physical cores respectively;
+    the same logical-thread count is passed to `singlem pipe --threads`.
+    Attempt time limits are 4, 12, and 24 hours, capped by `--max_time`.
   - Nextflow keeps at most 250 Slurm tasks outstanding by default, leaving
     headroom below Viper's default 300-job per-user submission limit. Lower
     this with `--viper_slurm_queue_size` when other jobs or workflow launches
