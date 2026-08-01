@@ -38,6 +38,17 @@ assert_local_module_run_local() {
     assert_file_contains "$module_file" "label 'run_local'"
 }
 
+assert_site_local_checks() {
+    # Assert that lightweight metadata and Sandpiper checks use a bounded local pool.
+    local config_file=$1
+
+    assert_file_contains "$config_file" "withName: 'DOWNLOAD_SRA_METADATA|RESOLVE_SRR_METADATA|SANDPIPER' {"
+    assert_file_contains "$config_file" "executor = 'local'"
+    assert_file_contains "$config_file" '$local {'
+    assert_file_contains "$config_file" "cpus = 2"
+    assert_file_contains "$config_file" "memory = 32.GB"
+}
+
 assert_file_contains "$REPO_ROOT/.gitmodules" "path = external/nf-helper"
 assert_file_contains "$REPO_ROOT/.gitmodules" "url = https://github.com/asuq/nf-helper.git"
 assert_path_exists "$REPO_ROOT/external/nf-helper/conf/sites/oist.config"
@@ -54,6 +65,9 @@ assert_file_contains "$REPO_ROOT/conf/oist.config" "external/nf-helper/conf/site
 assert_file_contains "$REPO_ROOT/conf/gwdg.config" "external/nf-helper/conf/sites/gwdg.config"
 assert_file_contains "$REPO_ROOT/conf/marmic.config" "external/nf-helper/conf/sites/marmic.config"
 assert_file_contains "$REPO_ROOT/conf/viper-cpu.config" "external/nf-helper/conf/sites/viper-cpu.config"
+assert_site_local_checks "$REPO_ROOT/conf/oist.config"
+assert_site_local_checks "$REPO_ROOT/conf/gwdg.config"
+assert_site_local_checks "$REPO_ROOT/conf/marmic.config"
 assert_file_contains "$REPO_ROOT/conf/viper-cpu.config" "'viper-cpu' {"
 assert_file_contains "$REPO_ROOT/conf/viper-cpu.config" "withName: VALIDATE_TAXA"
 assert_file_contains "$REPO_ROOT/conf/viper-cpu.config" "memory = 16.GB"

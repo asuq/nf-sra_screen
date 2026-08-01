@@ -291,13 +291,17 @@ nextflow run binning.nf \
   - Large queue size (`queueSize=2000`) and increased resource caps.
 - `oist`
   - Includes `conf/oist.config` for OIST Deigo HPC settings.
+  - SRA metadata resolution and Sandpiper run in a bounded two-task local pool.
 - `gwdg`
   - Includes `conf/gwdg.config` for the GWDG SCC SLURM environment.
   - Uses Apptainer with SHM-first temporary storage and defaults all CPU queue classes to `scc-cpu`.
+  - SRA metadata resolution and Sandpiper run in a bounded two-task local pool;
+    `DOWNLOAD_SRR` remains on an internet-enabled Slurm node.
   - Does not assign `QOS=2h` automatically; use `helpers/gwdg_promote_2h_qos.sh` when you want manual short-job promotion.
 - `marmic`
   - Includes `conf/marmic.config` for the Marmic SLURM environment.
   - Uses Apptainer/Singularity cache settings under `/bioinf/home/$USER/nfx_singularity_cache`.
+  - SRA metadata resolution and Sandpiper run in a bounded two-task local pool.
   - Keep database paths as command-line parameters, for example `--taxdump` and `--uniprot_db`.
 - `viper-cpu`
   - MPCDF Viper CPU profile; launch from `viper05i`.
