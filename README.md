@@ -301,9 +301,9 @@ nextflow run binning.nf \
   - Keep database paths as command-line parameters, for example `--taxdump` and `--uniprot_db`.
 - `viper-cpu`
   - MPCDF Viper CPU profile; launch from `viper05i`.
-  - Compute tasks use Slurm. SRA metadata resolution and both `DOWNLOAD_SRR`
-    uses run locally with one CPU and at most 16 GB each; no more than two run
-    at once.
+  - Compute tasks use Slurm. SRA metadata resolution, Sandpiper, and both
+    `DOWNLOAD_SRR` uses run locally with one CPU and at most 16 GB each; no more
+    than two run at once.
   - `VALIDATE_TAXA` receives 16 GB because loading the complete NCBI taxdump
     JSON creates several large in-memory Python indexes.
   - Nextflow keeps at most 250 Slurm tasks outstanding by default, leaving

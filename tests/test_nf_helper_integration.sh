@@ -59,6 +59,7 @@ assert_file_contains "$REPO_ROOT/conf/viper-cpu.config" "withName: VALIDATE_TAXA
 assert_file_contains "$REPO_ROOT/conf/viper-cpu.config" "memory = 16.GB"
 assert_file_contains "$REPO_ROOT/conf/viper-cpu.config" "DOWNLOAD_SRA_METADATA"
 assert_file_contains "$REPO_ROOT/conf/viper-cpu.config" "RESOLVE_SRR_METADATA"
+assert_file_contains "$REPO_ROOT/conf/viper-cpu.config" "SANDPIPER"
 assert_file_contains "$REPO_ROOT/conf/viper-cpu.config" "DOWNLOAD_SRR"
 assert_file_contains "$REPO_ROOT/conf/viper-cpu.config" "executor = 'local'"
 assert_file_contains "$REPO_ROOT/nextflow.config" "includeConfig \"\${projectDir}/conf/oist.config\""
