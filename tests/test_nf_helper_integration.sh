@@ -49,6 +49,43 @@ assert_site_local_checks() {
     assert_file_contains "$config_file" "memory = 32.GB"
 }
 
+assert_process_block_contains() {
+    # Assert within one named process block rather than matching another selector.
+    local config_file=$1
+    local selector=$2
+    local expected=$3
+    local block
+
+    block="$(
+        awk -v selector="$selector" '
+        index($0, selector) {
+            capture = 1
+        }
+        capture {
+            print
+            opening_line = $0
+            closing_line = $0
+            depth += gsub(/\{/, "{", opening_line)
+            depth -= gsub(/\}/, "}", closing_line)
+            if (depth == 0) {
+                exit
+            }
+        }
+        ' "$config_file"
+    )"
+
+    [ -n "$block" ] || fail "expected $config_file to contain selector $selector"
+    grep -F -- "$expected" <<<"$block" >/dev/null 2>&1 \
+        || fail "expected $selector in $config_file to contain $expected"
+}
+
+assert_download_srr_runs_local() {
+    local config_file=$1
+
+    assert_process_block_contains "$config_file" "withName: DOWNLOAD_SRR {" "executor = 'local'"
+    assert_process_block_contains "$config_file" "withName: DOWNLOAD_SRR {" "scratch = false"
+}
+
 assert_file_contains "$REPO_ROOT/.gitmodules" "path = external/nf-helper"
 assert_file_contains "$REPO_ROOT/.gitmodules" "url = https://github.com/asuq/nf-helper.git"
 assert_path_exists "$REPO_ROOT/external/nf-helper/conf/sites/oist.config"
@@ -68,6 +105,10 @@ assert_file_contains "$REPO_ROOT/conf/viper-cpu.config" "external/nf-helper/conf
 assert_site_local_checks "$REPO_ROOT/conf/oist.config"
 assert_site_local_checks "$REPO_ROOT/conf/gwdg.config"
 assert_site_local_checks "$REPO_ROOT/conf/marmic.config"
+assert_download_srr_runs_local "$REPO_ROOT/conf/oist.config"
+assert_download_srr_runs_local "$REPO_ROOT/conf/gwdg.config"
+assert_download_srr_runs_local "$REPO_ROOT/conf/marmic.config"
+assert_download_srr_runs_local "$REPO_ROOT/conf/viper-cpu.config"
 assert_file_contains "$REPO_ROOT/conf/viper-cpu.config" "'viper-cpu' {"
 assert_file_contains "$REPO_ROOT/conf/viper-cpu.config" "withName: VALIDATE_TAXA"
 assert_file_contains "$REPO_ROOT/conf/viper-cpu.config" "memory = 16.GB"
@@ -81,13 +122,11 @@ assert_file_contains "$REPO_ROOT/bin/run_singlem.sh" '--threads "$cpus"'
 assert_file_contains "$REPO_ROOT/conf/viper-cpu.config" "DOWNLOAD_SRA_METADATA"
 assert_file_contains "$REPO_ROOT/conf/viper-cpu.config" "RESOLVE_SRR_METADATA"
 assert_file_contains "$REPO_ROOT/conf/viper-cpu.config" "SANDPIPER"
-assert_file_contains "$REPO_ROOT/conf/viper-cpu.config" "withName: DOWNLOAD_SRR"
-assert_file_contains "$REPO_ROOT/conf/viper-cpu.config" "executor = 'local'"
 assert_file_contains "$REPO_ROOT/nextflow.config" "download_srr_max_forks = 2"
-assert_file_contains "$REPO_ROOT/nextflow.config" "maxForks = params.download_srr_max_forks as int"
-assert_file_contains "$REPO_ROOT/nextflow.config" "cpus   = 1"
-assert_file_contains "$REPO_ROOT/nextflow.config" "memory = { [ 8.GB, params.resource_memory_limit() ].min() }"
-assert_file_contains "$REPO_ROOT/nextflow.config" "time   = { params.resource_time_limit() }"
+assert_process_block_contains "$REPO_ROOT/nextflow.config" "withName: DOWNLOAD_SRR {" "maxForks = params.download_srr_max_forks as int"
+assert_process_block_contains "$REPO_ROOT/nextflow.config" "withName: DOWNLOAD_SRR {" "cpus   = 1"
+assert_process_block_contains "$REPO_ROOT/nextflow.config" "withName: DOWNLOAD_SRR {" "memory = { [ 8.GB, params.resource_memory_limit() ].min() }"
+assert_process_block_contains "$REPO_ROOT/nextflow.config" "withName: DOWNLOAD_SRR {" "time   = { params.resource_time_limit() }"
 assert_file_contains "$REPO_ROOT/nextflow.config" "includeConfig \"\${projectDir}/conf/oist.config\""
 assert_file_contains "$REPO_ROOT/nextflow.config" "includeConfig \"\${projectDir}/conf/gwdg.config\""
 assert_file_contains "$REPO_ROOT/nextflow.config" "includeConfig \"\${projectDir}/conf/marmic.config\""
