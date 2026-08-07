@@ -1,0 +1,62 @@
+software	version	scope	notes
+Nextflow	26.04.6	runtime	Pixi, run.sh, and workflow manifest target
+python-root	3.12.13	runtime	Latest compatible Python 3.12 lock for linux-64 and osx-arm64
+Apptainer	1.4.3	runtime	Viper host module intentionally retained
+Miniforge	26.3.2-3	base	All custom images use the pinned linux/amd64 base digest
+singlem	0.21.3	container	SingleM and Sandpiper processes
+fastp	1.3.6	container	Short-read preprocessing
+spades	4.3.0	container	metaSPAdes and hybrid Unicycler assembly
+unicycler	0.5.1	container	Hybrid assembly compatibility release
+python-unicycler	3.10	container	Custom Unicycler environment
+flye	2.9.6	container	Nanopore, PacBio CLR, and HiFi assembly
+myloasm	0.6.0	container	Long-read metagenome assembly
+diamond	2.2.5	container	Protein alignment
+blobtoolkit	4.5.0	container	Official GenomeHubs image
+bowtie2	2.5.5	container	Short-read assembly mapping
+minimap2	2.31	container	Long-read assembly mapping
+samtools-mapping	1.24	container	Mapping image alignment processing
+iseq	1.9.8	container	SRA orchestration
+sra-toolkit	3.4.1	container	SRA metadata and read download
+aria2	1.37.0	container	iSeq transfer dependency
+pigz	2.8	container	iSeq compression dependency
+pbzip2	1.1.13	container	iSeq compression dependency
+python-taxa	3.12	container	Taxonomy helper runtime
+biopython-taxa	1.88	container	Taxonomy helper library
+numpy-taxa	2.5.1	container	Taxonomy helper library
+openpyxl-taxa	3.1.5	container	Taxonomy helper library
+pandas-taxa	3.0.5	container	Taxonomy helper library
+pyyaml-taxa	6.0.3	container	Taxonomy helper library
+ujson-taxa	5.13.0	container	Taxonomy helper library
+metabat2	2.18	container	Latest stable MetaBAT2 release, excluding unreleased snapshot
+comebin	1.0.4	container	CPU and compatibility-frozen GPU binning
+python-comebin	3.7	container	Compatibility-frozen COMEBin runtime
+pytorch-comebin-gpu	1.13.1	container	Compatibility-frozen COMEBin GPU runtime
+cuda-comebin	11.7	container	PyTorch CUDA build metadata; no hardware execution claim
+vamb	5.0.4	container	CPU and compatibility-frozen GPU binning
+python-vamb	3.10	container	Compatibility-frozen VAMB GPU runtime
+numpy-vamb	1.26.4	container	VAMB 5.0.4 exact dependency
+pyhmmer-vamb	0.10.15	container	VAMB 5.0.4 exact dependency
+pyrodigal-vamb	3.6.3	container	VAMB 5.0.4 exact dependency
+psutil-vamb	5.9.8	container	PyHMMER-compatible VAMB dependency
+scikit-learn-vamb	1.6.1	container	VAMB 5.0.4 exact dependency
+pytorch-vamb-gpu	2.6.0	container	Compatibility-frozen VAMB GPU runtime
+cuda-vamb	12.4	container	PyTorch CUDA build metadata; no hardware execution claim
+lorbin	0.1.0	container	Pinned upstream commit e35c65b3a97fe225b04dc0beaddb85fcc4a1af7c
+python-lorbin	3.10	container	Compatibility-frozen LorBin runtime
+biopython-lorbin	1.81	container	Compatibility-frozen LorBin dependency
+hmmer-lorbin	3.1b2	container	Compatibility-frozen LorBin dependency
+prodigal-lorbin	2.6.3	container	Compatibility-frozen LorBin dependency
+bedtools-lorbin	2.26.0	container	Compatibility-frozen LorBin dependency
+samtools-lorbin	1.15.1	container	Compatibility-frozen LorBin dependency
+numpy-lorbin	1.23.3	container	Compatibility-frozen LorBin dependency
+pandas-lorbin	2.2.2	container	Compatibility-frozen LorBin dependency
+scikit-learn-lorbin	1.1.2	container	Compatibility-frozen LorBin dependency
+scipy-lorbin	1.13.1	container	Compatibility-frozen LorBin dependency
+joblib-lorbin	1.4.2	container	Compatibility-frozen LorBin dependency
+pytorch-lorbin-cpu	1.11.0	container	Compatibility-frozen LorBin CPU runtime
+pytorch-lorbin-gpu	2.6.0	container	Compatibility-frozen LorBin GPU runtime
+cuda-lorbin	12.4	container	PyTorch CUDA build metadata; no hardware execution claim
+semibin	2.4.1	container	CPU binning
+rosella	0.5.7	container	CPU binning
+das-tool	1.1.7	container	Bin refinement
+binette	1.2.1	container	Bin refinement

@@ -1,4 +1,4 @@
-FROM condaforge/mambaforge:24.9.2-0
+FROM condaforge/miniforge3:26.3.2-3@sha256:95195a50e20f7929a31a68ea407cefe117423258639efb6b66f0518e4b86f8ee
 
 ARG CONDA_ENV_NAME='taxa'
 ENV CONDA_DIR=/opt/conda \
@@ -10,13 +10,13 @@ WORKDIR /work
 
 RUN mamba create -y -n "${CONDA_ENV_NAME}" \
     -c bioconda -c conda-forge \
-    "python>=3.12" \
-    "biopython" \
-    "numpy" \
-    "openpyxl" \
-    "pandas" \
-    "pyyaml" \
-    "ujson" \
+    "python=3.12" \
+    "biopython=1.88" \
+    "numpy=2.5.1" \
+    "openpyxl=3.1.5" \
+    "pandas=3.0.5" \
+    "pyyaml=6.0.3" \
+    "ujson=5.13.0" \
     && mamba clean --all --yes
 
 CMD ["/bin/bash"]

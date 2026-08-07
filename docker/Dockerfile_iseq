@@ -1,4 +1,4 @@
-FROM condaforge/mambaforge:24.9.2-0
+FROM condaforge/miniforge3:26.3.2-3@sha256:95195a50e20f7929a31a68ea407cefe117423258639efb6b66f0518e4b86f8ee
 
 ARG CONDA_ENV_NAME='iseq'
 ENV CONDA_DIR=/opt/conda \

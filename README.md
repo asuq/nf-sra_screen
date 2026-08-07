@@ -1,6 +1,6 @@
 # nf-sra_screen
 
-[![Nextflow](https://img.shields.io/badge/version-%3E%3D26.04.0-green?style=flat&logo=nextflow&logoColor=white&color=%230DC09D&link=https%3A%2F%2Fnextflow.io)](https://www.nextflow.io/)
+[![Nextflow](https://img.shields.io/badge/version-%3E%3D26.04.6-green?style=flat&logo=nextflow&logoColor=white&color=%230DC09D&link=https%3A%2F%2Fnextflow.io)](https://www.nextflow.io/)
 [![run with docker](https://img.shields.io/badge/run%20with-docker-0db7ed?labelColor=000000&logo=docker)](https://www.docker.com/)
 [![run with singularity](https://img.shields.io/badge/run%20with-singularity-1d355c.svg?labelColor=000000)](https://sylabs.io/docs/)
 <!-- [![run with conda](http://img.shields.io/badge/run%20with-conda-3EB049?labelColor=000000&logo=anaconda)](https://docs.conda.io/en/latest/) -->
@@ -73,7 +73,7 @@ There is also a standalone binning entrypoint, `binning.nf`, for cases where you
 
 ### Requirements
 
-- **Nextflow**: `>= 26.04.0`
+- **Nextflow**: `>= 26.04.6`
 - **Container backend**:
   - Docker, or
   - Singularity / Apptainer
@@ -585,24 +585,36 @@ To reuse this pattern:
 
 ### Core tools (via containers)
 - iSeq 1.9.8 with SRA Toolkit 3.4.1
-- Sandpiper inputs, SingleM 0.20.3
-- DIAMOND 2.1.24
-- BlobToolKit 4.4.6
-- fastp 1.3.3
-- metaSPAdes / SPAdes 3.15.5
+- Sandpiper inputs, SingleM 0.21.3
+- DIAMOND 2.2.5
+- BlobToolKit 4.5.0
+- fastp 1.3.6
+- metaSPAdes / SPAdes 4.3.0
 - Flye 2.9.6
-- myloasm 0.5.1
-- bowtie2 2.5.5, minimap2 2.30, samtools 1.23.1
+- myloasm 0.6.0
+- bowtie2 2.5.5, minimap2 2.31, samtools 1.24
 - MetaBAT2 2.18
 - COMEBin 1.0.4
 - VAMB 5.0.4
 - LorBin 0.1.0
-- SemiBin 2.2.1
+- SemiBin 2.4.1
 - Rosella 0.5.7
 - DAS Tool 1.1.7
 - Binette 1.2.1
 
-GPU mode on GWDG uses patched CUDA-enabled images for COMEBin, VAMB, and HiFi-only LorBin. SemiBin uses its pretrained environment model on CPU.
+GPU mode on GWDG uses compatibility-pinned CUDA images for COMEBin, VAMB, and
+HiFi-only LorBin. These images were cross-built for `linux/amd64` and validated
+by package imports and CUDA build metadata; GPU hardware and numerical execution
+remain to be validated on the target cluster. SemiBin uses its pretrained
+environment model on CPU.
+
+Every process image is configured with a versioned tag and immutable digest.
+The [0.4.0 software provenance](docker/provenance/0.4.0/README.md) records the
+direct versions, image digests, build/verification scope, and complete Conda and
+pip inventories for the eight custom images. Database and reference assets,
+including the existing Sandpiper and GTDB filenames, are intentionally unchanged;
+their refresh and end-to-end reference-dependent validation are deferred to the
+future `db_prep` work.
 
 <!-- ## Citations -->
 

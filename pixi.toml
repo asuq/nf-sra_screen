@@ -4,7 +4,7 @@ channels = ["conda-forge", "bioconda"]
 platforms = ["osx-arm64", "linux-64"]
 
 [dependencies]
-nextflow = "26.04.*"
+nextflow = "==26.04.6"
 python = "3.12.*"
 
 [tasks]
@@ -12,5 +12,7 @@ test-binning-soft-failure = "bash tests/test_binning_soft_failure.sh"
 test-binning-summary-rows = "bash tests/test_binning_summary_rows.sh"
 test-cleanup = "bash tests/test_cleanup_processed_sample_workdirs.sh"
 test-helper-integration = "bash tests/test_nf_helper_integration.sh"
+test-container-provenance = "python tests/test_container_provenance.py"
+test-config-profiles = "bash tests/test_config_profiles.sh"
 test-viper-config = "HOSTNAME=viper05 NXF_APPTAINER_CACHEDIR=/ptmp/pixi-test/apptainer-cache NXF_SYNTAX_PARSER=v2 nextflow config -profile viper-cpu >/dev/null"
-test = { depends-on = ["test-binning-soft-failure", "test-binning-summary-rows", "test-cleanup", "test-helper-integration", "test-viper-config"] }
+test = { depends-on = ["test-binning-soft-failure", "test-binning-summary-rows", "test-cleanup", "test-helper-integration", "test-container-provenance", "test-config-profiles", "test-viper-config"] }

@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-export NXF_VER=25.04.8
+export NXF_VER=26.04.6
 
 # ------------------------------------------------------------------
 # User settings
@@ -14,7 +14,7 @@ GWDG_QOS_HELPER_OPTS=(--quiet)
 QOS_HELPER_PID=""
 nf_exit=0
 
-# mamba activate /bucket/HusnikU/Conda-envs/nextflow_v25.04.8
+# mamba activate /bucket/HusnikU/Conda-envs/nextflow_v26.04.6
 # module load singularity
 
 # ------------------------------------------------------------------

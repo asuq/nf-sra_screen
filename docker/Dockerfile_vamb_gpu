@@ -1,4 +1,4 @@
-FROM condaforge/mambaforge:24.9.2-0
+FROM condaforge/miniforge3:26.3.2-3@sha256:95195a50e20f7929a31a68ea407cefe117423258639efb6b66f0518e4b86f8ee
 
 ARG CONDA_ENV_NAME='vamb'
 
@@ -13,17 +13,40 @@ RUN mamba create -y -n "${CONDA_ENV_NAME}" \
     -c conda-forge -c bioconda \
     "python=3.10" \
     "vamb=5.0.4" \
+    "pytorch=2.6.0" \
+    "numpy=1.26.4" \
+    "pyhmmer=0.10.15" \
+    "pyrodigal=3.6.3" \
+    "scikit-learn=1.6.1" \
     "pip" \
-    && pip install --no-cache-dir --force-reinstall \
-      --index-url https://download.pytorch.org/whl/cu124 \
-      "torch==2.6.0" \
     && mamba clean --all --yes
 
+RUN pip install --no-cache-dir --force-reinstall \
+      --index-url https://download.pytorch.org/whl/cu124 \
+      "torch==2.6.0"
+
+# Conda currently packages the 3.6.3 source as 3.6.3.post1, while VAMB 5.0.4
+# declares an exact 3.6.3 requirement. Its pinned PyHMMER also requires psutil
+# 5.x, so correct both solver selections and verify all installed metadata.
+RUN pip install --no-cache-dir --force-reinstall \
+      "pyrodigal==3.6.3" \
+      "psutil==5.9.8" \
+    && pip check
+
 RUN python - <<'PY'
-"""Validate that the image contains CUDA-enabled PyTorch."""
+"""Validate the compatibility-frozen VAMB GPU stack."""
+from importlib.metadata import version
+
 import torch
 
-assert torch.version.cuda is not None, "PyTorch CUDA runtime is missing"
+assert torch.__version__.startswith("2.6.0"), torch.__version__
+assert torch.version.cuda == "12.4", torch.version.cuda
+assert version("vamb") == "5.0.4", version("vamb")
+assert version("numpy") == "1.26.4", version("numpy")
+assert version("pyhmmer") == "0.10.15", version("pyhmmer")
+assert version("pyrodigal") == "3.6.3", version("pyrodigal")
+assert version("psutil") == "5.9.8", version("psutil")
+assert version("scikit-learn") == "1.6.1", version("scikit-learn")
 print(f"torch={torch.__version__} cuda={torch.version.cuda}")
 PY
 
