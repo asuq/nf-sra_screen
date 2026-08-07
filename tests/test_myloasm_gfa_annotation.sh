@@ -82,6 +82,7 @@ run_wrapper() {
   local attempt=$3
   local max_retries=$4
   local mylotools_exit=$5
+  local read_type=$6
 
   mkdir -p "$work_dir"
   printf '@read\nACGT\n+\nIIII\n' > "$work_dir/reads.fastq"
@@ -92,7 +93,8 @@ run_wrapper() {
     FAKE_MYLOTOOLS_ARGS="$work_dir/mylotools.args" \
     FAKE_MYLOTOOLS_EXIT="$mylotools_exit" \
     PATH="$fake_bin:$REPO_ROOT/bin:$PATH" \
-      run_myloasm_hifi.sh \
+      run_myloasm.sh \
+        --read-type "$read_type" \
         --reads reads.fastq \
         --cpus 3 \
         --attempt "$attempt" \
@@ -105,7 +107,7 @@ test_successful_annotation() {
   local work_dir="$TMP_ROOT/success"
 
   write_fake_tools "$fake_bin"
-  run_wrapper "$work_dir" "$fake_bin" 1 2 0
+  run_wrapper "$work_dir" "$fake_bin" 1 2 0 hifi
 
   assert_file_exists "$work_dir/assembly.fasta"
   assert_file_exists "$work_dir/assembly.gfa"
@@ -115,6 +117,13 @@ test_successful_annotation() {
   assert_file_missing "$work_dir/FAIL.note"
 
   diff -u <(printf '%s\n' \
+    reads.fastq \
+    -o . \
+    -t 3 \
+    --hifi) \
+    "$work_dir/myloasm.args"
+
+  diff -u <(printf '%s\n' \
     annotate-gfa \
     --gfa final_contig_graph.gfa \
     --fasta assembly.fasta \
@@ -122,12 +131,44 @@ test_successful_annotation() {
     "$work_dir/mylotools.args"
 }
 
+test_nanopore_mode() {
+  local fake_bin="$TMP_ROOT/fake-nanopore-bin"
+  local work_dir="$TMP_ROOT/nanopore"
+
+  write_fake_tools "$fake_bin"
+  run_wrapper "$work_dir" "$fake_bin" 1 2 0 nanopore
+
+  assert_file_exists "$work_dir/assembly.fasta"
+  assert_file_exists "$work_dir/assembly.gfa"
+  assert_file_missing "$work_dir/FAIL.note"
+
+  diff -u <(printf '%s\n' \
+    reads.fastq \
+    -o . \
+    -t 3) \
+    "$work_dir/myloasm.args"
+}
+
+test_unsupported_read_type() {
+  local fake_bin="$TMP_ROOT/fake-unsupported-bin"
+  local work_dir="$TMP_ROOT/unsupported"
+
+  write_fake_tools "$fake_bin"
+  if run_wrapper "$work_dir" "$fake_bin" 1 2 0 pacbio > "$work_dir.log" 2>&1; then
+    fail "unsupported Myloasm read type unexpectedly succeeded"
+  fi
+
+  assert_file_missing "$work_dir/myloasm.args"
+  assert_file_contains "$work_dir.log" \
+    "run_myloasm.sh: unsupported --read-type 'pacbio'; expected nanopore or hifi"
+}
+
 test_annotation_retry_failure() {
   local fake_bin="$TMP_ROOT/fake-retry-bin"
   local work_dir="$TMP_ROOT/retry"
 
   write_fake_tools "$fake_bin"
-  if run_wrapper "$work_dir" "$fake_bin" 1 2 42 > "$work_dir.log" 2>&1; then
+  if run_wrapper "$work_dir" "$fake_bin" 1 2 42 hifi > "$work_dir.log" 2>&1; then
     fail "annotation retry attempt unexpectedly succeeded"
   fi
 
@@ -142,7 +183,7 @@ test_annotation_final_soft_failure() {
   local work_dir="$TMP_ROOT/final"
 
   write_fake_tools "$fake_bin"
-  if ! run_wrapper "$work_dir" "$fake_bin" 2 2 42 > "$work_dir.log" 2>&1; then
+  if ! run_wrapper "$work_dir" "$fake_bin" 2 2 42 hifi > "$work_dir.log" 2>&1; then
     sed -n '1,120p' "$work_dir.log" >&2
     fail "final annotation soft-failure attempt failed"
   fi
@@ -153,6 +194,8 @@ test_annotation_final_soft_failure() {
 }
 
 test_successful_annotation
+test_nanopore_mode
+test_unsupported_read_type
 test_annotation_retry_failure
 test_annotation_final_soft_failure
 

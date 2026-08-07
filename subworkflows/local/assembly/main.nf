@@ -56,8 +56,8 @@ workflow ASSEMBLY {
     metaflye_hifi_reads_channel = selected_reads.filter { sra, srr, platform, model, strategy, read_type, assembler, reads ->
       read_type.equalsIgnoreCase('hifi') && assembler == 'metaflye'
     }
-    myloasm_hifi_reads_channel = selected_reads.filter { sra, srr, platform, model, strategy, read_type, assembler, reads ->
-      read_type.equalsIgnoreCase('hifi') && assembler == 'myloasm'
+    myloasm_reads_channel = selected_reads.filter { sra, srr, platform, model, strategy, read_type, assembler, reads ->
+      (read_type.equalsIgnoreCase('nanopore') || read_type.equalsIgnoreCase('hifi')) && assembler == 'myloasm'
     }
 
     short_reads_channel = channel.empty()
@@ -78,7 +78,7 @@ workflow ASSEMBLY {
     metaflye_nanopore_out  = METAFLYE_NANO(metaflye_nanopore_reads_channel)
     metaflye_pacbio_out    = METAFLYE_PACBIO(metaflye_pacbio_reads_channel)
     metaflye_hifi_out      = METAFLYE_HIFI(metaflye_hifi_reads_channel)
-    myloasm_out            = MYLOASM(myloasm_hifi_reads_channel)
+    myloasm_out            = MYLOASM(myloasm_reads_channel)
 
     // Step 6: DIAMOND
     assembly_fasta_channel = channel.empty()
@@ -97,7 +97,7 @@ workflow ASSEMBLY {
                   .mix(metaflye_nanopore_reads_channel)
                   .mix(metaflye_pacbio_reads_channel)
                   .mix(metaflye_hifi_reads_channel)
-                  .mix(myloasm_hifi_reads_channel)
+                  .mix(myloasm_reads_channel)
 
     assembly_fasta_for_mapping_by_sample_key = assembly_fasta_channel.map { sra, srr, platform, model, strategy, read_type, assembler, assembly_fasta ->
       tuple([sra, srr, read_type, assembler], [platform, model, strategy, assembly_fasta])

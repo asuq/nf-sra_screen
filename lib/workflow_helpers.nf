@@ -217,7 +217,7 @@ def selectedAssemblerTokens() {
 def supportedAssemblersForReadType(readType) {
   def supportedByReadType = [
     short:    ['metaspades', 'unicycler'],
-    nanopore: ['metaflye'],
+    nanopore: ['metaflye', 'myloasm'],
     pacbio:   ['metaflye'],
     hifi:     ['metaflye', 'myloasm']
   ]

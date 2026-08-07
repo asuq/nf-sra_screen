@@ -37,8 +37,8 @@ the pipeline will:
 2. Optionally, with `--taxa`, pre-screen samples using Sandpiper and/or SingleM against a GTDB-derived phylum list.
 3. (Assembly mode; default) Assemble reads with:
    - **metaSPAdes** for short reads
-   - **metaFlye** for ONT and PacBio CLR
-   - **myloasm** for PacBio HiFi
+   - **metaFlye** by default for ONT and PacBio CLR
+   - **myloasm** for PacBio HiFi and, when explicitly selected, ONT R10
    - optional multi-assembler selection with `--assemblers`
 4. (Assembly mode) Annotate contigs with DIAMOND against UniProt and summarise with BlobToolKit.
 5. Optionally, with `--taxa`, extract contigs matching user-specified taxa into per-taxon FASTA and ID lists.
@@ -146,7 +146,7 @@ D48	pacbio	d48.fastq.gz
 - `sample`: logical sample identifier.
 - `read_type`: read class used for assembler selection. Use one of:
     - `short`: short paired-end reads (Illumina, BGISEQ, DNBSEQ) (metaSPAdes),
-    - `nanopore`: Nanopore reads (metaFlye),
+    - `nanopore`: Nanopore reads (metaFlye by default; myloasm can be selected explicitly for R10 reads),
     - `pacbio`: PacBio CLR reads (metaFlye),
     - `hifi`: PacBio HiFi reads (myloasm).
 - `reads`: comma-separated list of FASTQ paths (absolute or relative); at least one file per row is required. Two or more files are treated as paired-end for SingleM/metaSPAdes, one as single-end.
@@ -234,6 +234,23 @@ nextflow run asuq/nf-sra_screen \
   --outdir nf-sra_screen_results
 ```
 
+### Nanopore R10 assembly with Myloasm
+
+```bash
+nextflow run asuq/nf-sra_screen \
+  -profile <docker/singularity/local/slurm/...> \
+  --assembler myloasm \
+  --fastq_tsv fastq.tsv \
+  --taxdump /path/to/ncbi_taxdump_dir \
+  --uniprot_db /path/to/uniprot.dmnd \
+  --outdir nf-sra_screen_myloasm_results
+```
+
+`--assembler myloasm` is an explicit opt-in for Nanopore R10 reads; the
+pipeline cannot infer pore chemistry from SRA metadata or the FASTQ samplesheet.
+The default `--assembler auto` continues to use metaFlye for Nanopore. Selecting
+`--assembler all` runs both metaFlye and myloasm for Nanopore samples.
+
 ### Standalone binning example
 ```bash
 nextflow run binning.nf \
@@ -252,7 +269,7 @@ nextflow run binning.nf \
 - `--taxdump`        Directory containing NCBI taxdump files; `jsonify_taxdump.py` will create `taxdump.json`
 - `--uniprot_db`     UniProt DIAMOND database (`.dmnd`) (Follow [blobtools tutorial](https://blobtoolkit.genomehubs.org/install/))
 - `--taxa`           (Optional) CSV with rank,taxa (NCBI or GTDB names). Use it if you want taxonomy screening
-- `--assemblers`     (Optional) Assembly tools: `auto`, `all`, or comma-separated names. Default `auto` uses `metaspades` for short reads, `metaflye` for Nanopore/PacBio CLR, and `myloasm` for HiFi. Supported tools are `metaspades`, `unicycler`, `metaflye`, and `myloasm`; aliases `spades` and `flye` are accepted.
+- `--assemblers`     (Optional) Assembly tools: `auto`, `all`, or comma-separated names. Default `auto` uses `metaspades` for short reads, `metaflye` for Nanopore/PacBio CLR, and `myloasm` for HiFi. Explicit `myloasm` selection also supports Nanopore R10; `all` runs both `metaflye` and `myloasm` for Nanopore. Supported tools are `metaspades`, `unicycler`, `metaflye`, and `myloasm`; aliases `spades` and `flye` are accepted.
 - `--assembler`      Alias for `--assemblers`.
 - `--gtdb_ncbi_map`  (Required with `--taxa`) Directory with ncbi_vs_gtdb_bacteria.xlsx and ncbi_vs_gtdb_archaea.xlsx for taxonomy screening
 - `--sandpiper_db`   (Required with `--taxa` and `--sra`) Directory with Sandpiper summary tables for SRA taxonomy screening

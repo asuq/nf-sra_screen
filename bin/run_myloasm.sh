@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Usage:
-#   run_myloasm_hifi.sh \
+#   run_myloasm.sh \
+#     --read-type nanopore|hifi \
 #     --reads READS \
 #     --cpus N \
 #     --attempt A \
@@ -17,6 +18,7 @@ set -euo pipefail
 cpus=1
 attempt=0
 max_retries=1
+read_type=""
 read_files=()
 
 cleanup() {
@@ -48,7 +50,7 @@ while [[ $# -gt 0 ]]; do
       while [[ $# -gt 0 ]]; do
         # Stop when we hit the next flag
         case "$1" in
-          --sandpiper-decision|--valid-taxa|--singlem-db|--cpus|--attempt|--max-retries)
+          --sandpiper-decision|--valid-taxa|--singlem-db|--read-type|--cpus|--attempt|--max-retries)
             break
             ;;
           *)
@@ -58,6 +60,7 @@ while [[ $# -gt 0 ]]; do
         esac
       done
       ;;
+    --read-type)    read_type="$2"; shift 2 ;;
     --cpus)        cpus="$2"; shift 2 ;;
     --attempt)     attempt="$2"; shift 2 ;;
     --max-retries) max_retries="$2"; shift 2 ;;
@@ -69,9 +72,27 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ ${#read_files[@]} -eq 0 ]]; then
-  echo "run_myloasm_hifi.sh: missing --reads" >&2
+  echo "run_myloasm.sh: missing --reads" >&2
   exit 1
 fi
+
+mode_args=()
+case "$read_type" in
+  nanopore)
+    # Nanopore R10 is Myloasm's default mode.
+    ;;
+  hifi)
+    mode_args+=(--hifi)
+    ;;
+  "")
+    echo "run_myloasm.sh: missing --read-type" >&2
+    exit 1
+    ;;
+  *)
+    echo "run_myloasm.sh: unsupported --read-type '$read_type'; expected nanopore or hifi" >&2
+    exit 1
+    ;;
+esac
 
 readonly work_dir=$PWD
 trap cleanup EXIT
@@ -87,7 +108,7 @@ fail() {
 }
 
 # Run myloasm
-if ! myloasm "${read_files[@]}" -o . -t "${cpus}" --hifi; then
+if ! myloasm "${read_files[@]}" -o . -t "${cpus}" "${mode_args[@]}"; then
   fail "myloasm: assembly failed"
 fi
 

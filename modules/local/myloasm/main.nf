@@ -25,7 +25,8 @@ process MYLOASM {
 
     script:
     """
-    run_myloasm_hifi.sh \\
+    run_myloasm.sh \\
+      --read-type ${read_type.toLowerCase()} \\
       --cpus ${task.cpus} \\
       --attempt ${task.attempt} \\
       --max-retries ${params.max_retries} \\

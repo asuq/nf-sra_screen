@@ -37,6 +37,8 @@ def helpMessage() {
     --binning       Also run BINNING after ASSEMBLY
     --assemblers    Assembly tools: auto, all, or comma-separated tool names
                     (default: auto; aliases: --assembler, spades, flye)
+                    Myloasm supports Nanopore R10 and PacBio HiFi reads;
+                    Nanopore auto selection remains MetaFlye
     --binners       Comma-separated binners (default: all-compatible; allowed: all-compatible,auto,metabat,semibin,rosella,comebin,vamb,lorbin)
     --refiners      Comma-separated refiners (default: binette; allowed: dastool,binette)
     --checkm2_db    CheckM2 DIAMOND database required with --refiners binette
