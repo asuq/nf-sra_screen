@@ -6,6 +6,7 @@ images=(
   "mapping|quay.io/asuq1617/nf-sra_screen_mapping:0.4.0@sha256:c7b08a1057c79e1fa3f3628531ef661c683b4638cd43d6955523b7d4b1b8f0ff"
   "taxa|quay.io/asuq1617/nf-sra_screen_taxa:0.4.0@sha256:6366a34b26b324e1de543b26bb9d91799433ccddea254e0e8e29c32ca964ba44"
   "unicycler|quay.io/asuq1617/nf-sra_screen_unicycler:0.4.0-spades4.3.0@sha256:8b102ba4eb033f9efa7eeff7dc2a0d8aae6027ee6874a8efd20ccd77ce063717"
+  "myloasm|quay.io/asuq1617/nf-sra_screen_myloasm:0.4.0-myloasm0.6.0-mylotools2.1.0@sha256:f39e4ca09704cf855db549af22c732dfb8b43b4ed1efe7003b71a6682989bdc2"
   "iseq|quay.io/asuq1617/iseq:1.9.8-sratools3.4.1-r1@sha256:59e96013353dbecddf483aac16591c591b429219b7857a9b277c3bfcb1060ed1"
   "comebin|quay.io/asuq1617/comebin:1.0.4-cuda117-r1@sha256:114a1eb3804e5636b4af07262c078138963b1a2f2ce9a5be73f367dd420b45d6"
   "vamb|quay.io/asuq1617/vamb:5.0.4-torch2.6.0-cuda124-r1@sha256:f102f9aedca1d3b2681d8d1205f1f496fe194067d2d34f2b4fd7a1a107bb2ab2"
@@ -49,6 +50,37 @@ import Bio, numpy, openpyxl, pandas, yaml, ujson
         unicycler --version | grep -Fx "Unicycler v0.5.1"
         spades.py --version | grep -Fx "SPAdes genome assembler v4.3.0"
         unicycler --help >/dev/null
+      '
+      ;;
+    myloasm)
+      docker run --platform linux/amd64 --rm "${image}" bash -lc '
+        set -euo pipefail
+        test "$(myloasm --version)" = "myloasm 0.6.0"
+        test "$(mylotools --version)" = "2.1.0"
+        mylotools annotate-gfa --help >/dev/null
+        work=$(mktemp -d)
+        trap '\''rm -rf -- "${work}"'\'' EXIT
+        cd "${work}"
+        printf ">u1ctg_len-4_circular-no_depth-1-1-1_duplicated-no\nACGT\n" >assembly.fasta
+        printf "H\tVN:Z:1.0\nS\tu1ctg\t*\tLN:i:3\tDP:f:1.0\nS\tu2ctg\t*\tLN:i:5\tDP:f:2.0\na\tu1ctg,0-3\tread1\nL\tu1ctg\t+\tu2ctg\t+\t0M\n" >final_contig_graph.gfa
+        mylotools annotate-gfa \
+          --gfa final_contig_graph.gfa \
+          --fasta assembly.fasta \
+          --output assembly.gfa \
+          >/dev/null
+        python -c '\''
+from pathlib import Path
+
+lines = Path("assembly.gfa").read_text(encoding="utf-8").splitlines()
+good = next(line.split("\t") for line in lines if line.startswith("S\tu1ctg\t"))
+filtered = next(line.split("\t") for line in lines if line.startswith("S\tu2ctg\t"))
+assert good[2] == "ACGT"
+assert {"LN:i:4", "LN_GFA:i:3", "FILTERED:Z:GOOD"} <= set(good)
+assert filtered[2] == "*"
+assert {"LN:i:5", "FILTERED:Z:FAIL"} <= set(filtered)
+assert "L\tu1ctg\t+\tu2ctg\t+\t0M" in lines
+assert not any(line.startswith("a\t") for line in lines)
+'\''
       '
       ;;
     iseq)

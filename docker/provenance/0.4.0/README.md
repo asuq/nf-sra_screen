@@ -19,11 +19,15 @@ deferred to the future `db_prep` work.
 
 ## Custom builds
 
-All eight custom images were cross-built and loaded locally as `linux/amd64`
+All nine custom images were cross-built and loaded locally as `linux/amd64`
 images with Docker Buildx. Their common base is
 `condaforge/miniforge3:26.3.2-3@sha256:95195a50e20f7929a31a68ea407cefe117423258639efb6b66f0518e4b86f8ee`,
 the registry's `linux/amd64` platform digest. New versioned tags were used; no
 existing tag was overwritten.
+
+The custom Myloasm image combines Myloasm 0.6.0 with mylotools 2.1.0 so
+`final_contig_graph.gfa` can be reconciled with the polished, filtered assembly
+before the pipeline publishes `assembly.gfa`.
 
 COMEBin retains PyTorch 1.13.1/CUDA 11.7. VAMB and LorBin GPU retain PyTorch
 2.6.0/CUDA 12.4. LorBin uses upstream commit
@@ -34,7 +38,7 @@ loosened while moving from Mambaforge to Miniforge.
 
 Each custom image passed its Dockerfile build assertions and local
 version/import/CLI checks before publication. After publication,
-[`verify_custom_images.sh`](../../verify_custom_images.sh) pulled all eight by
+[`verify_custom_images.sh`](../../verify_custom_images.sh) pulled all nine by
 their tag-and-digest reference and repeated the checks. The mapping image also
 passed a tiny Bowtie2/SAMtools/minimap2 read-to-reference smoke test. Published
 manifest digests were independently resolved with Docker Buildx and match

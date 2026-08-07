@@ -10,6 +10,7 @@ images=(
   "nf-sra_screen_mapping-0.4.0|quay.io/asuq1617/nf-sra_screen_mapping:0.4.0@sha256:c7b08a1057c79e1fa3f3628531ef661c683b4638cd43d6955523b7d4b1b8f0ff|mapping"
   "nf-sra_screen_taxa-0.4.0|quay.io/asuq1617/nf-sra_screen_taxa:0.4.0@sha256:6366a34b26b324e1de543b26bb9d91799433ccddea254e0e8e29c32ca964ba44|taxa"
   "nf-sra_screen_unicycler-0.4.0-spades4.3.0|quay.io/asuq1617/nf-sra_screen_unicycler:0.4.0-spades4.3.0@sha256:8b102ba4eb033f9efa7eeff7dc2a0d8aae6027ee6874a8efd20ccd77ce063717|unicycler"
+  "nf-sra_screen_myloasm-0.4.0-myloasm0.6.0-mylotools2.1.0|quay.io/asuq1617/nf-sra_screen_myloasm:0.4.0-myloasm0.6.0-mylotools2.1.0@sha256:f39e4ca09704cf855db549af22c732dfb8b43b4ed1efe7003b71a6682989bdc2|myloasm"
   "iseq-1.9.8-sratools3.4.1-r1|quay.io/asuq1617/iseq:1.9.8-sratools3.4.1-r1@sha256:59e96013353dbecddf483aac16591c591b429219b7857a9b277c3bfcb1060ed1|iseq"
   "comebin-1.0.4-cuda117-r1|quay.io/asuq1617/comebin:1.0.4-cuda117-r1@sha256:114a1eb3804e5636b4af07262c078138963b1a2f2ce9a5be73f367dd420b45d6|comebin"
   "vamb-5.0.4-torch2.6.0-cuda124-r1|quay.io/asuq1617/vamb:5.0.4-torch2.6.0-cuda124-r1@sha256:f102f9aedca1d3b2681d8d1205f1f496fe194067d2d34f2b4fd7a1a107bb2ab2|vamb"

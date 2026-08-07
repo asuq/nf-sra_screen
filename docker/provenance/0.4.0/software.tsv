@@ -10,6 +10,8 @@ unicycler	0.5.1	container	Hybrid assembly compatibility release
 python-unicycler	3.10	container	Custom Unicycler environment
 flye	2.9.6	container	Nanopore, PacBio CLR, and HiFi assembly
 myloasm	0.6.0	container	Long-read metagenome assembly
+mylotools	2.1.0	container	Reconciles the Myloasm graph with the polished, filtered assembly
+python-myloasm	3.12	container	Custom Myloasm and mylotools runtime
 diamond	2.2.5	container	Protein alignment
 blobtoolkit	4.5.0	container	Official GenomeHubs image
 bowtie2	2.5.5	container	Short-read assembly mapping

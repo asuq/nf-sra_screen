@@ -591,7 +591,7 @@ To reuse this pattern:
 - fastp 1.3.6
 - metaSPAdes / SPAdes 4.3.0
 - Flye 2.9.6
-- myloasm 0.6.0
+- myloasm 0.6.0 with mylotools 2.1.0 GFA annotation
 - bowtie2 2.5.5, minimap2 2.31, samtools 1.24
 - MetaBAT2 2.18
 - COMEBin 1.0.4
@@ -611,7 +611,7 @@ environment model on CPU.
 Every process image is configured with a versioned tag and immutable digest.
 The [0.4.0 software provenance](docker/provenance/0.4.0/README.md) records the
 direct versions, image digests, build/verification scope, and complete Conda and
-pip inventories for the eight custom images. Database and reference assets,
+pip inventories for the nine custom images. Database and reference assets,
 including the existing Sandpiper and GTDB filenames, are intentionally unchanged;
 their refresh and end-to-end reference-dependent validation are deferred to the
 future `db_prep` work.

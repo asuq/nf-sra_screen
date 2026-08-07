@@ -91,10 +91,19 @@ if ! myloasm "${read_files[@]}" -o . -t "${cpus}" --hifi; then
   fail "myloasm: assembly failed"
 fi
 
-# Rename outputs
-if ! (
-  mv -v assembly_primary.fa assembly.fasta \
-  && mv -v final_contig_graph.gfa assembly.gfa
-  ); then
-  fail "myloasm: graph rename failed"
+# Rename the polished, filtered assembly to the pipeline output name.
+if ! mv -v -- assembly_primary.fa assembly.fasta; then
+  fail "myloasm: failed to rename assembly_primary.fa to assembly.fasta"
+fi
+
+# Reconcile the pre-polish graph with the final assembly. By default,
+# annotate-gfa drops per-read alignment records because their coordinates no
+# longer match the polished sequences.
+if ! mylotools annotate-gfa \
+  --gfa final_contig_graph.gfa \
+  --fasta assembly.fasta \
+  --output assembly.gfa \
+  || [[ ! -s assembly.gfa ]]; then
+  rm -f -- assembly.gfa
+  fail "myloasm: GFA annotation failed"
 fi

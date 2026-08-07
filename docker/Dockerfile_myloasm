@@ -1,0 +1,20 @@
+FROM condaforge/miniforge3:26.3.2-3@sha256:95195a50e20f7929a31a68ea407cefe117423258639efb6b66f0518e4b86f8ee
+
+ARG CONDA_ENV_NAME='myloasm'
+ENV CONDA_DIR=/opt/conda \
+    MAMBA_NO_BANNER=1 \
+    PATH=$CONDA_DIR/envs/$CONDA_ENV_NAME/bin:$PATH
+
+WORKDIR /work
+
+RUN mamba create -y -n "${CONDA_ENV_NAME}" \
+    -c bioconda -c conda-forge \
+    "myloasm==0.6.0" \
+    "mylotools==2.1.0" \
+    "python=3.12" \
+    && test "$(myloasm --version)" = "myloasm 0.6.0" \
+    && test "$(mylotools --version)" = "2.1.0" \
+    && mylotools annotate-gfa --help >/dev/null \
+    && mamba clean --all --yes
+
+CMD ["/bin/bash"]
