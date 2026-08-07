@@ -298,6 +298,8 @@ compression fallbacks therefore also run with one thread.
   - Large queue size (`queueSize=2000`) and increased resource caps.
 - `oist`
   - Includes `conf/oist.config` for OIST Deigo HPC settings.
+  - Uses Apptainer for both local and Slurm tasks; the `apptainer` executable
+    must be available on `PATH` when Nextflow is launched.
   - SRA metadata resolution, Sandpiper, and `DOWNLOAD_SRR` run in a bounded
     two-task local pool.
 - `gwdg`
