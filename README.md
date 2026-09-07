@@ -81,6 +81,10 @@ There is also a standalone binning entrypoint, `binning.nf`, for cases where you
 
 ### Database requirements
 All tools used by the pipeline are provided via containers defined in `nextflow.config`.
+Runtime images use `repository@sha256:digest` references for immutable selection
+across Docker, Singularity, and Apptainer. Apptainer's Docker transport rejects
+references that combine a tag and digest. Versioned tags are retained in the
+[release provenance](docker/provenance/0.4.0/images.tsv).
 
 - Assembly mode (default, without `--noassembly`)
   - `--taxdump`       NCBI taxdump dir (`nodes.dmp`, `names.dmp`, `taxidlineage.dmp` or classical taxdump)

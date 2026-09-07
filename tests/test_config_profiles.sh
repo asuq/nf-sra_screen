@@ -28,7 +28,7 @@ nextflow inspect -profile oist -ignore-errors . \
 import json
 import sys
 
-expected = "quay.io/asuq1617/iseq:1.9.8-sratools3.4.1-r1@sha256:59e96013353dbecddf483aac16591c591b429219b7857a9b277c3bfcb1060ed1"
+expected = "quay.io/asuq1617/iseq@sha256:59e96013353dbecddf483aac16591c591b429219b7857a9b277c3bfcb1060ed1"
 inspection = json.load(sys.stdin)
 downloads = [
     process

@@ -17,6 +17,12 @@ deferred to the future `db_prep` work.
 - [`packages/`](packages/) contains `conda list --explicit` and
   `pip freeze --all` output exported from each published custom-image digest.
 
+Runtime references in `nextflow.config` use `repository@sha256:digest` because
+Apptainer's Docker transport rejects combined tag-and-digest references.
+`images.tsv` retains versioned tags for readability; validation compares its
+repository and digest with each runtime reference, preserving the image identity.
+Docker build and verification references retain their tags and digests.
+
 ## Custom builds
 
 All nine custom images were cross-built and loaded locally as `linux/amd64`

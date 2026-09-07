@@ -12,7 +12,13 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 RELEASE = "0.4.0"
 PROVENANCE_DIR = ROOT / "docker" / "provenance" / RELEASE
-DIGEST_REF = re.compile(r"^.+:[^/@]+@sha256:[0-9a-f]{64}$")
+REPOSITORY = r"[a-z0-9.-]+(?::[0-9]+)?/(?:[a-z0-9._-]+/)*[a-z0-9._-]+"
+DIGEST_REF = re.compile(rf"{REPOSITORY}@sha256:[0-9a-f]{{64}}")
+PROVENANCE_REF = re.compile(
+    rf"(?P<repository>{REPOSITORY}):(?P<tag>[\w][\w.-]{{0,127}})"
+    r"@(?P<digest>sha256:[0-9a-f]{64})",
+    re.ASCII,
+)
 CONTAINER_ASSIGNMENT = re.compile(r'\bcontainer\s*=\s*"([^"]+)"')
 FORBIDDEN_TAGS = {"dev", "latest", "main", "master", "snapshot"}
 
@@ -38,21 +44,57 @@ def configured_images() -> set[str]:
 
 
 def assert_immutable(images: set[str]) -> None:
-    """Require a versioned tag and a sha256 digest for each image."""
+    """Require digest-only references supported by Apptainer's Docker transport."""
     for image in sorted(images):
         assert DIGEST_REF.fullmatch(image), f"mutable or malformed image ref: {image}"
-        tag = image.rsplit("@", maxsplit=1)[0].rsplit(":", maxsplit=1)[1].lower()
-        assert tag not in FORBIDDEN_TAGS, f"forbidden mutable tag in {image}"
+
+
+def provenance_runtime_ref(image: str) -> str:
+    """Validate a documented versioned reference and return its runtime identity."""
+    match = PROVENANCE_REF.fullmatch(image)
+    assert match, f"malformed provenance image ref: {image}"
+    assert match['tag'].lower() not in FORBIDDEN_TAGS, (
+        f"forbidden mutable tag in {image}"
+    )
+    return f"{match['repository']}@{match['digest']}"
+
+
+def test_reference_validation() -> None:
+    """Protect runtime syntax and preservation of provenance repository/digest."""
+    digest = "sha256:" + "a" * 64
+    for repository in ("quay.io/example/tool", "localhost:5000/example/tool"):
+        runtime = f"{repository}@{digest}"
+        tagged = f"{repository}:1.2.3@{digest}"
+        assert_immutable({runtime})
+        assert provenance_runtime_ref(tagged) == runtime
+        invalid_runtime = (
+            tagged, repository, f"{repository}:1.2.3",
+            runtime[:-1], runtime + "a", runtime.replace("a" * 64, "g" * 64),
+            runtime.replace("sha256:", "sha512:"),
+        )
+        for image in invalid_runtime:
+            try:
+                assert_immutable({image})
+            except AssertionError:
+                continue
+            raise AssertionError(f"accepted invalid runtime ref: {image}")
+        for image in (runtime, tagged[:-1], f"{repository}:latest@{digest}"):
+            try:
+                provenance_runtime_ref(image)
+            except AssertionError:
+                continue
+            raise AssertionError(f"accepted invalid provenance ref: {image}")
 
 
 def main() -> int:
     """Validate container configuration against release provenance."""
+    test_reference_validation()
     images = configured_images()
     assert_immutable(images)
 
     image_rows = read_tsv(PROVENANCE_DIR / "images.tsv")
-    documented = {row["image_ref"] for row in image_rows}
-    assert len(documented) == len(image_rows), "duplicate image_ref in images.tsv"
+    documented = {provenance_runtime_ref(row["image_ref"]) for row in image_rows}
+    assert len(documented) == len(image_rows), "duplicate repository/digest in images.tsv"
     assert images == documented, (
         f"configured but undocumented: {sorted(images - documented)}; "
         f"documented but unused: {sorted(documented - images)}"
