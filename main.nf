@@ -45,7 +45,8 @@ def helpMessage() {
     --semibin_environment  SemiBin2 pretrained environment (default: global)
     --gpu           Use GPU variants for COMEBin, VAMB, and HiFi-only LorBin
     --gpu_type      Optional GPU type for typed scheduler requests on GWDG
-    --gpus          GPU count for scheduler requests on GWDG (default: 1)
+    --gpus          GPU count for GWDG or Raven (Raven: 1, 2, or 4; default: 1)
+    --raven_gpu_constraint  Raven GPU node constraint: gpu, gpu-bw, or no-gpu-bw
     --outdir        Output directory (default: ./output)
     --max_retries   Maximum number of retries for each process (default: 3)
   """.stripIndent()

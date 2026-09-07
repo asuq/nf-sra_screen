@@ -17,4 +17,7 @@ test-myloasm-gfa-annotation = "bash tests/test_myloasm_gfa_annotation.sh"
 test-container-provenance = "python tests/test_container_provenance.py"
 test-config-profiles = "bash tests/test_config_profiles.sh"
 test-viper-config = "HOSTNAME=viper05 NXF_APPTAINER_CACHEDIR=/ptmp/pixi-test/apptainer-cache NXF_SYNTAX_PARSER=v2 nextflow config -profile viper-cpu >/dev/null"
-test = { depends-on = ["test-binning-soft-failure", "test-binning-summary-rows", "test-cleanup", "test-helper-integration", "test-assembler-selection", "test-myloasm-gfa-annotation", "test-container-provenance", "test-config-profiles", "test-viper-config"] }
+test-raven-config = "HOSTNAME=raven03 NXF_APPTAINER_CACHEDIR=/ptmp/pixi-test/apptainer-cache NXF_SYNTAX_PARSER=v2 nextflow config -profile raven >/dev/null"
+test-raven-valid-gpu-request = "HOSTNAME=raven03 NXF_APPTAINER_CACHEDIR=/ptmp/pixi-test/apptainer-cache NXF_SYNTAX_PARSER=v2 nextflow run main.nf -profile raven --help --gpus 2 --raven_gpu_constraint gpu-bw >/dev/null"
+test-raven-rejects-invalid-gpus = "bash -c 'if HOSTNAME=raven03 NXF_APPTAINER_CACHEDIR=/ptmp/pixi-test/apptainer-cache NXF_SYNTAX_PARSER=v2 nextflow run main.nf -profile raven --help --gpus 3 >/dev/null 2>&1; then exit 1; fi'"
+test = { depends-on = ["test-binning-soft-failure", "test-binning-summary-rows", "test-cleanup", "test-helper-integration", "test-assembler-selection", "test-myloasm-gfa-annotation", "test-container-provenance", "test-config-profiles", "test-viper-config", "test-raven-config", "test-raven-valid-gpu-request", "test-raven-rejects-invalid-gpus"] }

@@ -298,9 +298,13 @@ nextflow run binning.nf \
 - `--gpu_cluster_options` Optional extra scheduler options for GPU jobs
 - `--singularity_cache_dir` Optional Singularity cache directory override
 - `--singularity_run_options` Optional Singularity runtime options override
-- `--gpu_type`       Optional GPU type for typed SLURM requests on GPU-enabled profiles
-- `--gpus`           GPU count for typed SLURM requests on GWDG (default: `1`)
-- `--gpu_container_options` Optional container runtime options for GPU jobs (GWDG default: `--nv`)
+- `--gpu_type`       Optional GPU type for typed SLURM requests on GWDG
+- `--gpus`           GPU count for scheduler requests on GWDG or Raven
+  (Raven accepts `1`, `2`, or `4`; default: `1`)
+- `--raven_gpu_constraint` Raven GPU node constraint: `gpu` (default),
+  `gpu-bw`, or `no-gpu-bw`
+- `--gpu_container_options` Optional container runtime options for GPU jobs
+  (GWDG and Raven default: `--nv`)
 - `--help`           Print the pipeline help message and exit.
 
 Across all profiles, `DOWNLOAD_SRR` requests one CPU, up to 8 GB of memory, and
@@ -353,6 +357,21 @@ compression fallbacks therefore also run with one thread.
     headroom below Viper's default 300-job per-user submission limit. Lower
     this with `--viper_slurm_queue_size` when other jobs or workflow launches
     share that limit.
+- `raven`
+  - MPCDF Raven CPU/GPU profile; launch from an explicit `raven01i` through
+    `raven04i` host with the Apptainer cache and work directory under `/ptmp`.
+  - Ordinary compute tasks use up to 72 physical CPU cores. `SINGLEM` explicitly
+    enables two hardware threads per core and requests 64, 128, then at most 144
+    logical CPUs across its 4-, 12-, and 24-hour attempts.
+  - GPU-labelled processes request one A100 and 18 CPU cores by default. Valid
+    `--gpus` values are 1, 2, and 4; CPU and memory limits scale according to
+    Raven's documented per-GPU allocation. Apptainer receives `--nv`.
+  - Use `--raven_gpu_constraint gpu-bw` for the high-bandwidth GPU interconnect,
+    or `no-gpu-bw` for standard GPU nodes. The default `gpu` accepts either.
+  - Metadata, Sandpiper, and `DOWNLOAD_SRR` run in a bounded local pool because
+    Raven batch jobs cannot access the internet.
+  - Nextflow keeps at most 250 Slurm tasks outstanding by default, below Raven's
+    default 300-job submit limit.
 - `debug`
   - docker.enabled = true
   - `executor.queueSize = 1`
