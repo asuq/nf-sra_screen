@@ -652,7 +652,8 @@ by package imports and CUDA build metadata; GPU hardware and numerical execution
 remain to be validated on the target cluster. SemiBin uses its pretrained
 environment model on CPU.
 
-Every process image is configured with a versioned tag and immutable digest.
+Every process image uses a digest-only runtime reference for Apptainer
+compatibility; versioned tags are retained in the provenance records.
 The [0.4.0 software provenance](docker/provenance/0.4.0/README.md) records the
 direct versions, image digests, build/verification scope, and complete Conda and
 pip inventories for the nine custom images. Database and reference assets,
