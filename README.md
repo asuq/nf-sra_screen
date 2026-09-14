@@ -264,6 +264,17 @@ nextflow run binning.nf \
   --outdir nf-sra_screen_binning
 ```
 
+For standalone binning on a server with Apptainer, with one task at a time:
+
+```bash
+nextflow run asuq/nf-sra_screen -r v0.4.1 -main-script binning.nf \
+  -profile local_apptainer \
+  --executor_queue_size 1 \
+  --binning_tsv binning.tsv \
+  --checkm2_db /path/to/checkm2_db \
+  --outdir nf-sra_screen_binning
+```
+
 ### Key parameters
 - `-profile`         nextflow profile (see below)
 - `--sra`            CSV with column `sra` listing project accessions
@@ -292,7 +303,7 @@ nextflow run binning.nf \
 - `--queue_standard` Optional scheduler queue for standard jobs
 - `--queue_highmem`  Optional scheduler queue for high-memory retries
 - `--queue_gpu`      Optional scheduler queue for GPU jobs (GWDG default: `scc-gpu`)
-- `--executor_queue_size` Optional executor queue size override for SLURM-style profiles
+- `--executor_queue_size` Optional executor queue size override for SLURM-style profiles and `local_apptainer`
 - `--slurm_cluster_options` Optional extra SLURM cluster options appended to `process.clusterOptions`
 - `--gpu_cluster_options` Optional extra scheduler options for GPU jobs
 - `--singularity_cache_dir` Optional Singularity cache directory override
@@ -316,6 +327,11 @@ compression fallbacks therefore also run with one thread.
   - Executor: `local`
   - `docker.enabled = true`
   - Small queue size and moderate resources (max_cpus=8, max_memory=16.GB).
+- `local_apptainer`
+  - Executor: `local`; uses Apptainer with Docker and Singularity disabled.
+  - Requires `apptainer` on `PATH`; uses the shared Apptainer cache and runtime options.
+  - Defaults to four concurrent tasks, max_cpus=8, and max_memory=16.GB.
+  - Use `--executor_queue_size 1` for one task at a time; each task can still use multiple CPUs.
 - `slurm`
   - Executor: `slurm`
   - `singularity.enabled = true`

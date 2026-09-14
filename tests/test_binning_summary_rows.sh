@@ -245,6 +245,7 @@ run_standalone_stub() {
     local workdir="$TMP_ROOT/standalone_work"
     local log_file="$TMP_ROOT/standalone.log"
     local summary_file="$outdir/summary.tsv"
+    local stub_config="$TMP_ROOT/standalone_stub.config"
     local short_binning_dir="$outdir/short_sample/short_sample/binning"
     local hifi_binning_dir="$outdir/hifi_sample/hifi_sample/binning"
 
@@ -259,9 +260,14 @@ run_standalone_stub() {
             "$REPO_ROOT/test/binning/assembly.fasta"
     } > "$binning_tsv"
 
+    # Stub scripts run on the host; retain the profile's executor settings.
+    printf 'profiles { local_apptainer { apptainer.enabled = false } }\n' > "$stub_config"
     run_nextflow "$log_file" "$REPO_ROOT/binning.nf" \
         -stub-run \
         --binning_tsv "$binning_tsv" \
+        -profile local_apptainer \
+        -c "$stub_config" \
+        --executor_queue_size 1 \
         --binners metabat,semibin \
         --refiners dastool \
         --outdir "$outdir" \
@@ -274,6 +280,8 @@ run_standalone_stub() {
     assert_key_row_count "$summary_file" hifi_sample hifi_sample hifi provided 1
     assert_key_note_blank "$summary_file" short_sample short_sample short provided
     assert_key_note_blank "$summary_file" hifi_sample hifi_sample hifi provided
+    grep -E "Creating local task monitor.*capacity=1;" "$TMP_ROOT/.nextflow.log" >/dev/null \
+        || fail "local_apptainer must honour --executor_queue_size 1"
     assert_file_exists "$short_binning_dir/semibin.tar.gz"
     assert_file_exists "$hifi_binning_dir/semibin.tar.gz"
     assert_file_exists "$short_binning_dir/metabat.tar.gz"

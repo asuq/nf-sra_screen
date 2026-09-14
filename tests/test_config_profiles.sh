@@ -12,11 +12,17 @@ fail() {
   exit 1
 }
 
-profiles=(local slurm debug test oist gwdg marmic)
+profiles=(local local_apptainer slurm debug test oist gwdg marmic)
 for profile in "${profiles[@]}"; do
   nextflow config -profile "${profile}" >/dev/null
 done
 
+local_apptainer_config="$(nextflow config -profile local_apptainer -flat)"
+for setting in "process.executor = 'local'" "docker.enabled = false" \
+    "singularity.enabled = false" "apptainer.enabled = true" "executor.queueSize = 4"; do
+  grep -Fx -- "$setting" <<<"${local_apptainer_config}" >/dev/null \
+    || fail "local_apptainer must set $setting"
+done
 oist_config="$(nextflow config -profile oist -flat)"
 grep -F -- "singularity.enabled = false" <<<"${oist_config}" >/dev/null \
   || fail "OIST profile must disable Singularity"
