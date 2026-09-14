@@ -16,7 +16,6 @@ def helpMessage() {
 
   Required parameters:
     --binning_tsv   Path to binning.tsv
-    --uniprot_db    Path to UniProt database (.dmnd)
 
   Optional parameters:
     --outdir        Output directory (default: ./output)
@@ -54,7 +53,7 @@ def missingParametersError() {
   helpMessage()
   error """
   For standalone binning, please provide:
-    --binning_tsv and --uniprot_db
+    --binning_tsv
   """.stripIndent()
 }
 
@@ -67,7 +66,7 @@ workflow {
       exit 0
     }
 
-    if (!params.binning_tsv || !params.uniprot_db) {
+    if (!params.binning_tsv) {
       missingParametersError()
     }
 

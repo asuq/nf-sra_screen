@@ -262,8 +262,7 @@ run_standalone_stub() {
     run_nextflow "$log_file" "$REPO_ROOT/binning.nf" \
         -stub-run \
         --binning_tsv "$binning_tsv" \
-        --uniprot_db "$REPO_ROOT/test/binning/assembly.fasta" \
-        --binners metabat \
+        --binners metabat,semibin \
         --refiners dastool \
         --outdir "$outdir" \
         -work-dir "$workdir"
@@ -275,6 +274,8 @@ run_standalone_stub() {
     assert_key_row_count "$summary_file" hifi_sample hifi_sample hifi provided 1
     assert_key_note_blank "$summary_file" short_sample short_sample short provided
     assert_key_note_blank "$summary_file" hifi_sample hifi_sample hifi provided
+    assert_file_exists "$short_binning_dir/semibin.tar.gz"
+    assert_file_exists "$hifi_binning_dir/semibin.tar.gz"
     assert_file_exists "$short_binning_dir/metabat.tar.gz"
     assert_path_missing "$short_binning_dir/metabat"
     assert_dir_exists "$short_binning_dir/dastool"

@@ -9,7 +9,6 @@ process SEMIBIN {
 
     input:
     tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler), path(assembly_fasta), path(assembly_bam), path(assembly_csi)
-    path uniprot_db
 
     output:
     tuple val(sra), val(srr), val(platform), val(model), val(strategy), val(read_type), val(assembler),
@@ -20,7 +19,6 @@ process SEMIBIN {
     run_semibin.sh \\
       --assembly "${assembly_fasta}" \\
       --bam "${assembly_bam}" \\
-      --diamond-db "${uniprot_db}" \\
       --read-type "${read_type}" \\
       --environment "${params.semibin_environment}" \\
       --cpus ${task.cpus} \\

@@ -41,7 +41,6 @@ workflow STANDALONE_BINNING {
     }
 
     def outdir = file(params.outdir ?: './output').toAbsolutePath().toString()
-    def uniprot_db_ch = channel.value(file(params.uniprot_db, checkIfExists: true))
 
     def binning_rows_channel = channel.fromPath(params.binning_tsv, checkIfExists: true)
       .splitCsv(header: true, sep: '\t', strip: true)
@@ -213,7 +212,7 @@ workflow STANDALONE_BINNING {
       }
     }
     if ('semibin' in selected_binners) {
-      semibin_results = SEMIBIN(semibin_input, uniprot_db_ch).result
+      semibin_results = SEMIBIN(semibin_input).result
     }
     if ('rosella' in selected_binners) {
       rosella_results = ROSELLA(rosella_input).result

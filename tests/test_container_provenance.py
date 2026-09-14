@@ -10,8 +10,10 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-RELEASE = "0.4.0"
-PROVENANCE_DIR = ROOT / "docker" / "provenance" / RELEASE
+RELEASE = "0.4.1"
+# Patch release reuses the unchanged 0.4.0 software and image inventory.
+SOFTWARE_RELEASE = "0.4.0"
+PROVENANCE_DIR = ROOT / "docker" / "provenance" / SOFTWARE_RELEASE
 REPOSITORY = r"[a-z0-9.-]+(?::[0-9]+)?/(?:[a-z0-9._-]+/)*[a-z0-9._-]+"
 DIGEST_REF = re.compile(rf"{REPOSITORY}@sha256:[0-9a-f]{{64}}")
 PROVENANCE_REF = re.compile(

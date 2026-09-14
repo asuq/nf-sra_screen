@@ -375,11 +375,48 @@ test_partial_binner_group_reaches_refiner_input() {
     assert_file_contains "$log_file" "maps=metabat.contig2bin.tsv"
 }
 
+test_semibin_without_database() {
+    # Exercise the real wrapper with a fake tool, without any database argument.
+    local case_dir="$TMP_ROOT/semibin_without_database"
+    mkdir -p "$case_dir/tools"
+    cat > "$case_dir/tools/SemiBin2" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+[[ -z "${DIAMONDDB:-}" ]]
+[[ "$1" == single_easy_bin ]]
+shift
+out=""
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --output) out="$2" ;;
+        --input-fasta|--input-bam|--environment|--sequencing-type|--engine|--threads) ;;
+        *) exit 1 ;;
+    esac
+    shift 2
+done
+mkdir -p "$out/output_bins"
+printf 'contig\tbin\ncontig1\tSemiBin_0.fa\n' > "$out/contig_bins.tsv"
+printf '>contig1\nACGT\n' > "$out/output_bins/SemiBin_0.fa"
+EOF
+    chmod +x "$case_dir/tools/SemiBin2"
+    (
+        cd "$case_dir"
+        unset DIAMONDDB
+        PATH="$case_dir/tools:$REPO_ROOT/bin:$PATH" bash "$REPO_ROOT/bin/run_semibin.sh" \
+            --assembly "$REPO_ROOT/test/binning/assembly.fasta" \
+            --bam unused.bam --read-type short --environment global
+    )
+    assert_file_empty "$case_dir/semibin.note"
+    assert_file_has_line "$case_dir/semibin.contig2bin.tsv" $'contig1\tSemiBin_0.fa'
+    assert_tar_contains "$case_dir/semibin.tar.gz" "semibin/SemiBin_0.fa"
+}
+
 main() {
     # Run all soft-failure recovery tests.
     TMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/nf-sra-binning-soft-failure.XXXXXX")"
     trap 'rm -rf "$TMP_ROOT"' EXIT
 
+    test_semibin_without_database
     test_archive_binner_dir_populated
     test_archive_binner_dir_empty
     test_comebin_retries_before_soft_failure

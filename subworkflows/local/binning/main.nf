@@ -21,7 +21,6 @@ workflow BINNING {
   take:
     blobtable_ch
     assembly_bam_ch
-    uniprot_db_ch
 
   main:
     // Build binning_input from blobtable + BAM
@@ -149,7 +148,7 @@ workflow BINNING {
       }
     }
     if ('semibin' in selected_binners) {
-      semibin_results = SEMIBIN(semibin_input, uniprot_db_ch).result
+      semibin_results = SEMIBIN(semibin_input).result
     }
     if ('rosella' in selected_binners) {
       rosella_results = ROSELLA(rosella_input).result

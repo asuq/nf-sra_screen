@@ -154,7 +154,7 @@ workflow {
     // taxdump is needed for screening and/or assembly; keep it optional when not needed
     def taxdump_ch = params.taxdump ? channel.value(file(params.taxdump)) : channel.empty()
 
-    // uniprot is only needed for assembly (DIAMOND/SEMIBIN)
+    // uniprot is only needed for assembly annotation (DIAMOND)
     def uniprot_db_ch = (doAssembly && params.uniprot_db) ? channel.value(file(params.uniprot_db)) : channel.empty()
 
 
@@ -266,7 +266,7 @@ workflow {
     taxa_summary_ch   = assembly_out.taxa_summary
 
     if (doBinning) {
-      def binning_out = BINNING(assembly_out.blobtable, assembly_out.assembly_bam_all, uniprot_db_ch)
+      def binning_out = BINNING(assembly_out.blobtable, assembly_out.assembly_bam_all)
       binning_note_entries_ch = binning_out.note_entries
     }
   }

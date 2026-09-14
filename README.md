@@ -100,10 +100,10 @@ references that combine a tag and digest. Versioned tags are retained in the
   - `--checkm2_db`    CheckM2 database required when `--refiners` includes `binette`, including the default binning configuration
 
 - Standalone binning (`binning.nf`)
-  - `--uniprot_db`    UniProt DIAMOND database (`.dmnd`) for SemiBin2
   - `--checkm2_db`    CheckM2 database when using the default `--refiners binette`
 
 > [!NOTE]
+> Standalone binning does not require UniProt; SemiBin2 uses its pretrained model.
 > In screening-only mode (`--noassembly`), `--uniprot_db` is not required because DIAMOND / BlobToolKit / binners are skipped.
 
 
@@ -260,7 +260,6 @@ The default `--assembler auto` continues to use metaFlye for Nanopore. Selecting
 nextflow run binning.nf \
   -profile <docker/singularity/local/slurm/...> \
   --binning_tsv binning.tsv \
-  --uniprot_db /path/to/uniprot.dmnd \
   --checkm2_db /path/to/checkm2_db \
   --outdir nf-sra_screen_binning
 ```
